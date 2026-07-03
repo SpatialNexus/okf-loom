@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: okf-loom.config.yaml reference
-description: Every `okf-loom.config.yaml` key — `viewer.*`, `search.*`, `validate.*`, `studio.*` — with type, default, and behaviour. Path-bearing fields are bundle-relative; unknown keys are preserved in `OkfConfig.raw`.
+description: Every `okf-loom.config.yaml` key — `bundle.*`, `viewer.*`, `search.*`, `validate.*`, `studio.*` — with type, default, and behaviour. Path-bearing fields are bundle-relative; unknown keys are preserved in `OkfConfig.raw`.
 resource: /reference/config_yaml.md
 tags: [config, reference]
 timestamp: "2026-06-29T00:00:00Z"
@@ -22,13 +22,14 @@ The canonical filename is `okf-loom.config.yaml` (single constant in
 # Top-level shape
 
 ```yaml
+bundle:   { … }   # markdown scanning excludes
 viewer:   { … }   # display + override settings
 search:   { … }   # search-mode default
 validate: { … }   # validation profile + broken-link policy
 studio:   { … }   # live collaborative studio
 ```
 
-The four top-level keys are the only recognised top-level keys.
+The five top-level keys are the only recognised top-level keys.
 Unknown top-level keys are preserved verbatim in `OkfConfig.raw`
 for forward compatibility.
 
@@ -45,6 +46,78 @@ The following fields MUST be bundle-relative. Absolute paths and
 The check reuses the SPEC §4.5 guard (`log._resolve_within_bundle`):
 it resolves the candidate against the bundle root and confirms
 containment via `relative_to`. Empty values are also rejected.
+
+# `bundle.*`
+
+Controls which `*.md` files are part of the bundle when scanning
+(`Bundle.load`, the serve watcher, `okf import`). The scanner walks the
+tree top-down and PRUNES excluded directories, so serving or validating a
+real workspace root does not sweep `node_modules`, nested cloned repos, or
+virtualenvs in as thousands of missing-`type` pseudo-concepts — and never
+pays the cost of descending into them.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `exclude` | list of strings (or one string) | `[]` | Gitignore-style patterns skipped during the scan. Sits above the defaults and `.gitignore`: a negation (`"!.docs/"`) re-includes a path those groups excluded (git-style: not from under a pruned directory). |
+| `include` | list of strings (or one string) | `[]` | The add-back lever. Positive patterns that beat EVERY exclusion source — defaults, `.gitignore`, `exclude`, and the structural nested-repo prune — and can reach inside pruned directories. Negations are rejected fail-closed. |
+| `respect_gitignore` | bool | `true` | Honour `.gitignore` files — the bundle root's AND nested ones, each scoped to its own directory — during the scan. |
+
+Three exclusion rule groups apply, later group wins, and within a group
+the last matching rule wins (git semantics):
+
+1. **Built-in defaults**: hidden directories (`.git`, `.okf-loom`,
+   `.venv`, …), `node_modules/`, `__pycache__/`, `venv/`,
+   `bower_components/`. Hidden *files* still load. Any non-root directory
+   containing a `.git` entry (nested clone / submodule / worktree) is
+   pruned — a structural rule, overridable only by `include`.
+2. **`.gitignore` rules** (when `respect_gitignore` is on).
+3. **`exclude` patterns** (this section).
+
+`include` sits above all three. Two forms:
+
+* **Directory form** (`"vendor-repo/"`, or a wildcard-free path like
+  `"node_modules/my-pkg/docs"`): revives that directory — the scanner
+  reaches it through pruned ancestors, then scans the subtree as normal
+  bundle content. Exclusion rules that were overridden at the revived
+  directory (e.g. an anchored `node_modules/**` in `.gitignore`) stay
+  overridden beneath it; unrelated rules (hidden-dir default, basename
+  rules like `*.tmp.md`, deeper excludes) keep applying inside. This is
+  the recommended form.
+* **Glob form** (`"vendor-repo/**"`): force-includes exactly what it
+  matches, everything beneath — defaults included. Broad `**` on a big
+  tree is a deliberate, paid-for traversal.
+
+Include patterns without a `/` (basename form, `"keep.md"`) apply wherever
+the scan already reaches but never open pruned directories — pulling
+something out of a pruned tree requires naming its path.
+
+Pattern dialect (practical gitignore subset): `*` / `?` / character
+classes never cross `/`; `**` spans segments; trailing `/` = directory-only;
+a `/` anywhere else anchors the pattern to the bundle root (or the nested
+`.gitignore`'s directory); leading `!` = negation (exclude only); `\`
+escapes; `#` comments.
+
+`exclude`/`include` entries are match rules, not filesystem paths, so the
+§4.5 containment guard does not apply (a leading `/` is anchor syntax;
+matching is always against root-relative paths). Non-string entries are
+rejected fail-closed.
+
+An unparseable config never makes the bundle unloadable: `Bundle.load`
+warns (`config.unparseable`) and scans with the built-in defaults.
+
+```yaml
+bundle:
+  exclude:
+    - "drafts/**"                    # keep WIP notes out of validate/serve
+    - "*.generated.md"               # tool output, not concepts
+    - "!.docs/"                      # re-include a hidden dir the defaults pruned
+  include:
+    - "vendor-repo/"                 # nested git clone we DO want, scanned normally
+    - "node_modules/my-pkg/docs/"    # one docs dir pulled out of node_modules
+  respect_gitignore: true
+```
+
+Implementation: `okf_loom/ignore.py` (stdlib-only leaf module).
 
 # `viewer.*`
 
@@ -178,6 +251,9 @@ try:
 except OkfConfigError as e:
     ...  # unparseable / bad path / unknown enum
 
+cfg.bundle.exclude              # () — gitignore-style patterns
+cfg.bundle.include              # () — add-back patterns (beat every exclusion)
+cfg.bundle.respect_gitignore    # True
 cfg.viewer.title                # str | None
 cfg.viewer.allow_active_code    # bool
 cfg.search.default_mode         # "lexical"

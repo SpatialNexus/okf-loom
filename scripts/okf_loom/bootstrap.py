@@ -141,7 +141,23 @@ def import_directory(
     skipped = 0
     guessed_types: dict[str, str] = {}
 
-    for md_path in sorted(src_dir.rglob("*.md")):
+    # Scan with the spec §5 exclusion semantics (default excludes +
+    # .gitignore + any bundle.exclude in a src-root okf-loom.config.yaml):
+    # importing a workspace root must not vacuum node_modules / nested
+    # clones / virtualenvs into the bundle.
+    from .config import OkfConfig, OkfConfigError
+    from .ignore import iter_markdown_files
+    try:
+        src_bundle_cfg = OkfConfig.load(src_dir).bundle
+    except OkfConfigError:
+        from .config import BundleConfig
+        src_bundle_cfg = BundleConfig()  # best-effort import: use defaults
+    for md_path in sorted(iter_markdown_files(
+        src_dir,
+        exclude=src_bundle_cfg.exclude,
+        include=src_bundle_cfg.include,
+        respect_gitignore=src_bundle_cfg.respect_gitignore,
+    )):
         # Skip symlinked files (defence against info leak: a symlink to
         # /etc/sensitive would copy target contents into the bundle).
         if md_path.is_symlink():

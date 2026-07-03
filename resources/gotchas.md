@@ -26,6 +26,12 @@
 
 ## Common traps
 
+- Bundle scanning prunes hidden dirs, `node_modules`, nested git clones, and
+  `.gitignore`-d paths by default (spec §5), so serving a workspace root is
+  safe — but it also means a gitignored `.md` will NOT load. Anything can be
+  added back with `bundle.include` in `okf-loom.config.yaml` (beats every
+  exclusion, even nested-repo pruning — e.g. `include: [vendor-repo/]`);
+  tune the rest with `bundle.exclude` / `bundle.respect_gitignore`.
 - YAML parses unquoted dates/version-like values. Quote timestamps and versions.
 - `tags` should be a YAML list, not a comma-separated scalar.
 - Markdown links inside code blocks are not graph edges.

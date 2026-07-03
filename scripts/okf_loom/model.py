@@ -385,7 +385,35 @@ class Bundle:
 
         bundle = cls(root, name=name)
         root_resolved = root.resolve()
-        for md_path in sorted(root.rglob("*.md")):
+        # Scan via the pruning walker (spec §5): built-in default excludes
+        # (hidden dirs, node_modules, nested git repos, …), .gitignore
+        # respect, and bundle.exclude patterns from okf-loom.config.yaml —
+        # so serving/validating a real workspace root does not sweep vendor
+        # trees in as thousands of missing-`type` pseudo-concepts.
+        # Lazy imports: config imports log, which imports model transitively.
+        from .config import CONFIG_FILENAME, OkfConfig, OkfConfigError
+        from .ignore import iter_markdown_files
+        try:
+            _bundle_cfg = OkfConfig.load(root).bundle
+        except OkfConfigError as e:
+            # Load stays permissive (spec §9): a broken config must not make
+            # the bundle unloadable. Warn and scan with the defaults.
+            bundle.warnings.append(LoadWarning(
+                code="config.unparseable",
+                path=root / CONFIG_FILENAME,
+                message=(
+                    f"{CONFIG_FILENAME} could not be loaded ({e}); "
+                    f"scanning with default excludes"
+                ),
+            ))
+            from .config import BundleConfig
+            _bundle_cfg = BundleConfig()
+        for md_path in sorted(iter_markdown_files(
+            root,
+            exclude=_bundle_cfg.exclude,
+            include=_bundle_cfg.include,
+            respect_gitignore=_bundle_cfg.respect_gitignore,
+        )):
             try:
                 rel = md_path.relative_to(root)
             except ValueError:

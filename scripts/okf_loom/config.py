@@ -61,6 +61,11 @@ _DEFAULT_VIEWER_ALLOW_ACTIVE_CODE: bool = False
 
 _DEFAULT_SEARCH_DEFAULT_MODE: str = "lexical"
 
+# --- bundle scanning defaults (current spec §5 ``bundle:``) ------------------
+_DEFAULT_BUNDLE_EXCLUDE: tuple[str, ...] = ()
+_DEFAULT_BUNDLE_INCLUDE: tuple[str, ...] = ()
+_DEFAULT_BUNDLE_RESPECT_GITIGNORE: bool = True
+
 _DEFAULT_VALIDATE_DEFAULT_PROFILE: str = "spec"
 _DEFAULT_VALIDATE_FAIL_ON_BROKEN_LINKS: bool = False
 
@@ -109,6 +114,9 @@ _ALLOWED_VALIDATE_PROFILES: frozenset[str] = frozenset({
 })
 
 # Known keys per section (used to split known vs unknown for .raw).
+_KNOWN_BUNDLE_KEYS: frozenset[str] = frozenset({
+    "exclude", "include", "respect_gitignore",
+})
 _KNOWN_VIEWER_KEYS: frozenset[str] = frozenset({
     "title", "override_dir", "extension_css", "extension_js",
     "allow_active_code",
@@ -124,7 +132,9 @@ _KNOWN_STUDIO_KEYS: frozenset[str] = frozenset({
     "debounce_ms", "session_dir", "log_edits", "max_sse_clients",
     "allowed_hosts", "theme", "events_max_bytes", "events_keep",
 })
-_KNOWN_TOP_KEYS: frozenset[str] = frozenset({"viewer", "search", "validate", "studio"})
+_KNOWN_TOP_KEYS: frozenset[str] = frozenset({
+    "bundle", "viewer", "search", "validate", "studio",
+})
 
 # Path-bearing viewer keys that must pass the §4.5 containment check.
 _VIEWER_PATH_KEYS: tuple[str, ...] = (
@@ -133,6 +143,83 @@ _VIEWER_PATH_KEYS: tuple[str, ...] = (
 
 
 # --- section dataclasses ----------------------------------------------------
+
+
+def _coerce_patterns(name: str, value: Any) -> tuple[str, ...]:
+    """Coerce a config pattern list (``bundle.exclude`` / ``bundle.include``).
+
+    Accepts a list of non-empty strings or a single string (single-pattern
+    convenience form, mirroring ``studio.allowed_hosts``). Fail-closed on
+    anything else: a non-string entry (mapping, list, int…) is a config
+    mistake, not a pattern — do not str()-coerce it into something that
+    silently matches nothing (§11.1 philosophy).
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    if isinstance(value, (list, tuple)):
+        patterns: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise OkfConfigError(
+                    f"{name}: entries must be non-empty strings, got {item!r}"
+                )
+            patterns.append(item)
+        return tuple(patterns)
+    raise OkfConfigError(
+        f"{name}: expected a list of patterns, got {type(value).__name__}"
+    )
+
+
+@dataclass(frozen=True)
+class BundleConfig:
+    """Markdown scanning excludes/includes (current spec §5 ``bundle:``).
+
+    ``exclude`` holds gitignore-style patterns applied when discovering the
+    bundle's ``*.md`` files (``okf_loom.ignore``); they sit above the
+    built-in defaults and any ``.gitignore`` rules, so a negation here
+    (``"!.docs/"``) can re-include a path those groups dropped (with git's
+    limitation: not from under a pruned directory).
+
+    ``include`` is the explicit add-back lever: positive patterns that beat
+    every exclusion source — defaults, ``.gitignore``, ``exclude``, and the
+    structural nested-repo prune — and CAN reach inside pruned directories
+    (``"node_modules/my-pkg/docs/"``). Negations are rejected fail-closed
+    here; removals belong in ``exclude``.
+
+    Patterns are match rules, not filesystem paths, so the §4.5 containment
+    guard does not apply (a leading ``/`` is anchor syntax and cannot escape
+    the bundle: matching is always against root-relative paths).
+
+    ``respect_gitignore`` honours ``.gitignore`` files (bundle root and
+    nested) during the scan. Default True: serving a repo root skips
+    ignored vendor/generated trees with zero configuration.
+    """
+
+    exclude: tuple[str, ...] = _DEFAULT_BUNDLE_EXCLUDE
+    include: tuple[str, ...] = _DEFAULT_BUNDLE_INCLUDE
+    respect_gitignore: bool = _DEFAULT_BUNDLE_RESPECT_GITIGNORE
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "BundleConfig":
+        data = data or {}
+        include = _coerce_patterns("bundle.include", data.get("include"))
+        for pattern in include:
+            if pattern.lstrip().startswith("!"):
+                raise OkfConfigError(
+                    f"bundle.include: patterns are positive; negation is not "
+                    f"allowed (move removals to bundle.exclude): {pattern!r}"
+                )
+        return cls(
+            exclude=_coerce_patterns("bundle.exclude", data.get("exclude")),
+            include=include,
+            respect_gitignore=_coerce_bool(
+                "bundle.respect_gitignore",
+                data.get("respect_gitignore"),
+                _DEFAULT_BUNDLE_RESPECT_GITIGNORE,
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -319,6 +406,7 @@ class OkfConfig:
     an older toolkit (forward-compat mirror of SPEC §2's frontmatter rule).
     """
 
+    bundle: BundleConfig = field(default_factory=BundleConfig)
     viewer: ViewerConfig = field(default_factory=ViewerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     validate: ValidateConfig = field(default_factory=ValidateConfig)
@@ -370,6 +458,7 @@ class OkfConfig:
                 f"{CONFIG_FILENAME} rejected (DoS guard): {e}"
             ) from e
 
+        bundle_raw = data.get("bundle") or {}
         viewer_raw = data.get("viewer") or {}
         search_raw = data.get("search") or {}
         validate_raw = data.get("validate") or {}
@@ -404,6 +493,7 @@ class OkfConfig:
             if top_key not in _KNOWN_TOP_KEYS:
                 raw[top_key] = top_val
         for section_name, section_data, known in (
+            ("bundle", bundle_raw, _KNOWN_BUNDLE_KEYS),
             ("viewer", viewer_raw, _KNOWN_VIEWER_KEYS),
             ("search", search_raw, _KNOWN_SEARCH_KEYS),
             ("validate", validate_raw, _KNOWN_VALIDATE_KEYS),
@@ -414,6 +504,7 @@ class OkfConfig:
                     raw.setdefault(section_name, {})[k] = v
 
         return cls(
+            bundle=BundleConfig.from_dict(bundle_raw),
             viewer=ViewerConfig.from_dict(viewer_raw),
             search=SearchConfig.from_dict(search_raw),
             validate=ValidateConfig.from_dict(validate_raw),
@@ -530,6 +621,11 @@ DEFAULT_CONFIG_YAML: str = """\
 # okf-loom.config.yaml — OKF bundle configuration (current spec §5).
 # Every key is optional. Delete this file to fall back to built-in defaults.
 # Paths must be bundle-relative (absolute / ..-escaping values are rejected).
+
+bundle:
+  exclude: []                       # gitignore-style globs skipped when scanning *.md (e.g. ["drafts/**"])
+  include: []                       # add-back patterns that beat every exclusion (e.g. ["vendor-docs/", "node_modules/my-pkg/docs/"])
+  respect_gitignore: true           # skip .gitignore-d paths while scanning (root + nested files)
 
 viewer:
   title: "OKF Bundle"               # viewer page <title>

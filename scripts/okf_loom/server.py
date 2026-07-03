@@ -166,7 +166,24 @@ class _BundleWatcher(threading.Thread):
         snap: dict[Path, float] = {}
         if not self._root.is_dir():
             return snap
-        for p in self._root.rglob("*.md"):
+        # Same exclusion semantics as Bundle.load (spec §5): default
+        # excludes + .gitignore + bundle.exclude. Config and .gitignore are
+        # re-read every tick (cheap small files; the dir pruning makes the
+        # scan far cheaper than the old rglob), so serving a workspace root
+        # live-updates when excludes — or new OKF files — appear.
+        from .config import OkfConfig, OkfConfigError
+        from .ignore import iter_markdown_files
+        try:
+            bundle_cfg = OkfConfig.load(self._root).bundle
+        except OkfConfigError:
+            from .config import BundleConfig
+            bundle_cfg = BundleConfig()  # Bundle.load warns; keep scanning
+        for p in iter_markdown_files(
+            self._root,
+            exclude=bundle_cfg.exclude,
+            include=bundle_cfg.include,
+            respect_gitignore=bundle_cfg.respect_gitignore,
+        ):
             try:
                 snap[p] = p.stat().st_mtime
             except OSError:

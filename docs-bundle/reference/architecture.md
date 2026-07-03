@@ -38,6 +38,7 @@ scripts/okf_loom/
 ├── paths.py           — ConceptId = tuple[str,...]; segment validation; path<->id; reserved-name check; path_within_bundle symlink-containment guard
 ├── parse.py           — frontmatter parse + serialize; link extraction (BOTH forms + wikilinks); markdown->text
 ├── model.py           — Bundle, Concept, IndexFile, LogFile, Link, Graph, ContentIndex, Heading; has_wikilinks
+├── ignore.py          — gitignore-style exclusion for bundle scanning (stdlib-only leaf): default excludes (hidden dirs, node_modules, nested git repos), .gitignore respect, bundle.exclude patterns, bundle.include add-backs (revive/reach/force semantics); iter_markdown_files pruning walker used by Bundle.load / serve watcher / import
 ├── validate.py        — SPEC §9 conformance + warnings; CheckSpec; ValidationReport (with profile); Finding
 ├── search.py          — SearchBackend Protocol; LexicalBackend (BM25) + SemanticLiteBackend + HybridBackend (RRF, all zero-dep); ENTITY/RELATION modes
 ├── discover.py        — 6 discovery rules; Suggestion; DiscoveryReport
@@ -45,7 +46,7 @@ scripts/okf_loom/
 ├── update.py          — UpdatePlan/UpdateOp; 8 idempotent op kinds (incl. add_entity); safe round-trip via parse/serialize; accepts studio/actor/origin/group_id and threads them through every concept write (single-funnel attribution)
 ├── index.py           — SPEC §6 index.md regeneration; marker-safe; frozen CI mode; current spec §8 derived artifacts (emit_json)
 ├── log.py             — SPEC §7 log.md append-only helper
-├── config.py          — okf-loom.config.yaml loader (viewer/search/validate/studio defaults); fail-closed bool + enum validation
+├── config.py          — okf-loom.config.yaml loader (bundle/viewer/search/validate/studio defaults); fail-closed bool + enum validation
 ├── bootstrap.py       — init / bootstrap / import scaffolding
 ├── extensions.py      — CapabilityRegistry + 25 built-in okf.cap.* capabilities (incl. aliases/provenance/citations/wikilinks/search_hybrid)
 ├── cli.py             — argparse dispatcher (one cmd_* function per subcommand); includes wait, token, comment-claim, comment-resolve, comment-list, presence; mutators carry --group-id / --actor and route through the live studio funnel when a session exists

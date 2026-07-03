@@ -6,7 +6,7 @@ The runtime is not distributed as an installed package. It is source code under
 | Area | Files |
 |---|---|
 | CLI dispatcher | `scripts/okf_loom/cli.py`, `__main__.py` |
-| Data model | `model.py`, `parse.py`, `paths.py`, `roundtrip.py` |
+| Data model | `model.py`, `parse.py`, `paths.py`, `roundtrip.py`, `ignore.py` |
 | Validation | `validate.py` |
 | Search/index/discovery | `search.py`, `index.py`, `discover.py`, `plan.py`, `update.py` |
 | Bundle config/capabilities | `config.py`, `extensions.py` |
