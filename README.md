@@ -1,93 +1,202 @@
-# okf-loom Skill
+<div align="center">
 
-okf-loom v1.0 is an Apache-2.0 open-source OKF toolkit and loadable agent
-skill.
+# okf-loom
 
-This repository is a loadable, repo-local skill for working with
+**Turn a folder of Markdown into a living knowledge studio — a rendered
+wiki, an evidence-ranked graph, hybrid search, and a select-to-comment
+loop that your coding agent works for you.**
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](#quickstart-60-seconds)
+[![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-zero-brightgreen.svg)](#quickstart-60-seconds)
+[![Tests](https://img.shields.io/badge/tests-1200%2B%20passing-brightgreen.svg)](tests/)
+
+</div>
+
+![The okf-loom graph view: 30 documentation concepts grouped into six colour-coded themes, with a ranked theme summary panel on the right](docs/media/graph-map.png)
+
+okf-loom is a toolkit and loadable agent skill for
 [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-bundles. It includes:
+bundles: knowledge kept as plain Markdown files with YAML frontmatter,
+cross-linked into a graph. No database, no build pipeline, no package to
+install — clone this repo, point it at a folder of Markdown, and you get
+the studio above.
 
-- `SKILL.md` — the primary skill entrypoint for agents;
-- `resources/` — small Markdown guides referenced by the skill;
-- `scripts/okf_loom/` — checkout-local runtime scripts;
-- `docs-bundle/` — the full OKF documentation bundle;
-- `samples/` and `tests/` — examples and executable proofs.
+## Quickstart (60 seconds)
 
-The distribution unit is this git repo layout. Do not install or publish it as
-a Python package to use it; run the scripts directly from the checkout.
-
-## If you're a human: point your agent here
-
-That's the whole setup. Clone the repo and tell your agent to work in it —
-[`CLAUDE.md`](CLAUDE.md) (Claude Code), [`AGENTS.md`](AGENTS.md) (opencode &
-friends), and [`SKILL.md`](SKILL.md) (skill loaders) all route the agent to
-the same orientation, including the standing **default behaviours**: author
-docs as OKF bundles, validate after writing, start the live studio
-proactively when you want to read or comment, and work your comments via the
-studio loop. Requirements: Python 3.11+; nothing to install (PyYAML is used
-when present, with a built-in fallback otherwise); session state and its
-auth token are auto-gitignored.
-
-## Agent quickstart
-
-1. Clone or open this repo.
-2. Load [`SKILL.md`](SKILL.md) — start with its **Default behaviours**.
-3. Read the resource file that matches the task.
-4. Run commands with the checked-in `scripts/okf-loom` helper.
+All you need is Python 3.11+ and a clone. There is nothing to install —
+the checked-in helper runs straight from the checkout (PyYAML is used if
+present; a built-in fallback covers the rest):
 
 ```bash
-scripts/okf-loom --version
-# okf-loom 1.0.0 (SPEC v0.1)
-scripts/okf-loom validate docs-bundle --strict
+git clone <this-repo> okf-loom
+cd okf-loom
+
+scripts/okf-loom serve docs-bundle --no-open    # → http://127.0.0.1:8787/
 ```
 
-From a parent workspace where the checkout is named `okf-loom/`:
+That serves okf-loom's own documentation as a live studio — the same
+pages, graph, and screenshots you see on this page. Then try it on your
+own notes:
 
 ```bash
-okf-loom/scripts/okf-loom validate okf-loom/docs-bundle --strict
+scripts/okf-loom import path/to/your/notes my-bundle   # copy + stamp frontmatter
+scripts/okf-loom serve my-bundle --no-open
 ```
 
-## What OKF does
+Add `--tunnel` to get a shareable `https://…trycloudflare.com` link
+(needs `cloudflared`; see [Sharing & security](#sharing--security)).
 
-OKF represents knowledge — metadata, context, schemas, relationships, and
-curated insight — as plain Markdown files with YAML frontmatter, organized in a
-directory tree and cross-linked into a graph. This skill gives agents and
-humans scripts to validate, search, discover, update, render, and serve those
-bundles.
+## Tour
+
+### A wiki, not a file browser
+
+Every concept page renders full GitHub-flavoured Markdown plus Mermaid
+diagrams, KaTeX math, and syntax-highlighted code. Frontmatter is not a
+grey metadata dump: types become badges, entities become chips, typed
+relations become navigable links, and citations and provenance are laid
+out as a dressed header band.
+
+![A concept page rendering Mermaid flowchart and sequence diagrams, with a section outline and quick actions in the sidebar](docs/media/showcase-rendering.png)
+
+The dashboard index shows bundle-level stats and per-area entry points;
+[`docs-bundle/demo/showcase.md`](docs-bundle/demo/showcase.md) is one page
+that exercises every renderer if you want to see the whole palette at once.
+
+### Six graph lenses, each answering one question
+
+The graph is not a hairball generator. Each lens reshapes layout, colour,
+and ranking to answer one question a reader actually has — **Map** (how
+does this fit together?), **Themes** (what topic areas exist?), **Flow**
+(what depends on what?), **Bridges** (which concepts hold the areas
+together?), **Recent** (what is going stale?), and **Focus** (what is in
+this node's neighbourhood?). The side panel ranks the answers as clickable
+evidence, not just pixels:
+
+![Animated cycle through the Map, Themes, Flow, Bridges, and Recent graph lenses](docs/media/graph-lenses.gif)
+
+### Select text, leave a comment, let your agent do the work
+
+Commenting is the studio's native editing gesture. Select any sentence
+and a *Comment* button appears; the comment is anchored to that exact
+text and lands in a queue your agent consumes:
+
+![The comment composer opened from a text selection, with the selected sentence as the anchor and an instruction typed for the agent](docs/media/comment-composer.png)
+
+While a studio is up, an agent runs the loop from the CLI — no plugins,
+no webhooks:
+
+```bash
+scripts/okf-loom wait docs-bundle                     # blocks until a comment arrives
+scripts/okf-loom comment-claim docs-bundle <id> --summary "what I will do"
+# … edit via attributed, undoable mutators (write-concept, link-add, update…) …
+scripts/okf-loom comment-resolve docs-bundle <id> --summary "what I did"
+```
+
+Edits broadcast live to every open tab over SSE — the page patches in
+place, no reload. Agent activity, pending changes, and group-undo are all
+first-class panels in the top bar.
+
+### Five colour themes
+
+Light, dark, pastel, sepia, and midnight — all token-governed, all
+WCAG-AA-checked (the test suite enforces that every theme overrides the
+full token set, and the graph canvas follows along):
+
+![Animated cycle through the light, dark, pastel, sepia, and midnight themes on the showcase page](docs/media/themes.gif)
+
+### Search that understands the bundle
+
+Six search modes behind one flag — BM25 lexical, fuzzy-semantic, hybrid
+(rank fusion of the two), tag, entity, and relation — all dependency-free,
+served live with search-as-you-type from the top bar:
+
+![Search results for “studio” showing typed, described results with their bundle paths](docs/media/search.png)
+
+### Take it anywhere
+
+The same bundle renders four ways: the live studio, a **static site**
+(`build --target static`, deployable to any web host or GitHub Pages), a
+**SPA** build, and a **single self-contained `viz.html`** (`render`) you
+can attach to an email. And because a bundle is just Markdown, it still
+reads fine as plain files on GitHub.
+
+## Built for agents from day one
+
+This repo *is* a loadable skill. [`CLAUDE.md`](CLAUDE.md) (Claude Code),
+[`AGENTS.md`](AGENTS.md) (opencode & friends), and [`SKILL.md`](SKILL.md)
+(skill loaders) route any agent to the same standing contract:
+
+1. **Author docs as OKF concepts** with fully-dressed frontmatter.
+2. **Validate after writing** (`validate`, `discover`).
+3. **Serve the studio proactively** whenever a human wants to read or
+   comment.
+4. **Work the comment loop** (`wait` → `comment-claim` → mutators →
+   `comment-resolve`).
+
+So the setup for a team is: clone the repo, tell your agent to work in
+it, open the studio, and start selecting text. The agent authors, links,
+validates, and resolves; you read and direct.
+
+## Everything is plain Markdown
+
+A concept is one file. Frontmatter carries the metadata; Markdown links
+are the graph edges. This is the entire storage format:
+
+```markdown
+---
+type: reference
+title: HTTP server routes
+description: Every route the live studio exposes.
+tags: [studio, http]
+---
+
+# HTTP server routes
+
+The comment lifecycle is documented in
+[Comment lifecycle](/reference/comment_lifecycle.md).
+```
+
+`type` is the only required key (OKF v0.1). Unknown keys are preserved
+round-trip, hand-authored content is never destroyed, and every write
+okf-loom makes is atomic and marker-safe. The binding contract for all of
+this is [`docs-bundle/reference/spec.md`](docs-bundle/reference/spec.md).
 
 ## Common commands
 
 ```bash
 # Validate and inspect.
-scripts/okf-loom validate samples/demo_bundle --strict
-scripts/okf-loom info samples/demo_bundle
+scripts/okf-loom validate docs-bundle --strict
+scripts/okf-loom info docs-bundle
 
-# Search and discover.
+# Search and discover gaps.
 scripts/okf-loom search docs-bundle "current spec" --mode hybrid
-scripts/okf-loom discover samples/demo_bundle --out /tmp/okf-suggestions.json
+scripts/okf-loom discover docs-bundle --out /tmp/okf-suggestions.json
 
-# Serve the live studio (wiki + graph lenses + commenting), or build.
-scripts/okf-loom serve samples/demo_bundle --no-open           # http://127.0.0.1:8787/
-scripts/okf-loom serve samples/demo_bundle --no-open --tunnel  # + public https link
-scripts/okf-loom build docs-bundle --target static --out /tmp/okf-docs-site
+# Serve live, or build artifacts.
+scripts/okf-loom serve docs-bundle --no-open            # live studio
+scripts/okf-loom build docs-bundle --target static --out /tmp/site
+scripts/okf-loom render docs-bundle --out /tmp/viz.html # single file
+
+# Author safely (attributed, undoable, broadcast live).
+scripts/okf-loom bootstrap path/to/new-bundle
+scripts/okf-loom write-concept --bundle path/to/bundle --id notes/decision \
+    --type decision --title "Use SQLite" --body "## Context ..."
+scripts/okf-loom link-add --bundle path/to/bundle --source tables/orders --target tables/customers
 ```
 
-Security note: `serve` is loopback-only by default.
-`--tunnel`, `--public`, or a non-loopback host makes the studio reachable by
-others; anyone with the URL can read public GET surfaces, while mutating POST
-routes require the per-session `X-OKF-Token` and Origin/Host allow-list checks.
-Use `--no-edit` for read-only sharing, and see [SECURITY.md](SECURITY.md) plus
-the [HTTP routes reference](docs-bundle/reference/http_routes.md) before
-publishing a tunnel URL.
+Run `scripts/okf-loom --help` for the full verb list (25+ commands), or
+read the [CLI reference](docs-bundle/reference/cli.md).
 
-The served studio is the product's heart: a live wiki (dashboard index,
-typed concept pages, full rendering incl. Mermaid/KaTeX/highlighting), a
-graph view with six evidence-based lenses (Map / Themes / Flow / Bridges /
-Recent / Focus — each answers one question and ranks its answers), and
-select-to-comment collaboration that agents consume via
-`scripts/okf-loom wait`. See the
-[Rendering & Feature Showcase](docs-bundle/demo/showcase.md) for everything
-on one page.
+## Sharing & security
+
+`serve` binds `127.0.0.1:8787` — loopback-only — by default. Going public
+is an explicit choice: `--tunnel` starts a Cloudflare quick tunnel
+(anyone with the link can read; mutating routes still require the
+per-session `X-OKF-Token` plus Origin/Host allow-list checks), and
+`--public --public-ack` does a raw network bind. Use `--no-edit` for
+read-only kiosk sharing. Details: [SECURITY.md](SECURITY.md) and the
+[HTTP routes reference](docs-bundle/reference/http_routes.md).
 
 ## Skill resources
 
@@ -103,53 +212,55 @@ on one page.
 | [`resources/architecture-map.md`](resources/architecture-map.md) | Runtime/source map |
 | [`resources/gotchas.md`](resources/gotchas.md) | Hard rules and traps |
 
-The full docs live as an OKF bundle in [`docs-bundle/`](docs-bundle/). The
-canonical current spec is [`docs-bundle/reference/spec.md`](docs-bundle/reference/spec.md).
+The full documentation lives as an OKF bundle in
+[`docs-bundle/`](docs-bundle/) — okf-loom is documented in okf-loom.
 
 ## Repository layout
 
 ```text
 okf-loom/
-├── SKILL.md
-├── AGENTS.md
-├── CLAUDE.md
-├── README.md
-├── resources/
+├── SKILL.md                  # primary skill entrypoint for agents
+├── CLAUDE.md / AGENTS.md     # thin pointers that route agents to SKILL.md
+├── README.md                 # this file
+├── resources/                # small agent-readable guidance files
 ├── scripts/
-│   ├── okf-loom
-│   ├── okf_loom/
-│   ├── build_skill_archive.py
-│   ├── capture_signal_controls.py
+│   ├── okf-loom              # the checked-in helper command
+│   ├── okf_loom/             # checkout-local runtime (stdlib-only)
+│   ├── capture_readme_media.py   # regenerates docs/media/
 │   ├── capture_viewer_proof.py
+│   ├── capture_signal_controls.py
+│   ├── build_skill_archive.py
 │   └── lint-js.sh
-├── docs-bundle/
-├── docs/
-├── samples/
-└── tests/
+├── docs-bundle/              # okf-loom's own docs, as an OKF bundle
+├── samples/                  # example bundles (demo_bundle, showcase)
+├── docs/                     # screenshots, README media, design notes
+└── tests/                    # 1,200+ test pytest suite
 ```
 
-`pyproject.toml` is retained only for pytest/coverage configuration. It is not
-package metadata.
+The distribution unit is this git repo layout; `pyproject.toml` exists
+only for pytest/coverage configuration.
 
-## Browser proof
+## Regenerating media & browser proof
 
-Browser proof is optional and installed explicitly into your environment:
+The screenshots and GIFs on this page live in [`docs/media/`](docs/media/)
+and are reproducible from a live studio; browser-marked tests skip cleanly
+when Playwright is absent:
 
 ```bash
-python -m pip install pytest playwright
+python -m pip install pytest playwright pillow
 python -m playwright install chromium
-PYTHONPATH=scripts pytest tests/test_viewer_browser.py
-PYTHONPATH=scripts python scripts/capture_viewer_proof.py
-```
 
-Without Playwright or a browser, browser-marked tests skip cleanly.
+PYTHONPATH=scripts python scripts/capture_readme_media.py   # this page's media
+PYTHONPATH=scripts python scripts/capture_viewer_proof.py   # dated spec §17 proofs
+PYTHONPATH=scripts pytest tests/test_viewer_browser.py      # browser tests
+```
 
 ## License
 
-okf-loom is licensed under the Apache License, Version 2.0.
-Commercial and non-commercial use are both allowed under that license.
+okf-loom is licensed under the Apache License, Version 2.0 — commercial
+and non-commercial use are both allowed. See [LICENSE](LICENSE) and
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 okf-loom is compatible with and complementary to the upstream OKF
-specification, which is also Apache-2.0 upstream.
-This implementation is independent; it is not affiliated with or endorsed by
-Google.
+specification (also Apache-2.0). This implementation is independent; it
+is not affiliated with or endorsed by Google.

@@ -101,13 +101,14 @@ okf-loom/
 │   ├── okf-loom              # checked-in helper command
 │   ├── okf_loom/             # checkout-local runtime package
 │   ├── build_skill_archive.py
+│   ├── capture_readme_media.py
 │   ├── capture_viewer_proof.py
 │   ├── capture_signal_controls.py
 │   └── lint-js.sh
 ├── docs-bundle/             # OKF documentation bundle
 ├── samples/                 # example OKF bundles
 ├── tests/                   # pytest proofs for checkout scripts
-├── docs/                    # screenshots + design plans (docs/design/)
+├── docs/                    # README media (docs/media/), screenshots, design plans
 ├── README.md                # human overview
 ├── AGENTS.md                # thin pointer for agents that read AGENTS first
 └── CLAUDE.md                # thin pointer for agents that read CLAUDE first
