@@ -60,6 +60,13 @@ Requirements: Python 3.11+, nothing to install. Add `--tunnel` to `serve`
 for a shareable `https://…trycloudflare.com` link (needs `cloudflared`;
 see [Sharing & security](#sharing--security)).
 
+
+
+
+https://github.com/user-attachments/assets/5251cdd9-9a58-4c00-bd52-a3236522f1dc
+
+
+
 ## Tour
 
 ### Select text, leave a comment, let your agent do the work
