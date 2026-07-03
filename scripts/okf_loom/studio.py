@@ -644,6 +644,34 @@ def _read_jsonl_with_rotations(active: Path) -> Iterator[dict[str, Any]]:
     yield from _read_jsonl(active)
 
 
+def _event_dedup_key(event: dict[str, Any]) -> str | None:
+    """Unique per-append key for cross-process broadcast dedup.
+
+    ``event_id`` is the right identity: :meth:`Studio.append_event` stamps
+    a fresh ULID on EVERY append, unconditionally. Neither of the other
+    candidates is unique:
+
+    * ``id`` — comment lifecycle events reuse the COMMENT id as the event
+      id (the SSE payload contract; the client's upsertComment keys on
+      it), so an id collides across a comment's open→claimed→resolved
+      transitions.
+    * ``seq`` — a per-instance in-memory counter initialised from the
+      feed at construction, so two processes whose Studio instances both
+      predate the other's writes stamp colliding seqs.
+
+    The ``id|seq`` composite fallback covers rows written before
+    ``event_id`` existed (their combination is unique in all but
+    pathological multi-writer interleavings).
+    """
+    eid = event.get("event_id")
+    if eid:
+        return f"eid:{eid}"
+    rid = event.get("id")
+    if rid is None:
+        return None
+    return f"id:{rid}|seq:{event.get('seq')}"
+
+
 # ---------------------------------------------------------------------------
 # Studio — session state + the comment / presence / undo / activity API
 # ---------------------------------------------------------------------------
@@ -1083,6 +1111,11 @@ class Studio:
         self.ensure_session()
         ev = dict(event)
         ev.setdefault("id", new_id())
+        # Unconditional per-append identity for cross-process dedup. ``id``
+        # can NOT serve: comment lifecycle events reuse the comment id (the
+        # SSE contract), and ``seq`` is a per-instance counter that collides
+        # across processes. See _event_dedup_key.
+        ev["event_id"] = new_id()
         ev.setdefault("ts", _now_iso())
         ev.setdefault("seq", self._next_seq())
         ev.setdefault("rev", self._next_bundle_rev())
@@ -1092,17 +1125,27 @@ class Studio:
         )
         if publish:
             self.bus.publish(ev)
-            # Track the id so the cross-process tail doesn't re-broadcast it.
-            self._remember_published(ev.get("id"))
+            # Track the event so the cross-process tail doesn't re-broadcast it.
+            self._remember_published(_event_dedup_key(ev))
         return ev
 
-    def _remember_published(self, event_id: str | None) -> None:
-        """Track an event id as published by THIS process (cross-process tail)."""
-        if not event_id:
+    def _remember_published(self, key: str | None) -> None:
+        """Track an event dedup key as published by THIS process.
+
+        Keys come from :func:`_event_dedup_key` — ``event_id``-based, NOT
+        ``id``-based. Comment lifecycle events deliberately reuse the
+        COMMENT id as the event ``id`` (the SSE contract: the client's
+        upsertComment keys on it), so an id-based set poisoned itself:
+        once the creation event was published in-process, every later
+        claim/resolve event for that comment carried the same id and was
+        skipped by the tail forever (CLI state flips never reached open
+        tabs). ``event_id`` is a fresh ULID stamped on every append.
+        """
+        if not key:
             return
         with self._lock:
-            self._recently_published_events.add(event_id)
-            self._recently_published_order.append(event_id)
+            self._recently_published_events.add(key)
+            self._recently_published_order.append(key)
             # Bound the ring at 256 entries.
             while len(self._recently_published_order) > 256:
                 old = self._recently_published_order.pop(0)
@@ -1124,7 +1167,18 @@ class Studio:
 
         Idempotent + bounded: reads at most the last 500 events from the
         feed (sufficient for any realistic burst), filters, publishes. Called
-        from the watcher's ``_reload`` path when the bundle changed.
+        from the watcher's ``_reload`` path when the bundle changed AND from
+        its every-tick ``_tick`` path when events.jsonl's mtime moved
+        (ARCH4-001 — session-only writes like a CLI claim/resolve/presence
+        never touch a ``.md`` file).
+
+        Dedup is by :func:`_event_dedup_key` (``event_id``-based). It was
+        id-based, which silently dropped every comment LIFECYCLE event:
+        comment events reuse the comment id as the event id (the SSE
+        contract), so after the creation event was published in-process,
+        the claim/resolve rows written by a CLI process carried an
+        already-seen id and were never broadcast — an open tab never saw
+        the state flip.
         """
         broadcast: list[dict[str, Any]] = []
         try:
@@ -1137,24 +1191,24 @@ class Studio:
         # publishes) but CONTINUE past them — do NOT break — because
         # serve's own events (e.g. a ``graph`` event from the watcher's
         # disk diff) can land BETWEEN the CLI's older activity/changed
-        # events and this tail call. Stopping at the first seen id (the
+        # events and this tail call. Stopping at the first seen key (the
         # old behavior, ARCH3-001) skipped the CLI's events entirely.
         # The 500-row window bounds the work; the ``seen`` set prevents
         # double-broadcast within this call + across calls.
         for row in reversed(rows[-500:]):
-            rid = row.get("id")
-            if rid is None:
+            key = _event_dedup_key(row)
+            if key is None:
                 continue
-            if rid in seen:
+            if key in seen:
                 continue
             broadcast.append(row)
-            seen.add(rid)  # don't re-broadcast within this call
+            seen.add(key)  # don't re-broadcast within this call
         # Broadcast oldest-first so the browser sees them in order.
         broadcast.reverse()
         for row in broadcast:
             try:
                 self.bus.publish(row)
-                self._remember_published(row.get("id"))
+                self._remember_published(_event_dedup_key(row))
             except Exception:
                 pass
         return broadcast

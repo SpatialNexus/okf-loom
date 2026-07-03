@@ -505,6 +505,43 @@ def test_tail_broadcasts_past_serve_own_graph_event(studio: Studio) -> None:
     )
 
 
+def test_tail_broadcasts_comment_lifecycle_despite_shared_id(studio: Studio) -> None:
+    """Comment lifecycle events must cross processes (seq-keyed dedup).
+
+    Comment events reuse the COMMENT id as the event id (the SSE payload
+    contract — the client's upsertComment keys on it), so the old id-keyed
+    dedup poisoned itself: once serve published the CREATION event
+    in-process, a CLI claim/resolve row for the same comment carried an
+    already-seen id and was silently skipped — an open tab never saw the
+    state flip until a manual resync or reload. Dedup is now keyed by
+    ``seq`` (stamped fresh per append, unique across processes).
+    """
+    # Serve (studio A) posts the comment in-process — this publishes the
+    # creation event and records its dedup key.
+    created = studio.post_comment(
+        concept="tables/orders", body="tighten this",
+        anchor={"kind": "concept", "ref": "tables/orders"}, actor="user",
+    )
+    cid = created["id"]
+    # CLI (studio B: separate instance = separate process) claims, then
+    # resolves. Both events land in events.jsonl with the SAME event id
+    # (= the comment id) but fresh seqs; B's bus has no subscribers.
+    studio_b = Studio.for_bundle(studio.bundle_root)
+    studio_b.update_comment(cid, state="claimed", claimed_by="agent")
+    studio_b.update_comment(cid, state="resolved", summary="did it")
+    broadcast = studio.tail_and_broadcast_cross_process_events()
+    states = [
+        e.get("state") for e in broadcast
+        if e.get("type") == "comment" and e.get("id") == cid
+    ]
+    assert "claimed" in states and "resolved" in states, (
+        f"comment lifecycle events not broadcast (id-keyed dedup "
+        f"regression): broadcast={broadcast}"
+    )
+    # Oldest-first ordering: the claim must precede the resolve.
+    assert states.index("claimed") < states.index("resolved")
+
+
 # ---------------------------------------------------------------------------
 # INTENT2-007: resolve_comment back-stamps comment_link events
 # ---------------------------------------------------------------------------
