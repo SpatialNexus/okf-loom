@@ -44,17 +44,14 @@ it as an OKF bundle first if it isn't one), give me the URL, then wait
 for my comments and work each one to resolution.
 ```
 
-The agent serves the studio and blocks on the comment feed. You open the
-URL, select any sentence, type a note — and watch the agent's edit patch
-back into the page live. That's the whole workflow.
+Then the whole workflow is:
 
-No agent handy? The same flow by hand:
-
-```bash
-git clone https://github.com/ojamin/okf-loom
-okf-loom/scripts/okf-loom serve docs        # opens http://127.0.0.1:8787/
-okf-loom/scripts/okf-loom wait docs         # second terminal: blocks until a comment
-```
+1. **Agent** serves the studio and blocks on the comment feed.
+2. **You** open the URL and read your docs.
+3. **You** select any sentence and type a note.
+4. **Agent** claims it, edits the Markdown, resolves.
+5. **You** watch the edit patch into the page live — keep reading, keep
+   commenting.
 
 Requirements: Python 3.11+, nothing to install. Add `--tunnel` to `serve`
 for a shareable `https://…trycloudflare.com` link (needs `cloudflared`;
