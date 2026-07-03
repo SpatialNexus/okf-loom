@@ -12,6 +12,9 @@ The files stay plain Markdown throughout.**
 [![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-zero-brightgreen.svg)](docs-bundle/explanation/zero_dependencies.md)
 [![Tests](https://img.shields.io/badge/tests-1200%2B%20passing-brightgreen.svg)](tests/)
 
+**[▶ Live demo](https://ojamin.github.io/okf-loom/)** — this repo's docs
+bundle as a static build (the live studio adds commenting on top).
+
 </div>
 
 ![The okf-loom graph view: 30 documentation concepts grouped into six colour-coded themes, with a ranked theme summary panel on the right](docs/media/graph-map.png)
@@ -126,8 +129,9 @@ served live with search-as-you-type from the top bar:
 ### Take it anywhere
 
 The same bundle renders four ways: the live studio, a **static site**
-(`build --target static`, deployable to any web host or GitHub Pages), a
-**SPA** build, and a **single self-contained `viz.html`** (`render`) you
+(`build --target static` — the [live demo](https://ojamin.github.io/okf-loom/)
+is exactly that, deployed by [a small workflow](.github/workflows/pages.yml)),
+a **SPA** build, and a **single self-contained `viz.html`** (`render`) you
 can attach to an email. And because a bundle is just Markdown, it still
 reads fine as plain files on GitHub.
 

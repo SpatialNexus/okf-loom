@@ -1,0 +1,55 @@
+# Deploy the docs-bundle static build to GitHub Pages.
+#
+# The published site is the static render of okf-loom's own documentation
+# bundle — the "Try the live demo" link in the README. Setup (one-time):
+# repo Settings → Pages → Build and deployment → Source: "GitHub Actions".
+#
+# Triggers on pushes to main that touch the bundle or the renderer, and
+# manually via workflow_dispatch (Actions tab → Deploy docs to Pages →
+# Run workflow) for one-off deploys from any branch.
+name: Deploy docs to Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs-bundle/**"
+      - "scripts/okf_loom/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; don't cancel a production deploy mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate bundle (strict)
+        run: scripts/okf-loom validate docs-bundle --strict
+      - name: Build static site
+        run: scripts/okf-loom build docs-bundle --target static --out _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
