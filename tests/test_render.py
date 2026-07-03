@@ -1164,42 +1164,70 @@ def test_iter2_graph_selection_color_is_token_governed() -> None:
         "amber #f59e0b still used as a style value in graph.js "
         "(should be governed by --okf-select)"
     )
-    # GRAPH_COLORS constants block exists and is referenced.
+    # GRAPH_COLORS per-theme palette block exists and is referenced.
     assert 'GRAPH_COLORS' in graph_js, "GRAPH_COLORS constants block missing"
-    # node:selected border reads from GRAPH_COLORS.select* (not a literal).
+    # Every theme ships a canvas palette (mirrors its wiki.css tokens).
+    for theme in ("light", "dark", "pastel", "sepia", "midnight"):
+        assert re.search(rf'\b{theme}:\s*\{{', graph_js), (
+            f"GRAPH_COLORS missing the {theme} palette"
+        )
+    # node:selected border reads from the palette (not a literal).
     assert re.search(
-        r'"border-color":\s*GRAPH_COLORS\.select\w*', graph_js
-    ), "node:selected border-color does not read from GRAPH_COLORS.select*"
-    # syncLabelColour re-syncs the selection color on theme toggle.
+        r'"border-color":\s*GRAPH_COLORS\.light\.select', graph_js
+    ), "node:selected border-color does not read from GRAPH_COLORS.light.select"
+    # syncLabelColour re-syncs the selection color on theme change.
     sync_match = re.search(
         r'function\s+syncLabelColour\s*\(\)\s*\{(.*?)\n\s*\}',
         graph_js, re.DOTALL,
     )
     assert sync_match, "syncLabelColour function missing"
     sync_body = sync_match.group(1).replace("\n", " ")
-    # sel is derived from GRAPH_COLORS.select* (light/dark pair).
+    # The palette is resolved from the active data-theme.
     assert re.search(
-        r'var sel\s*=\s*dark\s*\?\s*GRAPH_COLORS\.select\w*',
-        sync_body,
-    ), "syncLabelColour does not derive selection color from GRAPH_COLORS.select*"
-    # node:selected re-syncs border-color using sel on theme toggle.
+        r'var pal\s*=\s*graphPalette\(\)', sync_body,
+    ), "syncLabelColour does not resolve the active theme palette"
+    # node:selected re-syncs border-color from the palette on theme change.
     assert re.search(
-        r'node:selected.*?border-color.*?sel', sync_body
+        r'node:selected.*?border-color.*?pal\.select', sync_body
     ), "syncLabelColour does not re-sync node:selected border-color"
 
 
 def test_iter2_select_token_defined_in_wiki_css() -> None:
-    """P2-5 (iter-2): the --okf-select token is defined in BOTH light and
-    dark themes (the graph.js GRAPH_COLORS block mirrors these values)."""
+    """P2-5 (iter-2): the --okf-select token is defined in EVERY theme
+    (the graph.js GRAPH_COLORS block mirrors these values)."""
     css = _runtime_file("viewer", "static", "wiki.css").read_text(encoding="utf-8")
     root_block = css.split(":root", 1)[1].split("}", 1)[0]
     assert re.search(r'--okf-select\s*:', root_block), (
         "light theme missing --okf-select token"
     )
-    dark_block = css.split('[data-theme="dark"]', 1)[1].split("}", 1)[0]
-    assert re.search(r'--okf-select\s*:', dark_block), (
-        "dark theme missing --okf-select token"
+    for theme in ("dark", "pastel", "sepia", "midnight"):
+        block = css.split(f'[data-theme="{theme}"]', 1)[1].split("}", 1)[0]
+        assert re.search(r'--okf-select\s*:', block), (
+            f"{theme} theme missing --okf-select token"
+        )
+
+
+def test_theme_blocks_override_full_token_set() -> None:
+    """Every named theme block (dark/pastel/sepia/midnight) overrides the
+    same colour tokens the light :root defines, so no theme inherits a
+    light-only colour that breaks contrast (e.g. a pastel page with the
+    light theme's white code background)."""
+    css = _runtime_file("viewer", "static", "wiki.css").read_text(encoding="utf-8")
+    core_tokens = (
+        "okf-bg", "okf-bg-elev", "okf-bg-inset", "okf-fg", "okf-fg-muted",
+        "okf-border", "okf-border-strong", "okf-accent", "okf-accent-hover",
+        "okf-accent-on", "okf-accent-bg", "okf-select", "okf-code-bg",
+        "okf-code-fg", "okf-pre-bg", "okf-pre-fg", "okf-broken",
+        "okf-ok", "okf-ok-bg", "okf-warn", "okf-warn-bg",
+        "okf-info", "okf-info-bg", "okf-error", "okf-error-bg", "okf-shadow",
     )
+    for theme in ("dark", "pastel", "sepia", "midnight"):
+        assert f'[data-theme="{theme}"]' in css, f"{theme} theme block missing"
+        block = css.split(f'[data-theme="{theme}"]', 1)[1].split("}", 1)[0]
+        for token in core_tokens:
+            assert re.search(rf'--{token}\s*:', block), (
+                f"{theme} theme missing --{token} token"
+            )
 
 
 # ===========================================================================

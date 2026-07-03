@@ -90,7 +90,10 @@
   }
 
   function isDark() {
-    return (document.documentElement.getAttribute("data-theme") || "light") === "dark";
+    // Dark-family themes (dark, midnight) get the dark mermaid/hljs skins;
+    // light-family themes (light, pastel, sepia) get the light ones.
+    var t = document.documentElement.getAttribute("data-theme") || "light";
+    return t === "dark" || t === "midnight";
   }
 
   // --- Mermaid ---

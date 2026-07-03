@@ -502,7 +502,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 
 
 _ALLOWED_LAYOUTS = frozenset({"cose", "concentric", "breadthfirst", "circle", "grid"})
-_ALLOWED_THEMES = frozenset({"light", "dark"})
+_ALLOWED_THEMES = frozenset({"light", "dark", "pastel", "sepia", "midnight"})
 
 
 def load_config(bundle: Bundle) -> dict[str, Any]:
@@ -514,9 +514,10 @@ def load_config(bundle: Bundle) -> dict[str, Any]:
         default_layout (str): one of cose, concentric, breadthfirst, circle,
             grid. Used as the initial Cytoscape layout in the single-file and
             full-page graph views.
-        theme (str): "light" or "dark" — initial theme for the single-file
-            viewer. Page-served views honour ``localStorage['okf-theme']`` if
-            set; otherwise this value.
+        theme (str): one of "light", "dark", "pastel", "sepia", "midnight" —
+            initial theme for the single-file viewer. Page-served views
+            honour ``localStorage['okf-theme']`` if set; otherwise this
+            value.
         cdn (bool): if False, the single-file / graph templates omit the
             CDN ``<script>`` tag for Cytoscape.js. The graph view will then
             degrade (no rendering) but the page still loads — useful for

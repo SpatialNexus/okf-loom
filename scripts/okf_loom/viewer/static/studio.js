@@ -17,7 +17,8 @@
  *   - Extension API (§13.6): okfLoomStudio.register(kind, impl). Wired kinds:
  *     {panel, viewMode}. Reserved (forward-compat, accepted + warned):
  *     {toolbar, graphDecorator, suggestionRenderer}.
- *   - Themes (§13.5): light/dark/auto, honouring bootstrap + OS pref.
+ *   - Themes (§13.5): light/dark/pastel/sepia/midnight/auto, honouring
+ *     saved choice + bootstrap + OS pref.
  *
  * Security: untrusted strings (comment bodies, summaries, ids) go through
  * textContent only. The only innerHTML assignment is the server-rendered
@@ -213,27 +214,49 @@
   // ====================================================================
   // 2. Themes (§13.5)
   // ====================================================================
+  // Theme names + button glyphs. KEEP IN SYNC with the copies in wiki.js /
+  // graph.js and render.py:_theme_button_html.
+  const THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
+  const THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
   function effectiveTheme(choice) {
-    if (choice === "light" || choice === "dark") return choice;
+    if (THEMES.indexOf(choice) >= 0) return choice;
     // auto: follow OS preference
     return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
   }
-  function applyThemeAttr(t) {
-    document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
-    // Keep the existing topbar toggle button (wiki.js) in sync if present.
+  function applyThemeAttr(t, opts) {
+    if (THEMES.indexOf(t) < 0) t = "light";
+    document.documentElement.setAttribute("data-theme", t);
+    // Persist by default so a palette-chosen theme survives navigation
+    // (wiki.js reads localStorage['okf-theme'] on every page). Boot and
+    // "Auto (follow OS)" pass persist:false — a resolved OS preference
+    // must not be frozen as an explicit user choice.
+    if (!opts || opts.persist !== false) {
+      try { localStorage.setItem("okf-theme", t); } catch (e) {}
+    }
+    // Keep the existing topbar cycle button (wiki.js) in sync if present.
     const tb = document.getElementById("okf-theme");
     if (tb) {
-      tb.textContent = t === "dark" ? "☀" : "☾";
-      tb.setAttribute("aria-pressed", t === "dark" ? "true" : "false");
+      tb.textContent = THEME_GLYPHS[t];
+      tb.setAttribute("title", "Theme: " + t + " — click to cycle");
+      tb.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
+      tb.removeAttribute("aria-pressed");
     }
   }
   function currentThemeChoice() {
-    return (document.documentElement.getAttribute("data-theme") === "dark") ? "dark" : "light";
+    const t = document.documentElement.getAttribute("data-theme");
+    return THEMES.indexOf(t) >= 0 ? t : "light";
   }
-  // Apply the bootstrap theme on boot.
+  // Apply the bootstrap theme on boot. A saved user choice (wiki.js theme
+  // button / command palette) outranks the server-side studio.theme config —
+  // otherwise every navigation would stomp the user's pick back to the
+  // config default.
   (function bootTheme() {
-    const t = effectiveTheme(BOOT.theme || "auto");
-    applyThemeAttr(t);
+    let saved = null;
+    try { saved = localStorage.getItem("okf-theme"); } catch (e) {}
+    const t = (saved && THEMES.indexOf(saved) >= 0)
+      ? saved
+      : effectiveTheme(BOOT.theme || "auto");
+    applyThemeAttr(t, { persist: false });
   })();
 
   // ====================================================================
@@ -2950,7 +2973,14 @@
     items.push({ label: "Open Changes panel", sub: "panel", run: () => openPanel("changes") });
     items.push({ label: "Theme: Light", sub: "theme", run: () => applyThemeAttr("light") });
     items.push({ label: "Theme: Dark", sub: "theme", run: () => applyThemeAttr("dark") });
-    items.push({ label: "Theme: Auto (follow OS)", sub: "theme", run: () => applyThemeAttr(effectiveTheme("auto")) });
+    items.push({ label: "Theme: Pastel", sub: "theme", run: () => applyThemeAttr("pastel") });
+    items.push({ label: "Theme: Sepia", sub: "theme", run: () => applyThemeAttr("sepia") });
+    items.push({ label: "Theme: Midnight", sub: "theme", run: () => applyThemeAttr("midnight") });
+    items.push({ label: "Theme: Auto (follow OS)", sub: "theme", run: () => {
+      // Clear the saved choice so the OS preference governs again.
+      try { localStorage.removeItem("okf-theme"); } catch (e) {}
+      applyThemeAttr(effectiveTheme("auto"), { persist: false });
+    } });
     if (window.okfLoomLive && window.okfLoomLive.resync) items.push({ label: "Resync now", sub: "live", run: () => window.okfLoomLive.resync() });
     // Registered panels.
     Object.keys(panels).forEach((id) => {

@@ -1,7 +1,10 @@
 /* OKF wiki viewer - shared stylesheet.
  *
- * Light + dark themes via CSS custom properties on :root and
- * [data-theme="dark"]. Responsive: sidebar+main on wide screens, stacked
+ * Five colour themes via CSS custom properties: :root carries the light
+ * tokens; [data-theme="dark"|"pastel"|"sepia"|"midnight"] override them.
+ * Every theme overrides the SAME token set (test_render.py enforces this)
+ * so no theme inherits a light-only colour that breaks contrast.
+ * Responsive: sidebar+main on wide screens, stacked
  * on narrow. Used by both the live server and the built static site.
  *
  * Token system (P2-66):
@@ -160,6 +163,128 @@
   --okf-error: oklch(0.72 0.16 27);
   --okf-error-bg: oklch(0.30 0.06 27);
   --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+/* Pastel: the "middle ground" theme — soft lilac surfaces sit between the
+ * bright light theme and the dark ones. The accent moves to a dusty violet
+ * so the whole palette stays in one gentle hue family; the brand teal
+ * remains the light/dark identity. Contrast ratios (WCAG 2.2):
+ *   --okf-fg #403a58 on --okf-bg #eee9f6            ≈ 8.97:1 (AAA)
+ *   --okf-fg-muted #5f5880 on --okf-bg-inset        ≈ 4.94:1 (AA)
+ *   --okf-accent #6d4fae on --okf-bg                ≈ 5.21:1 (AA)
+ *   --okf-accent #6d4fae on --okf-bg-elev #f7f4fb   ≈ 5.71:1 (AA)
+ *   --okf-accent-on #ffffff on #6d4fae              ≈ 6.21:1 (AA)
+ *   --okf-accent-bg #e2d7f3 (text #6d4fae)          ≈ 4.51:1 (AA)
+ *   --okf-broken #a92f56 on --okf-bg-inset          ≈ 4.89:1 (AA) */
+[data-theme="pastel"] {
+  --okf-bg: #eee9f6;
+  --okf-bg-elev: #f7f4fb;
+  --okf-bg-inset: #e4dcf0;
+  --okf-fg: #403a58;
+  --okf-fg-muted: #5f5880;
+  --okf-border: #d9d0e8;
+  --okf-border-strong: #bbaed6;
+  --okf-accent: #6d4fae;
+  --okf-accent-hover: #5b3f96;
+  --okf-accent-on: #ffffff;
+  --okf-accent-bg: #e2d7f3;
+  --okf-select: #6d4fae;
+  --okf-code-bg: #e4dcf0;
+  --okf-code-fg: #403a58;
+  --okf-pre-bg: #2e2946;
+  --okf-pre-fg: #e9e4f5;
+  --okf-broken: #a92f56;
+  /* State tokens: light-theme hues, lightness dropped a step because the
+   * lilac surfaces are darker than white. Approx. vs --okf-bg-elev:
+   *   ok ≈ 5.4:1  warn ≈ 5.2:1  info ≈ 7.0:1  error ≈ 6.9:1 (all AA) */
+  --okf-ok: oklch(0.49 0.10 165);
+  --okf-ok-bg: oklch(0.94 0.03 165);
+  --okf-warn: oklch(0.52 0.12 70);
+  --okf-warn-bg: oklch(0.94 0.04 70);
+  --okf-info: oklch(0.44 0.09 235);
+  --okf-info-bg: oklch(0.94 0.03 235);
+  --okf-error: oklch(0.47 0.16 27);
+  --okf-error-bg: oklch(0.94 0.03 27);
+  --okf-shadow: 0 1px 2px rgba(64, 58, 88, 0.06), 0 1px 3px rgba(64, 58, 88, 0.08);
+}
+/* Sepia: warm paper reading theme — cream surfaces, espresso text, sienna
+ * accent. Contrast ratios (WCAG 2.2):
+ *   --okf-fg #3d3020 on --okf-bg #f3ead8            ≈ 10.70:1 (AAA)
+ *   --okf-fg-muted #635038 on --okf-bg-inset        ≈ 5.83:1 (AA)
+ *   --okf-accent #8a4a15 on --okf-bg                ≈ 5.72:1 (AA)
+ *   --okf-accent #8a4a15 on --okf-bg-elev #faf4e6   ≈ 6.24:1 (AA)
+ *   --okf-accent-on #ffffff on #8a4a15              ≈ 6.84:1 (AA)
+ *   --okf-accent-bg #ecd9be (text #8a4a15)          ≈ 4.96:1 (AA)
+ *   --okf-broken #a03422 on --okf-bg-inset          ≈ 5.30:1 (AA) */
+[data-theme="sepia"] {
+  --okf-bg: #f3ead8;
+  --okf-bg-elev: #faf4e6;
+  --okf-bg-inset: #ecdfc6;
+  --okf-fg: #3d3020;
+  --okf-fg-muted: #635038;
+  --okf-border: #e2d5b8;
+  --okf-border-strong: #c6b28a;
+  --okf-accent: #8a4a15;
+  --okf-accent-hover: #733a0b;
+  --okf-accent-on: #ffffff;
+  --okf-accent-bg: #ecd9be;
+  --okf-select: #8a4a15;
+  --okf-code-bg: #ecdfc6;
+  --okf-code-fg: #3d3020;
+  --okf-pre-bg: #32281a;
+  --okf-pre-fg: #ede4d1;
+  --okf-broken: #a03422;
+  /* State tokens: same one-step-darker treatment as pastel; the cream
+   * surfaces are slightly darker than white. Approx. vs --okf-bg-elev:
+   *   ok ≈ 5.4:1  warn ≈ 5.4:1  info ≈ 7.0:1  error ≈ 6.8:1 (all AA) */
+  --okf-ok: oklch(0.49 0.10 165);
+  --okf-ok-bg: oklch(0.94 0.04 165);
+  --okf-warn: oklch(0.51 0.11 70);
+  --okf-warn-bg: oklch(0.94 0.05 70);
+  --okf-info: oklch(0.44 0.09 235);
+  --okf-info-bg: oklch(0.94 0.03 235);
+  --okf-error: oklch(0.47 0.16 27);
+  --okf-error-bg: oklch(0.94 0.04 27);
+  --okf-shadow: 0 1px 2px rgba(61, 48, 32, 0.06), 0 1px 3px rgba(61, 48, 32, 0.08);
+}
+/* Midnight: deeper than dark — near-black, OLED-friendly surfaces with a
+ * brighter take on the brand teal. Contrast ratios (WCAG 2.2):
+ *   --okf-fg #dbe2f4 on --okf-bg #050810            ≈ 15.45:1 (AAA)
+ *   --okf-fg-muted #8e97b8 on --okf-bg-inset        ≈ 6.76:1 (AA)
+ *   --okf-accent #52d8d8 on --okf-bg                ≈ 11.61:1 (AAA)
+ *   --okf-accent #52d8d8 on --okf-bg-elev #0b1020   ≈ 10.97:1 (AAA)
+ *   --okf-accent-on #050810 on #52d8d8              ≈ 11.61:1 (AAA)
+ *   --okf-accent-bg 16% teal overlay (text #52d8d8) ≈ 7.99:1 (AAA)
+ *   --okf-broken #fb8f8f on --okf-bg-inset          ≈ 8.77:1 (AAA) */
+[data-theme="midnight"] {
+  --okf-bg: #050810;
+  --okf-bg-elev: #0b1020;
+  --okf-bg-inset: #070c18;
+  --okf-fg: #dbe2f4;
+  --okf-fg-muted: #8e97b8;
+  --okf-border: #161d33;
+  --okf-border-strong: #2a3352;
+  --okf-accent: #52d8d8;
+  --okf-accent-hover: #79e3e3;
+  --okf-accent-on: #050810;
+  --okf-accent-bg: rgba(82, 216, 216, 0.16);
+  --okf-select: #52d8d8;
+  --okf-code-bg: #070c18;
+  --okf-code-fg: #dbe2f4;
+  --okf-pre-bg: #010409;
+  --okf-pre-fg: #dbe2f4;
+  --okf-broken: #fb8f8f;
+  /* State tokens: dark-theme hues lifted a step for the near-black
+   * surfaces. Approx. vs --okf-bg-elev:
+   *   ok ≈ 9.3:1  warn ≈ 10.6:1  info ≈ 9.0:1  error ≈ 7.6:1 (all AAA/AA) */
+  --okf-ok: oklch(0.76 0.12 165);
+  --okf-ok-bg: oklch(0.26 0.05 165);
+  --okf-warn: oklch(0.82 0.13 70);
+  --okf-warn-bg: oklch(0.28 0.06 70);
+  --okf-info: oklch(0.76 0.10 235);
+  --okf-info-bg: oklch(0.26 0.05 235);
+  --okf-error: oklch(0.74 0.16 27);
+  --okf-error-bg: oklch(0.28 0.06 27);
+  --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 /* ---- Reset / base ------------------------------------------------------ */

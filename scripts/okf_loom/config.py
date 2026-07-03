@@ -276,7 +276,9 @@ class SearchConfig:
         )
 
 
-_ALLOWED_STUDIO_THEMES: frozenset[str] = frozenset({"auto", "light", "dark"})
+_ALLOWED_STUDIO_THEMES: frozenset[str] = frozenset(
+    {"auto", "light", "dark", "pastel", "sepia", "midnight"}
+)
 
 
 @dataclass(frozen=True)
@@ -652,5 +654,5 @@ studio:                             # Live collaborative studio (all ON by defau
   log_edits: true                   # append a SPEC §7 log.md entry per agent write / resolved comment
   max_sse_clients: 32
   allowed_hosts: [127.0.0.1, localhost]   # invisible cross-origin guard (§15)
-  theme: auto                       # auto | light | dark
+  theme: auto                       # auto | light | dark | pastel | sepia | midnight
 """

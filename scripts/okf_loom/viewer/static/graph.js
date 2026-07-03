@@ -24,42 +24,67 @@
 
   var STORAGE_KEY = "okf-theme";
 
+  // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
+  // wiki.js / studio.js and render.py:_theme_button_html — this file must
+  // stand alone in the single-file viewer, which has no wiki.js.
+  var THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
+  var THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
   // these JS literals MIRROR the design tokens declared in wiki.css :root
-  // and [data-theme="dark"]. KEEP IN SYNC WITH wiki.css :root TOKENS - the
-  // CSS file is the authoritative source; this block exists so a token
-  // change has ONE obvious place to update in JS. Each entry names the
-  // token it mirrors.
+  // and the [data-theme="…"] blocks. KEEP IN SYNC WITH wiki.css TOKENS -
+  // the CSS file is the authoritative source; this block exists so a token
+  // change has ONE obvious place to update in JS. Per theme:
+  //   nodeText     node label text. = --okf-fg.
+  //   nodeBorder   node border. Light-family themes reuse --okf-fg; dark-
+  //                family themes use --okf-bg so the border reads strong
+  //                against the elevated canvas surface.
+  //   bridgeBorder bridge/focus node border. = --okf-fg in every theme.
+  //   edge         edge line + arrow. = --okf-border-strong.
+  //   edgeLabel    edge label text. Review feedback: darkened well past
+  //                --okf-fg-muted (light was #64748b ~4.6:1 → #334155
+  //                ~10.4:1) so relationship labels stay legible when the
+  //                auto-fit zooms the graph out. Each theme's value is a
+  //                strengthened take on its fg-muted.
+  //   edgeLabelBg  edge label background (opaque so labels stay readable
+  //                over nodes). = --okf-bg-elev (light family) or --okf-bg
+  //                (dark family).
+  //   select       selection colour. = --okf-select (contrast ratios are
+  //                documented in wiki.css).
   var GRAPH_COLORS = {
-    // Node label text + node border. Mirrors --okf-fg (the page foreground,
-    // which is near-black on light and near-white on dark).
-    nodeTextLight: "#0f172a",         // = --okf-fg (light)
-    nodeTextDark: "#e2e8f0",          // = --okf-fg (dark)
-    nodeBorderLight: "#0f172a",       // = --okf-fg (light)
-    nodeBorderDark: "#0b1220",        // strong against the elevated canvas surface
-    // Edge line + arrow. Mirrors --okf-border-strong.
-    edgeLight: "#cbd5e1",             // = --okf-border-strong (light)
-    edgeDark: "#334155",              // = --okf-border-strong (dark)
-    // Edge label text. Review feedback: the relationship labels were too
-    // faint to read at high spread, so the light value is darkened from the old
-    // #64748b (~4.6:1) to slate #334155 (~10.4:1 on the light canvas) — well
-    // above AA and legible even when the auto-fit zooms the graph out. #cbd5e1
-    // is the matching dark-mode strengthening (~12:1 on #0b1220, up from the
-    // iter-1 #94a3b8 ~5.6:1).
-    edgeLabelLight: "#334155",
-    edgeLabelDark: "#cbd5e1",
-    // Edge label background (opaque so labels stay readable over nodes).
-    edgeLabelBgLight: "#ffffff",      // = --okf-bg-elev (light)
-    edgeLabelBgDark: "#0b1220",       // = --okf-bg (dark)
-    // Selection (P2-5 iter-2): governed by the --okf-select token, which
-    // reuses the brand teal. Was amber #f59e0b (off-token, undocumented,
-    // a third accent on the canvas). A 3px border-width keeps selection
-    // clearly visible against the auto-generated type-hash node fills
-    // without a separate hue. Contrast ratios documented in wiki.css.
-    selectLight: "#0c7373",           // = --okf-select (light)  ≈ 5.65:1 (AA)
-    selectDark: "#3ec9c9",            // = --okf-select (dark)   ≈ 7.6:1 (AAA)
+    light: {
+      nodeText: "#0f172a", nodeBorder: "#0f172a", bridgeBorder: "#0f172a",
+      edge: "#cbd5e1", edgeLabel: "#334155", edgeLabelBg: "#ffffff",
+      select: "#0c7373",
+    },
+    dark: {
+      nodeText: "#e2e8f0", nodeBorder: "#0b1220", bridgeBorder: "#e2e8f0",
+      edge: "#334155", edgeLabel: "#cbd5e1", edgeLabelBg: "#0b1220",
+      select: "#3ec9c9",
+    },
+    pastel: {
+      nodeText: "#403a58", nodeBorder: "#403a58", bridgeBorder: "#403a58",
+      edge: "#bbaed6", edgeLabel: "#4c4569", edgeLabelBg: "#f7f4fb",
+      select: "#6d4fae",
+    },
+    sepia: {
+      nodeText: "#3d3020", nodeBorder: "#3d3020", bridgeBorder: "#3d3020",
+      edge: "#c6b28a", edgeLabel: "#54432c", edgeLabelBg: "#faf4e6",
+      select: "#8a4a15",
+    },
+    midnight: {
+      nodeText: "#dbe2f4", nodeBorder: "#050810", bridgeBorder: "#dbe2f4",
+      edge: "#2a3352", edgeLabel: "#b8c1dd", edgeLabelBg: "#050810",
+      select: "#52d8d8",
+    },
   };
+
+  // Resolve the palette for the CURRENT data-theme (light fallback).
+  function graphPalette() {
+    var t = document.documentElement.getAttribute("data-theme") || "light";
+    return GRAPH_COLORS[t] || GRAPH_COLORS.light;
+  }
 
   // ---- Config from data-* attributes (CSP-safe; no inline script) ------
   // The graph_page.html template passes config via data-* attributes on
@@ -202,11 +227,15 @@
   }
 
   function applyTheme(t) {
-    document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+    if (THEMES.indexOf(t) < 0) t = "light";
+    document.documentElement.setAttribute("data-theme", t);
     try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {}
     if (themeBtn) {
-      themeBtn.textContent = t === "dark" ? "☀" : "☾";
-      themeBtn.setAttribute("aria-pressed", t === "dark" ? "true" : "false");
+      themeBtn.textContent = THEME_GLYPHS[t];
+      themeBtn.setAttribute("title", "Theme: " + t + " — click to cycle");
+      themeBtn.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
+      // Five-way cycle, not a two-state toggle — aria-pressed would lie.
+      themeBtn.removeAttribute("aria-pressed");
     }
   }
 
@@ -333,7 +362,7 @@
   // Honour saved preference on load; fall back to OS pref, then INITIAL_THEME.
   try {
     var saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === "light" || saved === "dark") applyTheme(saved);
+    if (saved && THEMES.indexOf(saved) >= 0) applyTheme(saved);
     else {
       var mq = window.matchMedia("(prefers-color-scheme: dark)");
       if (mq && mq.matches) applyTheme("dark");
@@ -342,7 +371,7 @@
   } catch (e) { applyTheme(INITIAL_THEME); }
   if (themeBtn) themeBtn.addEventListener("click", function () {
     var cur = document.documentElement.getAttribute("data-theme") || "light";
-    applyTheme(cur === "dark" ? "light" : "dark");
+    applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
   });
 
   // ---- Bundle acquisition ------------------------------------------------
@@ -923,7 +952,7 @@
             "background-position-y": "50%",
             "background-clip": "node",
             "label": "data(label)",
-            "color": GRAPH_COLORS.nodeTextLight,
+            "color": GRAPH_COLORS.light.nodeText,
             // Review feedback: node names read "near-microscopic" at the
             // widened max spread (the auto-fit zooms the big graph out, so the
             // rendered size is font-size × zoom; measured max-range zoom is
@@ -946,19 +975,19 @@
             // plate is a touch more opaque (0.72→0.85) so the bolder text stays
             // crisp over edges at high spread. Padding stays 2 so the plate does
             // not enlarge the label footprint at the compact default.
-            "text-background-color": GRAPH_COLORS.edgeLabelBgLight,
+            "text-background-color": GRAPH_COLORS.light.edgeLabelBg,
             "text-background-opacity": 0.85,
             "text-background-padding": 2,
             "text-background-shape": "roundrectangle",
             "width": "data(vizSize)",
             "height": "data(vizSize)",
             "border-width": 1,
-            "border-color": GRAPH_COLORS.nodeBorderLight,
+            "border-color": GRAPH_COLORS.light.nodeBorder,
           },
         },
         {
           selector: "node:selected",
-          style: { "border-width": 3, "border-color": GRAPH_COLORS.selectLight },
+          style: { "border-width": 3, "border-color": GRAPH_COLORS.light.select },
         },
         {
           selector: "edge",
@@ -969,8 +998,8 @@
             // still override (an inline ele.style() bypass would not).
             "width": "mapData(weight, 0, 1, 1.2, 4.8)",
             "opacity": "mapData(weight, 0, 1, 0.5, 1)",
-            "line-color": GRAPH_COLORS.edgeLight,
-            "target-arrow-color": GRAPH_COLORS.edgeLight,
+            "line-color": GRAPH_COLORS.light.edge,
+            "target-arrow-color": GRAPH_COLORS.light.edge,
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
             // Phase 3: arrowheads scale with edge weight so direction stays
@@ -983,7 +1012,7 @@
             // Review feedback: the contextual relationship labels were
             // faint/thin/unreadable at high spread. The faintness was the COLOR
             // and WEIGHT, so fix exactly those — a 600 weight and the darkened
-            // slate token (GRAPH_COLORS.edgeLabelLight, #334155 ≈ 10:1) — and
+            // slate token (GRAPH_COLORS.light.edgeLabel, #334155 ≈ 10:1) — and
             // leave the plate opacity/padding at their reviewed defaults so the
             // many overlapping selected-node labels do not stack into an opaque
             // blob at the compact default. min-zoomed-font-size is raised 7→9 so
@@ -994,9 +1023,9 @@
             // .okf-show-label) and only changes WHEN they paint.
             "font-size": 11,
             "font-weight": 600,
-            "color": GRAPH_COLORS.edgeLabelLight,
+            "color": GRAPH_COLORS.light.edgeLabel,
             "text-rotation": "autorotate",
-            "text-background-color": GRAPH_COLORS.edgeLabelBgLight,
+            "text-background-color": GRAPH_COLORS.light.edgeLabelBg,
             "text-background-opacity": 0.9,
             "text-background-padding": 2,
             "text-background-shape": "roundrectangle",
@@ -1023,7 +1052,7 @@
         // compose instead of fighting.
         { selector: ".okf-hover-dim", style: { "opacity": 0.18 } },
         { selector: "node.okf-hover", style: {
-            "underlay-color": GRAPH_COLORS.selectLight,
+            "underlay-color": GRAPH_COLORS.light.select,
             "underlay-opacity": 0.18,
             "underlay-padding": 8,
         } },
@@ -1032,14 +1061,14 @@
         { selector: ".okf-path-dim", style: { "opacity": 0.12 } },
         { selector: "node.okf-path", style: {
             "border-width": 3,
-            "border-color": GRAPH_COLORS.selectLight,
-            "underlay-color": GRAPH_COLORS.selectLight,
+            "border-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS.light.select,
             "underlay-opacity": 0.14,
             "underlay-padding": 6,
         } },
         { selector: "edge.okf-path", style: {
-            "line-color": GRAPH_COLORS.selectLight,
-            "target-arrow-color": GRAPH_COLORS.selectLight,
+            "line-color": GRAPH_COLORS.light.select,
+            "target-arrow-color": GRAPH_COLORS.light.select,
             "width": 4.5,
             "opacity": 1,
             "line-style": "solid",
@@ -1048,8 +1077,8 @@
         {
           selector: "edge:selected",
           style: {
-            "line-color": GRAPH_COLORS.selectLight,
-            "target-arrow-color": GRAPH_COLORS.selectLight,
+            "line-color": GRAPH_COLORS.light.select,
+            "target-arrow-color": GRAPH_COLORS.light.select,
             "line-style": "solid",
             "width": 5,
             "opacity": 1,
@@ -1059,7 +1088,7 @@
         // heavy double-black ring (reviewer blocker 1). Still a non-colour-only
         // SHAPE/halo cue; cross-group bridge edges stay dashed.
         { selector: "node.okf-bridge", style: {
-            "underlay-color": GRAPH_COLORS.selectLight,
+            "underlay-color": GRAPH_COLORS.light.select,
             "underlay-opacity": 0.16,
             "underlay-padding": 6,
             "border-width": 2,
@@ -1067,11 +1096,11 @@
         { selector: "edge.okf-bridge-edge", style: { "line-style": "dashed" } },
         // Focus root: strong selection halo so the focused node is unmistakable.
         { selector: "node.okf-focus-root", style: {
-            "underlay-color": GRAPH_COLORS.selectLight,
+            "underlay-color": GRAPH_COLORS.light.select,
             "underlay-opacity": 0.38,
             "underlay-padding": 14,
             "border-width": 4,
-            "border-color": GRAPH_COLORS.selectLight,
+            "border-color": GRAPH_COLORS.light.select,
             "z-index": 30,
         } },
         // Non-neighbour dim during focus is stronger (~12%); reviewer asked ≤30%.
@@ -1083,7 +1112,7 @@
         // halo is theme-aware and distinct from auto-generated node fills.
         { selector: ".okf-presence-halo", style: {
             "border-width": 4,
-            "border-color": GRAPH_COLORS.selectLight,
+            "border-color": GRAPH_COLORS.light.select,
             "border-opacity": 0.9,
             "z-index": 20,
           } },
@@ -1102,41 +1131,33 @@
     try { cy.maxZoom(MAX_ZOOM); cy.minZoom(0.06); } catch (e) {}
     // Bridge/focus glow + bridge border mirror the theme select colour.
     function syncBridgeColour() {
-      var dark = (document.documentElement.getAttribute("data-theme") === "dark");
-      var sel = dark ? GRAPH_COLORS.selectDark : GRAPH_COLORS.selectLight;
-      var nodeBorder = dark ? GRAPH_COLORS.nodeTextDark : GRAPH_COLORS.nodeBorderLight;
-      cy.style().selector("node.okf-bridge").style("underlay-color", sel).update();
-      cy.style().selector("node.okf-bridge").style("border-color", nodeBorder).update();
-      cy.style().selector("node.okf-focus-root").style("underlay-color", sel).update();
-      cy.style().selector("node.okf-focus-root").style("border-color", sel).update();
+      var pal = graphPalette();
+      cy.style().selector("node.okf-bridge").style("underlay-color", pal.select).update();
+      cy.style().selector("node.okf-bridge").style("border-color", pal.bridgeBorder).update();
+      cy.style().selector("node.okf-focus-root").style("underlay-color", pal.select).update();
+      cy.style().selector("node.okf-focus-root").style("border-color", pal.select).update();
     }
 
-    // Dark mode tweaks the label colour.
+    // The theme tweaks the label colour.
     // P2-72: edge label text-background was hardcoded #ffffff (failed in
     //   dark mode). P3-11: also re-sync on prefers-color-scheme change so
     //   users with no explicit theme follow OS colour scheme toggles.
     // P2-5 (iter-2): all literals now read from the GRAPH_COLORS constants
-    //   block (mirrors wiki.css :root tokens). Selection border + edge
-    //   selection line/arrow are also re-synced here so a theme toggle
-    //   updates them to the dark --okf-select value.
+    //   block (mirrors wiki.css theme tokens). Selection border + edge
+    //   selection line/arrow are also re-synced here so a theme change
+    //   updates them to the active theme's --okf-select value.
     function syncLabelColour() {
-      var dark = (document.documentElement.getAttribute("data-theme") === "dark");
-      var nodeText = dark ? GRAPH_COLORS.nodeTextDark : GRAPH_COLORS.nodeTextLight;
-      var nodeBorder = dark ? GRAPH_COLORS.nodeBorderDark : GRAPH_COLORS.nodeBorderLight;
-      var edge = dark ? GRAPH_COLORS.edgeDark : GRAPH_COLORS.edgeLight;
-      var edgeLabelBg = dark ? GRAPH_COLORS.edgeLabelBgDark : GRAPH_COLORS.edgeLabelBgLight;
-      var edgeLabel = dark ? GRAPH_COLORS.edgeLabelDark : GRAPH_COLORS.edgeLabelLight;
-      var sel = dark ? GRAPH_COLORS.selectDark : GRAPH_COLORS.selectLight;
-      cy.style().selector("node").style("color", nodeText).update();
-      cy.style().selector("node").style("border-color", nodeBorder).update();
-      cy.style().selector("node").style("text-background-color", edgeLabelBg).update();
-      cy.style().selector("edge").style("line-color", edge).update();
-      cy.style().selector("edge").style("target-arrow-color", edge).update();
-      cy.style().selector("edge").style("text-background-color", edgeLabelBg).update();
-      cy.style().selector("edge").style("color", edgeLabel).update();
-      cy.style().selector("node:selected").style("border-color", sel).update();
-      cy.style().selector("edge:selected").style("line-color", sel).update();
-      cy.style().selector("edge:selected").style("target-arrow-color", sel).update();
+      var pal = graphPalette();
+      cy.style().selector("node").style("color", pal.nodeText).update();
+      cy.style().selector("node").style("border-color", pal.nodeBorder).update();
+      cy.style().selector("node").style("text-background-color", pal.edgeLabelBg).update();
+      cy.style().selector("edge").style("line-color", pal.edge).update();
+      cy.style().selector("edge").style("target-arrow-color", pal.edge).update();
+      cy.style().selector("edge").style("text-background-color", pal.edgeLabelBg).update();
+      cy.style().selector("edge").style("color", pal.edgeLabel).update();
+      cy.style().selector("node:selected").style("border-color", pal.select).update();
+      cy.style().selector("edge:selected").style("line-color", pal.select).update();
+      cy.style().selector("edge:selected").style("target-arrow-color", pal.select).update();
       syncBridgeColour();
     }
     syncLabelColour();
@@ -1146,10 +1167,10 @@
     if (window.matchMedia) {
       var colourSchemeMq = window.matchMedia("(prefers-color-scheme: dark)");
       var colourSchemeHandler = function (e) {
-        // Only follow OS pref when the user has not explicitly toggled.
+        // Only follow OS pref when the user has not explicitly chosen.
         try {
           var saved = localStorage.getItem(STORAGE_KEY);
-          if (saved === "light" || saved === "dark") return;
+          if (saved && THEMES.indexOf(saved) >= 0) return;
         } catch (err) {}
         applyTheme(e.matches ? "dark" : "light");
         syncLabelColour();

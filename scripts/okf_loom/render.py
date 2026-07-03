@@ -513,19 +513,36 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # Theme button (P2-74) + shared topbar nav fragment (P2-61)
 # ---------------------------------------------------------------------------
 
+# Valid data-theme values. wiki.css defines a token block per theme; the
+# button cycles them in this order. KEEP IN SYNC with the THEMES /
+# THEME_GLYPHS copies in wiki.js, graph.js and studio.js (each JS context
+# loads without the others).
+_THEMES: tuple[str, ...] = ("light", "dark", "pastel", "sepia", "midnight")
+_THEME_GLYPHS: dict[str, str] = {
+    "light": "\u2600",     # \u2600 sun
+    "dark": "\u263e",      # \u263e moon
+    "pastel": "\u273f",    # \u273f flower
+    "sepia": "\u2615",     # \u2615 hot beverage
+    "midnight": "\u2605",  # \u2605 star
+}
+
+
 def _theme_button_html(initial_theme: str) -> str:
     """Server-side initial theme button to avoid FOUC (P2-74).
 
     Emits the glyph that matches the initial ``data-theme`` so the first
     paint is consistent. ``wiki.js`` / ``graph.js`` update both the
     ``data-theme`` attribute and the button glyph atomically when the user
-    (or localStorage) overrides the initial theme.
+    (or localStorage) overrides the initial theme. The button cycles the
+    five themes, so it carries an aria-label naming the current theme
+    rather than a two-state aria-pressed.
     """
-    pressed = "true" if initial_theme == "dark" else "false"
-    glyph = "\u2600" if initial_theme == "dark" else "\u263e"  # sun / moon
+    theme = initial_theme if initial_theme in _THEMES else "light"
+    glyph = _THEME_GLYPHS[theme]
     return (
-        '<button id="okf-theme" type="button" aria-label="Toggle dark mode" '
-        f'title="Toggle dark mode" aria-pressed="{pressed}">{glyph}</button>'
+        '<button id="okf-theme" type="button" '
+        f'aria-label="Change colour theme (current: {theme})" '
+        f'title="Theme: {theme} \u2014 click to cycle">{glyph}</button>'
     )
 
 
@@ -669,7 +686,7 @@ def render_single_file(
     js = load_static("graph.js", bundle) + "\n" + load_static("renderers.js", bundle)
 
     initial_theme = "light"
-    if config.get("theme") in ("light", "dark"):
+    if config.get("theme") in _THEMES:
         initial_theme = config["theme"]
     initial_layout = config.get("default_layout") or "cose"
     cdn_scripts = _CDN_SCRIPTS if config.get("cdn", True) else (
@@ -1229,7 +1246,7 @@ def _render_concept_page(
     )
 
     theme_attr = ""
-    if initial_theme in ("light", "dark"):
+    if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
@@ -1843,7 +1860,7 @@ def _render_index_page(
 
     theme_attr = ""
     initial_theme = config.get("theme") or "light"
-    if initial_theme in ("light", "dark"):
+    if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
 
     # P1-10: emit data-okf-enhance on index pages too so wiki.js detects
@@ -1958,7 +1975,7 @@ def _render_search_page(
 
     theme_attr = ""
     initial_theme = config.get("theme") or "light"
-    if initial_theme in ("light", "dark"):
+    if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
 
     # P1-10: emit data-okf-enhance on the search page too so wiki.js
@@ -2040,7 +2057,7 @@ def _render_graph_page(
     back_link = "/" if mode in ("serve", "spa") else "index.html"
     initial_theme = config.get("theme") or "light"
     initial_layout = config.get("default_layout") or "cose"
-    theme_attr = f' data-theme="{initial_theme}"' if initial_theme in ("light", "dark") else ""
+    theme_attr = f' data-theme="{initial_theme}"' if initial_theme in _THEMES else ""
 
     cdn_scripts = _CDN_SCRIPTS if config.get("cdn", True) else (
         "<!-- CDN scripts omitted (config.cdn=false). -->"
