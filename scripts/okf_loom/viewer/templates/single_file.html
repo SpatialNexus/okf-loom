@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!--
+  OKF single-file viewer template.
+
+  Placeholder convention (str.replace, NOT string.Template: concept bodies
+  contain literal `$`):
+      __BUNDLE_NAME__    → JSON-encoded string (display name)
+      __BUNDLE_NAME_DISPLAY__ → HTML-escaped display name for the topbar
+      __BUNDLE_DATA__    → JSON-encoded object: {name, nodes, edges, bodies,
+                          types, palette, backlinks, external}
+      /*__VIEWER_CSS__*/ → wiki.css + graph.css contents (inlined)
+      /*__VIEWER_JS__*/  → graph.js (the full viewer logic, inlined)
+      __INITIAL_THEME__  → "light" | "dark" (initial theme, may be overridden
+                          by localStorage in the browser)
+      __INITIAL_LAYOUT__ → "cose" | "concentric" | ...
+
+  CDN scripts are emitted only when config["cdn"] is True.
+-->
+<html lang="en" data-theme="__INITIAL_THEME__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'none'; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'">
+<title>OKF Viewer</title>
+__CDN_SCRIPTS__
+<style>
+/*__VIEWER_CSS__*/
+</style>
+</head>
+<body class="okf-viewer okf-viewer--singlefile">
+<a href="#okf-main" class="okf-skip-link">Skip to content</a>
+<header class="okf-topbar">
+  <div class="okf-topbar__brand">
+    <strong id="bundle-name">__BUNDLE_NAME_DISPLAY__</strong>
+    <span class="okf-muted">OKF bundle</span>
+  </div>
+  <div class="okf-topbar__controls">
+    <input id="okf-search" type="search" placeholder="Search title / id / tag" autocomplete="off" aria-label="Search concepts">
+    <select id="okf-filter-type" aria-label="Filter by type">
+      <option value="">All types</option>
+    </select>
+    <select id="okf-layout" aria-label="Graph layout">
+      <option value="cose">cose (force)</option>
+      <option value="concentric">concentric</option>
+      <option value="breadthfirst">breadth-first</option>
+      <option value="circle">circle</option>
+      <option value="grid">grid</option>
+    </select>
+    <button id="okf-reset" type="button">Reset view</button>
+    __INITIAL_THEME_BUTTON__
+  </div>
+</header>
+
+<main id="okf-main" class="okf-layout">
+  <!-- P2-2 (iter-1): top-level heading for document outline parity with
+       graph_page.html. Visually hidden; the detail panel's selected-node
+       title is an <h2> below. -->
+  <h1 class="sr-only">__BUNDLE_NAME_DISPLAY__ graph view</h1>
+
+  <section id="okf-graph" class="okf-graph" aria-label="Concept graph">
+    <!-- P1-4 / P2-2 (iter-1): keyboard-accessible node index (same overlay
+         as graph_page.html). Populated by graph.js buildNodeIndex().
+         P2-4 (iter-2): defaults to COLLAPSED on all screen sizes (matches
+         graph_page.html; prevents the overlay crowding the canvas). -->
+    <details class="okf-node-index">
+      <summary>All concepts <span class="okf-node-index__count" id="okf-node-index-count"></span></summary>
+      <p class="okf-node-index__hint okf-muted">Click or press Enter to focus a concept.</p>
+      <div class="okf-node-index__list" id="okf-node-index-list"></div>
+    </details>
+  </section>
+
+  <!-- No aria-live here: graph.js mounts its own role="status" region
+       (.okf-signal__status) inside this pane, and a live region nested inside
+       another double-announces. The inner status region is the single owner. -->
+  <aside id="okf-detail" class="okf-detail">
+    <div id="detail-empty" class="okf-muted okf-detail__empty">Select a node to see its details.</div>
+    <article id="detail-content" hidden>
+      <header class="okf-detail__header">
+        <span class="okf-type-chip" id="detail-type"></span>
+        <h2 id="detail-title"></h2>
+        <div class="okf-muted" id="detail-id"></div>
+      </header>
+      <dl class="okf-frontmatter">
+        <dt>Description</dt><dd id="detail-description"></dd>
+        <dt>Resource</dt><dd id="detail-resource"></dd>
+        <dt>Tags</dt><dd id="detail-tags"></dd>
+      </dl>
+      <!-- P1-3 (iter-1): §7 governed keys, same container as graph_page.html. -->
+      <div class="okf-detail__governed" id="detail-governed" hidden></div>
+      <hr>
+      <div id="detail-body" class="okf-prose"></div>
+      <section id="detail-outgoing" hidden>
+        <h2>Links to</h2>
+        <ul id="outgoing-list" class="okf-linklist"></ul>
+      </section>
+      <section id="detail-backlinks" hidden>
+        <h2>Cited by</h2>
+        <ul id="backlinks-list" class="okf-linklist"></ul>
+      </section>
+    </article>
+  </aside>
+</main>
+
+<script>
+window.BUNDLE_NAME = __BUNDLE_NAME__;
+window.BUNDLE = __BUNDLE_DATA__;
+window.OKF_LOOM_INITIAL_LAYOUT = "__INITIAL_LAYOUT__";
+window.OKF_LOOM_INITIAL_THEME = "__INITIAL_THEME__";
+</script>
+<script>
+/*__VIEWER_JS__*/
+</script>
+</body>
+</html>

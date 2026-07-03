@@ -1,0 +1,37 @@
+# OKF hard rules and gotchas
+
+## Hard rules
+
+1. OKF v0.1 only requires `type` in concept frontmatter.
+2. Preserve unknown frontmatter keys round-trip.
+3. Consumers tolerate broken links; authoring mutators fail closed unless a
+   forward reference is explicitly allowed.
+4. Absolute bundle-relative and relative Markdown links are both valid. Prefer
+   absolute bundle-relative links when authoring.
+5. `index.md` and `log.md` are reserved filenames, not concept documents.
+6. Only the bundle-root `index.md` may carry frontmatter.
+7. Auto-update must not destroy hand-curated content; index regeneration is
+   marker-safe and log updates are append-only.
+8. All okf-loom writes go through tmp + rename atomic writes.
+9. Use `scripts/okf-loom`; do not assume package installation.
+10. Never commit `<bundle>/.okf-loom/session/` — it holds ephemeral live-feed
+    state and the per-session `.token` secret. okf-loom handles this
+    automatically: the session and derived-index directories are written
+    self-ignoring (a `.gitignore` containing `*` inside each), so they stay
+    invisible to git in any repository. Don't delete those files.
+11. `serve` binds 127.0.0.1:8787 by default and auto-opens a browser
+    unless `--no-open`. Going public is an explicit choice:
+    `--tunnel` (cloudflared quick tunnel, read-open to link holders) or
+    `--public --public-ack` (raw network bind).
+
+## Common traps
+
+- YAML parses unquoted dates/version-like values. Quote timestamps and versions.
+- `tags` should be a YAML list, not a comma-separated scalar.
+- Markdown links inside code blocks are not graph edges.
+- Do not use `type` as a source-system or per-dataset taxonomy. Use tags and
+  custom keys for cross-cutting classifications.
+- Do not add a database or sidecar schema for what OKF already represents in
+  plain Markdown.
+- Do not reintroduce package-publishing as the primary distribution story; this
+  git repo skill layout is the artifact.

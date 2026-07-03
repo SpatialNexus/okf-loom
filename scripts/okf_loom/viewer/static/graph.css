@@ -1,0 +1,615 @@
+/* OKF viewer - graph view styles.
+ *
+ * Loaded in addition to wiki.css by the single-file viewer template (where
+ * both are inlined) and the full-page graph view template. The shared
+ * wiki.css already covers .okf-graph, .okf-detail, the type chips etc;
+ * this file holds only the graph-specific overrides.
+ */
+
+#okf-graph {
+  background: var(--okf-bg-elev);
+  /* Phase 4: the hover tooltip + zoom cluster are absolutely positioned
+   * children of the canvas container. */
+  position: relative;
+}
+
+/* Legend overlay showing type → colour */
+.okf-graph-legend {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  box-shadow: var(--okf-shadow);
+}
+.okf-graph-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+.okf-graph-legend__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--okf-border-strong);
+}
+
+/* A small hint overlay while Cytoscape.js is still loading from CDN. */
+.okf-graph-loading {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: var(--okf-fg-muted);
+}
+.okf-graph-loading--error { color: #dc2626; border-color: #dc2626; }
+
+/* ---- Keyboard-accessible node index (P1-4 / P2-2 iter-1, P2-4 iter-2) ---- *
+ * A collapsible <details> overlay on the canvas. Each entry is a real
+ * <button> (Tab + Enter/Space) so keyboard users get full graph access
+ * (WCAG 2.1.1) without a pointer. Mirrors the concept-page local-graph
+ * pill pattern. Sits top-right so it doesn't collide with the bottom-left
+ * legend; max-height keeps it from overtaking the canvas.
+ *
+ * P2-4 (iter-2): the <details> defaults to COLLAPSED on all screen sizes
+ * (the `open` attribute was removed from both graph templates). The
+ * <summary> stays keyboard-reachable so users expand it with one click or
+ * Enter/Space. A prior comment here claimed the index auto-collapsed on
+ * small screens; CSS cannot remove the `open` attribute, so that claim was
+ * never true. Collapsing by default is simpler and works on every
+ * viewport. */
+.okf-node-index {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  width: min(240px, 60vw);
+  max-height: calc(100% - 20px);
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  box-shadow: var(--okf-shadow);
+  font-size: var(--okf-text-sm);
+}
+.okf-node-index > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: var(--okf-space-2) var(--okf-space-3);
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--okf-space-2);
+}
+.okf-node-index > summary::-webkit-details-marker { display: none; }
+.okf-node-index__count { color: var(--okf-fg-muted); font-weight: 400; font-size: var(--okf-text-xs); }
+.okf-node-index__hint { margin: 0 var(--okf-space-3) var(--okf-space-1); }
+.okf-node-index__list {
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  padding: 0 var(--okf-space-2) var(--okf-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.okf-node-index__item {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  padding: var(--okf-space-1) var(--okf-space-2);
+  border-radius: var(--okf-radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--okf-fg);
+  font: inherit;
+  font-size: var(--okf-text-sm);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.okf-node-index__item:hover {
+  background: var(--okf-bg-inset);
+  border-color: var(--okf-border);
+}
+.okf-node-index__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--okf-radius-pill);
+  flex-shrink: 0;
+  border: 1px solid var(--okf-border-strong);
+}
+.okf-node-index__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+/* ---- iter2 CRI2-006 / §13.7: LOD "Show all" pill ----------------------- *
+ * A single accessible <button> surfaced when the bundle exceeded the LOD
+ * threshold and the hidden set is non-empty. Sits top-centre so it doesn't
+ * collide with the bottom-left legend or the top-right node index. Caps at
+ * viewport width so the count copy never overflows on mobile. */
+.okf-graph-lod-pill {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: calc(100% - 20px);
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-pill);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg);
+  cursor: pointer;
+  box-shadow: var(--okf-shadow);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.okf-graph-lod-pill:hover { border-color: var(--okf-accent); color: var(--okf-accent); }
+.okf-graph-lod-pill:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The pill itself has no animation; this block exists so a future motion
+   * enhancement is gated from the start. */
+  .okf-graph-lod-pill { transition: none !important; }
+}
+
+.okf-graph-legend__title {
+  font-weight: 600;
+  color: var(--okf-fg-muted);
+  font-size: var(--okf-text-xs);
+  padding-bottom: 2px;
+}
+.okf-graph-legend__title:not(:first-child) { margin-top: 6px; }
+/* Edge-key swatch: a coloured line segment (with dash variants matching the
+ * canvas relation dashes) so the relation legend maps 1:1 to edge styles. */
+.okf-graph-legend__line {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  flex-shrink: 0;
+  border-top: 2.5px solid var(--okf-border-strong);
+}
+.okf-graph-legend__line.okf-legend-okf-reld-1 { border-top-style: dashed; }
+.okf-graph-legend__line.okf-legend-okf-reld-2 { border-top-style: dotted; }
+.okf-graph-legend__line.okf-legend-okf-reld-3 { border-top-style: dashed; }
+
+/* ---- Signal controls panel -------------------------------------------- *
+ * A collapsible <details> rail built by graph.js (so it works identically
+ * in the full-page graph AND the single-file viewer, with no inline JS).
+ * Sits top-LEFT so it never collides with the top-right node index, the
+ * top-centre LOD pill, or the bottom-left legend on desktop. Uses the same
+ * elevated-surface tokens as the other overlays. */
+/* User feedback: the controls are a compact BAR pinned at the
+ * top of the right-hand detail pane — lens chips + status always visible,
+ * everything expert-grade inside an Advanced disclosure. The node's
+ * rendered page flows underneath and scrolls; the bar stays sticky. The
+ * negative margins stretch it across the pane's padding so it reads as
+ * the pane's header strip. */
+/* The detail pane drops its top padding on graph pages so the sticky bar
+ * pins flush against the pane's top edge (no see-through strip); the bar
+ * supplies its own spacing below. */
+.okf-layout > .okf-detail { padding-top: 0; }
+.okf-signal--bar {
+  position: sticky;
+  top: 0;
+  z-index: 21;
+  margin: 0 calc(-1 * var(--okf-space-6)) var(--okf-space-4);
+  padding: var(--okf-space-3) var(--okf-space-6) var(--okf-space-2);
+  background: var(--okf-bg-elev);
+  border-bottom: 1px solid var(--okf-border);
+  box-shadow: var(--okf-shadow);
+  font-size: var(--okf-text-sm);
+}
+.okf-signal__lenses {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  flex-wrap: wrap;
+}
+.okf-signal__lenses .okf-signal__seg { flex: 1 1 auto; }
+.okf-signal__advanced { margin-top: var(--okf-space-2); }
+.okf-signal__advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--okf-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--okf-fg-muted);
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--okf-space-1);
+}
+.okf-signal__advanced > summary::-webkit-details-marker { display: none; }
+.okf-signal__advanced > summary::after {
+  content: "▸";
+  color: var(--okf-fg-muted);
+  transition: transform 0.15s ease;
+}
+.okf-signal__advanced[open] > summary::after { transform: rotate(90deg); }
+.okf-signal__advanced > summary:hover { color: var(--okf-accent); }
+.okf-signal__body {
+  max-height: min(52vh, 440px);
+  overflow-y: auto;
+  padding: var(--okf-space-2) 0 var(--okf-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--okf-space-3);
+}
+.okf-signal__hint { margin: 0 0 var(--okf-space-1); }
+.okf-signal__group {
+  border: 0;
+  border-top: 1px solid var(--okf-border);
+  margin: 0;
+  padding: var(--okf-space-2) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--okf-space-2);
+  min-width: 0;
+}
+.okf-signal__group > legend {
+  padding: 0;
+  font-weight: 600;
+  font-size: var(--okf-text-xs);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--okf-fg-muted);
+}
+/* Preset segmented radio group: real radios (keyboard/arrow navigable),
+ * visually presented as pills. */
+/* Review feedback: balanced 3-col grid so the 6 presets form an even 2×3
+ * block instead of an orphaned "Focus" row (reviewer #10). */
+.okf-signal__seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--okf-space-1); }
+.okf-signal__seg-item { position: relative; display: flex; }
+.okf-signal__seg-item span { width: 100%; text-align: center; }
+.okf-signal__seg-item input {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  margin: 0;
+}
+.okf-signal__seg-item span {
+  display: inline-block;
+  padding: 3px var(--okf-space-2);
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-pill);
+  font-size: var(--okf-text-xs);
+  cursor: pointer;
+  user-select: none;
+}
+.okf-signal__seg-item span:hover { border-color: var(--okf-accent); color: var(--okf-accent); }
+.okf-signal__seg-item input:checked + span {
+  background: var(--okf-accent);
+  color: var(--okf-accent-on);
+  border-color: var(--okf-accent);
+}
+.okf-signal__seg-item input:focus-visible + span {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 2px;
+}
+.okf-signal__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--okf-text-sm);
+}
+.okf-signal__row--check {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--okf-space-2);
+  cursor: pointer;
+}
+.okf-signal__row-label { color: var(--okf-fg); }
+.okf-signal__row-value { font-weight: 600; color: var(--okf-accent); }
+.okf-signal__row-hint { margin: 2px 0 0; }
+.okf-signal__row select,
+.okf-signal__row input[type="range"] { width: 100%; }
+.okf-signal input[type="range"] { accent-color: var(--okf-accent); }
+.okf-signal input[type="checkbox"],
+.okf-signal input[type="radio"] { accent-color: var(--okf-accent); }
+.okf-signal__row--check input { flex: 0 0 auto; }
+.okf-signal__btn {
+  align-self: flex-start;
+  padding: 3px var(--okf-space-3);
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-inset);
+  color: var(--okf-fg);
+  font: inherit;
+  font-size: var(--okf-text-sm);
+  cursor: pointer;
+}
+.okf-signal__btn:hover:not(:disabled) { border-color: var(--okf-accent); color: var(--okf-accent); }
+.okf-signal__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* The active lens's question, always visible under the chips. */
+.okf-signal__question {
+  margin: var(--okf-space-1) 0 0;
+  font-size: var(--okf-text-sm);
+  font-weight: 600;
+  color: var(--okf-fg);
+}
+
+/* Lens summary — the ranked answers panel (renders in
+ * #detail-empty whenever no node is selected). */
+.okf-lens-summary { text-align: left !important; margin-top: var(--okf-space-2) !important; }
+.okf-lens-summary__title {
+  margin: 0 0 4px;
+  font-size: var(--okf-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--okf-fg-muted);
+}
+.okf-lens-summary__verdict {
+  margin: 0 0 var(--okf-space-3);
+  font-size: var(--okf-text-base);
+  color: var(--okf-fg);
+  line-height: 1.5;
+}
+.okf-lens-summary__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--okf-space-2);
+  width: 100%;
+  padding: 6px 10px;
+  margin: 0 0 4px;
+  background: var(--okf-bg-inset);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg);
+  text-align: left;
+  overflow: hidden;
+}
+.okf-lens-summary__row:hover { border-color: var(--okf-accent); }
+.okf-lens-summary__bar {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--okf-accent);
+  opacity: 0.16;
+  pointer-events: none;
+}
+.okf-lens-summary__label {
+  position: relative;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okf-lens-summary__note {
+  position: relative;
+  color: var(--okf-fg-muted);
+  font-size: var(--okf-text-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.okf-lens-summary__hint { margin-top: var(--okf-space-3); font-size: var(--okf-text-xs); }
+
+.okf-signal__status {
+  margin: var(--okf-space-1) 0 0;
+  font-size: var(--okf-text-xs);
+  color: var(--okf-fg-muted);
+  min-height: 1.2em;
+}
+/* Lens chips flow in one row on wide panes, wrapping on narrow ones. */
+.okf-signal__lenses .okf-signal__seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--okf-space-1);
+}
+.okf-signal__lenses .okf-signal__seg-item { flex: 0 0 auto; }
+.okf-signal__edgekey { margin: 0; font-size: var(--okf-text-xs); }
+.okf-signal :focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 2px;
+}
+/* Empty-graph (0 nodes): controls are disabled and visibly muted. */
+.okf-signal--disabled .okf-signal__body { opacity: 0.55; }
+.okf-signal--disabled .okf-signal__status { opacity: 1; }
+
+/* ---- Detail panel: computed relationship explanation ------------------- */
+.okf-detail__signals { margin: var(--okf-space-3) 0 0; }
+.okf-detail__signals-head {
+  margin: 0 0 var(--okf-space-1);
+  font-size: var(--okf-text-sm);
+  font-weight: 600;
+}
+.okf-detail__signals-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--okf-space-3);
+  margin: 0;
+  font-size: var(--okf-text-sm);
+}
+.okf-detail__signals-list dt { color: var(--okf-fg-muted); }
+.okf-detail__signals-list dd { margin: 0; }
+
+/* ---- Phase 4: hover tooltip card --------------------------------------- */
+.okf-graph-tip {
+  position: absolute;
+  z-index: 30;
+  max-width: 280px;
+  padding: 10px 12px;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  font-size: var(--okf-text-sm);
+  line-height: 1.4;
+}
+.okf-graph-tip__type {
+  font-size: var(--okf-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.okf-graph-tip__title { font-weight: 700; margin-top: 2px; }
+.okf-graph-tip__desc { color: var(--okf-fg-muted); margin-top: 4px; }
+.okf-graph-tip__meta {
+  color: var(--okf-fg-muted);
+  font-size: var(--okf-text-xs);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Phase 4: zoom cluster (bottom-right) ------------------------------ */
+.okf-graph-zoom {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.okf-graph-zoom button {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-sm);
+  color: var(--okf-fg);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--okf-shadow);
+}
+.okf-graph-zoom button:hover {
+  border-color: var(--okf-accent);
+  color: var(--okf-accent);
+}
+
+/* ---- Phase 5: live "graph updated" chip --------------------------------- */
+.okf-graph-updated {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  padding: 6px 12px;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-accent);
+  border-radius: var(--okf-radius-pill);
+  box-shadow: var(--okf-shadow);
+  font-size: var(--okf-text-sm);
+}
+.okf-graph-updated button {
+  background: none;
+  border: none;
+  color: var(--okf-accent);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: var(--okf-text-sm);
+  padding: 0 2px;
+}
+.okf-graph-updated button:hover { text-decoration: underline; }
+
+/* ---- Phase 5: first-visit micro-tour ------------------------------------ */
+.okf-graph-tour {
+  position: absolute;
+  bottom: 20px;
+  z-index: 40;
+  width: 300px;
+  padding: 14px 16px;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-accent);
+  border-radius: var(--okf-radius);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  font-size: var(--okf-text-sm);
+  line-height: 1.5;
+}
+.okf-graph-tour[data-at="left"] { left: 20px; }
+.okf-graph-tour[data-at="center"] { left: 50%; transform: translateX(-50%); }
+.okf-graph-tour[data-at="right"] { right: 20px; }
+.okf-graph-tour strong { display: block; margin-bottom: 4px; font-size: var(--okf-text-base); }
+.okf-graph-tour p { margin: 0 0 10px; color: var(--okf-fg-muted); }
+.okf-graph-tour__nav { display: flex; align-items: center; justify-content: space-between; }
+.okf-graph-tour__dots { color: var(--okf-fg-muted); font-size: var(--okf-text-xs); }
+.okf-graph-tour__nav button {
+  background: var(--okf-accent);
+  color: var(--okf-accent-on);
+  border: none;
+  border-radius: var(--okf-radius-sm);
+  padding: 5px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.okf-graph-tour > button:first-child {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--okf-fg-muted);
+  cursor: pointer;
+  font-size: var(--okf-text-sm);
+  padding: 2px;
+}
+
+/* ---- Phase 4: legend rows as type filter chips -------------------------- */
+.okf-graph-legend__item--chip { cursor: pointer; border-radius: var(--okf-radius-sm); padding: 1px 4px; }
+.okf-graph-legend__item--chip:hover { background: var(--okf-bg-inset); }
+.okf-graph-legend__item--chip:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+.okf-graph-legend__item--off { opacity: 0.45; }
+.okf-graph-legend__item--off span:last-child { text-decoration: line-through; }
+
+@media (max-width: 900px) {
+  .okf-graph-legend { display: none; }
+  .okf-node-index { width: min(220px, 70vw); top: 56px; }
+  /* Mobile-open feedback loop: stack the panes in normal
+   * flow so the page scrolls, give the graph a tall fixed viewport (76vh), and
+   * let the detail panel flow at natural height below it. The open drawer is
+   * capped at 36vh, so the graph keeps a ≈39vh readable strip uncovered — well
+   * above the ~35vh the reviewer requires — instead of a thumbnail. */
+  .okf-layout { display: block; min-height: auto; }
+  .okf-layout > .okf-graph { flex: 0 0 auto; height: 76vh; min-height: 360px; }
+  .okf-layout > .okf-detail { flex: 0 0 auto; }
+  /* The signal bar is in-flow at the top of the detail pane (which
+   * stacks below the canvas on mobile) — no overlay geometry needed; just
+   * relax the sticky inset to the pane's mobile padding. */
+  .okf-signal--bar { top: 0; margin: 0 0 var(--okf-space-3); padding: var(--okf-space-2) var(--okf-space-3); }
+  .okf-signal__body { max-height: 29vh; -webkit-overflow-scrolling: touch; }
+  /* Stack the overlays so the collapsed Signal summary, node index, and LOD
+   * pill never sit on top of each other. */
+  .okf-graph-lod-pill { font-size: var(--okf-text-xs); padding: 4px 10px; top: 102px; }
+  /* Topbar controls wrap instead of truncating ("Force n…") (reviewer #10).
+   * Scoped to graph contexts since graph.css only loads on the graph page and
+   * the single-file viewer. */
+  .okf-topbar__controls { flex-wrap: wrap; row-gap: var(--okf-space-2); }
+  .okf-topbar__controls #okf-search { flex: 1 1 100%; }
+  .okf-topbar__controls select { flex: 1 1 auto; min-width: 8.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .okf-signal__advanced > summary::after { transition: none !important; }
+}

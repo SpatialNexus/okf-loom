@@ -1,0 +1,68 @@
+"""Browser-free proof that ``build_graph_data`` produces render-ready JSON.
+
+The full render proof lives in ``tests/test_viewer_browser.py`` and is gated on
+the optional browser-proof dependencies + a Chromium binary, so it is SKIPPED in the
+default ``pytest`` run. That left a gap: a regression that dropped graph nodes,
+left labels blank, or skipped colour assignment could ship green because the
+only test that would catch it never ran without the extra.
+
+This module closes that gap with a BROWSER-FREE data-layer proof that runs in
+every suite. It asserts the invariants the Cytoscape view needs to render
+anything meaningful:
+
+  * exactly one node per concept (no drops, no duplicates);
+  * every node carries a non-empty label and a colour; and
+  * the set of node ids equals the set of concept ids.
+
+These run on the always-shipped ``samples/demo_bundle`` so they never skip.
+"""
+from __future__ import annotations
+
+from okf_loom.model import Bundle
+from okf_loom.paths import concept_id_to_str
+from okf_loom.render import build_graph_data
+
+DEMO = "samples/demo_bundle"
+
+
+def test_graph_data_node_count_equals_concept_count() -> None:
+    """``build_graph_data`` emits exactly one node per concept."""
+    b = Bundle.load(DEMO)
+    data = build_graph_data(b)
+    nodes = data["nodes"]
+    assert len(nodes) == len(b.concepts), (
+        f"node count {len(nodes)} != concept count {len(b.concepts)}; "
+        f"a concept was dropped or duplicated in the graph payload"
+    )
+
+
+def test_graph_data_every_node_has_label_and_color() -> None:
+    """Every node carries a non-empty label and a colour.
+
+    These are the two fields Cytoscape needs to render a visible, labelled
+    node (``background-color: data(color)`` and ``label: data(label)``); a
+    missing/blank value would render an invisible or unlabelled node.
+    """
+    b = Bundle.load(DEMO)
+    data = build_graph_data(b)
+    assert data["nodes"], "graph data has no nodes"
+    for node in data["nodes"]:
+        d = node["data"]
+        assert d.get("label"), (
+            f"node {d.get('id')!r} is missing/empty label (renders unlabelled)"
+        )
+        assert d.get("color"), (
+            f"node {d.get('id')!r} is missing/empty color (renders invisible)"
+        )
+
+
+def test_graph_data_node_ids_match_concept_ids() -> None:
+    """The set of node ids equals the set of concept ids (no drops/dupes)."""
+    b = Bundle.load(DEMO)
+    data = build_graph_data(b)
+    node_ids = {n["data"]["id"] for n in data["nodes"]}
+    concept_ids = {concept_id_to_str(c.id) for c in b.concepts.values()}
+    assert node_ids == concept_ids, (
+        f"node ids != concept ids: missing={sorted(concept_ids - node_ids)} "
+        f"extra={sorted(node_ids - concept_ids)}"
+    )

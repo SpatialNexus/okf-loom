@@ -1,0 +1,1300 @@
+/* OKF wiki viewer - shared stylesheet.
+ *
+ * Light + dark themes via CSS custom properties on :root and
+ * [data-theme="dark"]. Responsive: sidebar+main on wide screens, stacked
+ * on narrow. Used by both the live server and the built static site.
+ *
+ * Token system (P2-66):
+ *   --okf-space-1..7  spacing scale (4/8/12/16/24/32/48 px)
+ *   --okf-text-xs..xl type scale (0.75/0.875/1/1.0625/1.25/1.5 rem)
+ *   --okf-accent-on   contrast-safe foreground for the accent colour
+ *   --okf-radius-pill pill radius for chips
+ */
+
+/* ---- Theme tokens ------------------------------------------------------ */
+:root {
+  --okf-bg: #f8fafc;
+  --okf-bg-elev: #ffffff;
+  --okf-bg-inset: #f1f5f9;
+  --okf-fg: #0f172a;
+  --okf-fg-muted: #475569;            /* P2-58: was #64748b (4.33:1); now ~7:1 on bg-inset */
+  --okf-border: #e2e8f0;
+  --okf-border-strong: #cbd5e1;
+  /* P2-8 (iter-1): the UI accent is now a confident deep teal instead of
+   * the prior Tailwind blue-600 (#2563eb). A teal reads as
+   * curation/trust/provenance (the OKF value prop) and avoids the default
+   * "wiki/knowledge-tool → blue" reflex. Contrast ratios (WCAG 2.2):
+   *   --okf-accent #0c7373 on --okf-bg      (#f8fafc) ≈ 5.46:1 (AA)
+   *   --okf-accent #0c7373 on --okf-bg-elev (#ffffff) ≈ 5.65:1 (AA)
+   *   --okf-accent-on #ffffff on #0c7373              ≈ 5.65:1 (AA)
+   *   --okf-accent-bg #e0f0f0 (text #0c7373)          ≈ 4.81:1 (AA)
+   * The auto-generated type palette hues (hash of concept type) are
+   * unchanged and separate from this UI accent. */
+  --okf-accent: #0c7373;
+  --okf-accent-hover: #0a5e5e;
+  --okf-accent-on: #ffffff;           /* 5.65:1 on #0c7373 (AA) */
+  /* P1-11: opaque tinted teal background for accent chips/alias pills.
+   * Contrast vs the #0c7373 accent text ≈ 4.81:1 (AA). */
+  --okf-accent-bg: #e0f0f0;
+  /* P2-5 (iter-2): graph-canvas selection colour. The Cytoscape canvas
+   * can't read CSS vars directly, so graph.js mirrors this value in a
+   * GRAPH_COLORS constant block (keep in sync). We reuse the brand teal
+   * rather than introducing a third accent hue: a 3px border-width keeps
+   * selection clearly visible against the auto-generated type-hash node
+   * fills. Contrast ratios (WCAG 2.2):
+   *   --okf-select #0c7373 on --okf-bg-elev (#ffffff, canvas) ≈ 5.65:1 (AA) */
+  --okf-select: #0c7373;
+  --okf-code-bg: #f1f5f9;
+  --okf-code-fg: #0f172a;
+  --okf-pre-bg: #0f172a;
+  --okf-pre-fg: #e2e8f0;
+  --okf-broken: #b91c1c;              /* P2-73: AA on light bg-inset */
+  /* iter1 CRI-011: theme-aware state tokens (ok / warn / info / error),
+   * tinted toward the brand teal hue family rather than raw Tailwind
+   * emerald/amber/indigo. OKLCH keeps chroma moderate so the palette
+   * never reads as generic SaaS-collab colours. Each role ships a
+   * matching *-bg tint for surfaces (chips, toast fills, comment state).
+   * Approx. WCAG ratios vs --okf-bg-elev (#ffffff):
+   *   --okf-ok   oklch(0.52 0.10 165)  ≈ 4.7:1 (AA)
+   *   --okf-warn oklch(0.55 0.12 70)   ≈ 4.6:1 (AA)
+   *   --okf-info oklch(0.46 0.09 235)  ≈ 5.4:1 (AA)
+   *   --okf-error oklch(0.50 0.17 27)  ≈ 4.9:1 (AA) */
+  --okf-ok: oklch(0.52 0.10 165);
+  --okf-ok-bg: oklch(0.96 0.03 165);
+  --okf-warn: oklch(0.55 0.12 70);
+  --okf-warn-bg: oklch(0.96 0.04 70);
+  --okf-info: oklch(0.46 0.09 235);
+  --okf-info-bg: oklch(0.96 0.03 235);
+  --okf-error: oklch(0.50 0.17 27);
+  --okf-error-bg: oklch(0.96 0.03 27);
+  --okf-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  /* Radii */
+  --okf-radius: 8px;
+  --okf-radius-sm: 4px;
+  /* User feedback: the fully-rounded "oval pill" look is gone.
+   * Every chip-shaped element (tags, type chips, stats, entity chips,
+   * lens chips, badges, recent-rail items…) shares this crisp tag radius
+   * instead. The token keeps its historical name — it is referenced
+   * across wiki/studio/graph CSS — but now means "chip radius". Small
+   * square swatches/dots (≤10px) still render round because the radius
+   * exceeds half their size. */
+  --okf-radius-pill: 5px;
+  /* Spacing scale (P2-66) */
+  --okf-space-1: 4px;
+  --okf-space-2: 8px;
+  --okf-space-3: 12px;
+  --okf-space-4: 16px;
+  --okf-space-5: 24px;
+  --okf-space-6: 32px;
+  --okf-space-7: 48px;
+  /* Type scale (P2-60 / P2-66 / P2-21) - true 1.25 modular ratio on the
+   * heading end (base→md→lg→xl each *1.25). The smaller end (xs/sm) keeps
+   * the previous values so chip/caption sizes don't shift; the prior mid
+   * ratios (1.18 / 1.20) were inconsistent with the documented 1.25 intent
+   * and made H3 visually almost equal to body text. */
+  --okf-text-xs: 0.75rem;     /* 12px - chips, captions */
+  --okf-text-sm: 0.875rem;    /* 14px - secondary text */
+  --okf-text-base: 1rem;      /* 16px */
+  --okf-text-md: 1.25rem;     /* 20px - H3 (was 1.0625rem) */
+  --okf-text-lg: 1.5625rem;   /* 25px - H2 (was 1.25rem) */
+  --okf-text-xl: 1.9531rem;   /* 31.25px - H1 (was 1.5rem) */
+  /* Layout (UI overhaul phase 1) — a real reading measure. The previous
+   * 160ch/2880px "vast" experiment produced viewport-wide paragraphs;
+   * 76ch is the classic comfortable measure, and the page shell centers
+   * within --okf-page-maxw so ultra-wide monitors get margins, not
+   * mile-long lines. */
+  --okf-maxw: 1200px;          /* index/search shell */
+  --okf-prose-maxw: 76ch;      /* body text measure */
+  --okf-page-maxw: 1560px;     /* concept page shell (sidebar + article) */
+  --okf-topbar-h: 52px;
+  /* Display face for headings/hero: system serif stack. Body stays sans;
+   * the serif display gives the wiki its "atlas" identity without a
+   * webfont download. */
+  --okf-font-display: "Iowan Old Style", "Palatino Linotype", Palatino,
+    "Source Serif Pro", Georgia, "Noto Serif CJK SC", serif;
+}
+[data-theme="dark"] {
+  --okf-bg: #0b1220;
+  --okf-bg-elev: #111a2e;
+  --okf-bg-inset: #0d1626;
+  --okf-fg: #e2e8f0;
+  --okf-fg-muted: #94a3b8;
+  --okf-border: #1e293b;
+  --okf-border-strong: #334155;
+  /* P2-8 (iter-1): light teal accent for the dark theme (was blue-400
+   * #60a5fa). Contrast ratios (WCAG 2.2):
+   *   --okf-accent #3ec9c9 on --okf-bg     (#0b1220) ≈ 8.44:1 (AAA)
+   *   --okf-accent #3ec9c9 on --okf-bg-elev (#111a2e) ≈ 7.6:1 (AAA)
+   *   --okf-accent-on #0b1220 on #3ec9c9              ≈ 8.44:1 (AAA) */
+  --okf-accent: #3ec9c9;
+  --okf-accent-hover: #5fd4d4;
+  --okf-accent-on: #0b1220;           /* 8.44:1 on #3ec9c9 (AAA) */
+  /* P1-11: 18% teal overlay composites against the dark surfaces.
+   * Computed contrast vs the #3ec9c9 accent text on the composited tint:
+   *   on --okf-bg     (#0b1220) → ≈ 6.9:1
+   *   on --okf-bg-elev (#111a2e) → ≈ 6.3:1
+   * Both pass AA (4.5:1) comfortably. */
+  --okf-accent-bg: rgba(62, 201, 201, 0.18);
+  /* P2-5 (iter-2): graph-canvas selection colour (dark). Mirrors the light
+   * token; graph.js reads this via its GRAPH_COLORS block.
+   *   --okf-select #3ec9c9 on --okf-bg-elev (#111a2e, canvas) ≈ 7.6:1 (AAA) */
+  --okf-select: #3ec9c9;
+  --okf-code-bg: #0d1626;
+  --okf-code-fg: #e2e8f0;
+  --okf-pre-bg: #020617;
+  --okf-pre-fg: #e2e8f0;
+  --okf-broken: #f87171;              /* P2-73: AA on dark bg-inset */
+  /* iter1 CRI-011: dark-theme state tokens. Higher lightness for contrast
+   * on dark surfaces; bg tints are low-lightness overlays that composite
+   * against the dark elev/inset surfaces. Approx. WCAG ratios:
+   *   --okf-ok   oklch(0.74 0.12 165) on #111a2e ≈ 7.0:1 (AAA)
+   *   --okf-warn oklch(0.80 0.13 70)  on #111a2e ≈ 7.6:1 (AAA)
+   *   --okf-info oklch(0.74 0.10 235) on #111a2e ≈ 6.4:1 (AA)
+   *   --okf-error oklch(0.72 0.16 27) on #111a2e ≈ 6.0:1 (AA) */
+  --okf-ok: oklch(0.74 0.12 165);
+  --okf-ok-bg: oklch(0.28 0.05 165);
+  --okf-warn: oklch(0.80 0.13 70);
+  --okf-warn-bg: oklch(0.30 0.06 70);
+  --okf-info: oklch(0.74 0.10 235);
+  --okf-info-bg: oklch(0.28 0.05 235);
+  --okf-error: oklch(0.72 0.16 27);
+  --okf-error-bg: oklch(0.30 0.06 27);
+  --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- Reset / base ------------------------------------------------------ */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  /* iter3 CRI3-001: append CJK fallback families so a concept whose
+   * aliases/body contain Chinese/Japanese/Korean (e.g. the demo bundle's
+   * ``order事实表`` alias) renders real glyphs instead of tofu. Latin
+   * faces stay first so English text still resolves to the system font;
+   * the CJK faces only win for CJK codepoints the Latin fonts lack. The
+   * static-search tokenizer already splits CJK per-character
+   * (static-search.js), so the product knows CJK content exists — the
+   * rendered page must be able to display it. */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui,
+    "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--okf-fg);
+  background: var(--okf-bg);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ---- Accessibility utilities ------------------------------------------ */
+/* P2-63: screen-reader-only utility (WCAG 2.4.1). */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* P2-63: skip-to-content link. Invisible until focused. */
+.okf-skip-link {
+  position: absolute;
+  left: var(--okf-space-3);
+  top: -100px;
+  z-index: 100;
+  padding: var(--okf-space-2) var(--okf-space-4);
+  background: var(--okf-bg-elev);
+  color: var(--okf-accent);
+  border: 2px solid var(--okf-accent);
+  border-radius: var(--okf-radius-sm);
+  text-decoration: none;
+  font-weight: 600;
+  transition: top 0.12s ease;
+}
+.okf-skip-link:focus {
+  top: var(--okf-space-2);
+  outline: 3px solid var(--okf-accent);
+  outline-offset: 1px;
+}
+
+/* ---- Focus visibility (keyboard accessibility) ------------------------ *
+ * Critical: without explicit :focus-visible styles, styled buttons and
+ * links suppress the browser default focus ring, making keyboard
+ * navigation invisible. We add a visible ring tuned to the accent colour
+ * for keyboard users (:focus-visible) and suppress it for mouse clicks
+ * (:focus:not(:focus-visible)) per WCAG 2.1 SC 2.4.7 and SC 1.4.11.
+ */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 2px;
+  border-radius: var(--okf-radius-sm);
+}
+a:focus-visible { outline-offset: 1px; }
+summary:focus-visible { outline-offset: 1px; }
+.okf-type-chip:focus-visible { outline-offset: 2px; }
+a { color: var(--okf-accent); text-decoration: none; }
+a:hover { color: var(--okf-accent-hover); text-decoration: underline; }
+a.okf-internal { color: var(--okf-accent); }
+a.okf-external { color: var(--okf-accent); }
+a[data-okf-broken] { color: var(--okf-broken); text-decoration: line-through; }
+/* P1-12: prose links are underlined by default (WCAG 1.4.1 Level A —
+ * colour alone must not be the only way to distinguish a link from body
+ * text). The body's general ``a { text-decoration: none }`` above is kept
+ * for chrome (topbar, chips, controls) where the surrounding context
+ * makes the link role obvious. */
+.okf-prose a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  /* Slightly soften the underline so dense prose stays readable while
+   * still being clearly a link. */
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+.okf-prose a:hover { text-decoration-color: currentColor; }
+
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; font-weight: 600; }
+hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space-4) 0; }
+
+.okf-muted { color: var(--okf-fg-muted); font-size: var(--okf-text-sm); }
+
+/* ---- Chip base + variants (P2-67 / P3-3) ------------------------------ *
+ * Consolidates the active chip classes (.okf-type-chip, .okf-chip--accent,
+ * .okf-tag, .okf-alias-pill, .okf-entity-kind, .okf-rel-type) on a shared
+ * base. Each variant then only declares its colour treatment.
+ *
+ * P3-3: the base ``.okf-chip`` and the unused ``.okf-chip--muted`` were
+ * removed - render.py never emits them (grep-confirmed) and the previous
+ * shared-selector list meant their absence had no effect anyway. The
+ * ``.okf-chip--accent`` selector stays because the alias pill falls back
+ * to it (P1-11 contrast fix).
+ */
+.okf-type-chip,
+.okf-chip--accent,
+.okf-tag,
+.okf-alias-pill,
+.okf-entity-kind,
+.okf-rel-type {
+  display: inline-block;
+  padding: 2px var(--okf-space-2);
+  border-radius: var(--okf-radius-pill);
+  font-size: var(--okf-text-xs);
+  font-weight: 600;
+  line-height: 1.4;
+}
+/* Inset chips get a hairline border so the tag shape reads as a
+ * deliberate element rather than a soft blob. */
+.okf-tag,
+.okf-entity-kind {
+  background: var(--okf-bg-inset);
+  color: var(--okf-fg-muted);
+  border: 1px solid var(--okf-border);
+}
+.okf-chip--accent,
+.okf-alias-pill {
+  background: var(--okf-accent-bg);
+  color: var(--okf-accent);
+}
+/* Solid chips use the palette colour as background with a luminance-aware fg
+ * set inline (concept_page) or via JS (graph view) - see P0-4. */
+.okf-type-chip {
+  padding: 2px 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.okf-rel-type {
+  padding: 0 6px;
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-accent);
+  color: var(--okf-accent-on);       /* P0-3: contrast-safe per theme */
+  font-weight: 500;
+  margin-right: 3px;
+  font-size: var(--okf-text-xs);
+}
+
+/* ---- Topbar ------------------------------------------------------------ */
+.okf-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--okf-space-4);
+  padding: 0 var(--okf-space-5);
+  height: var(--okf-topbar-h);
+  background: var(--okf-bg-elev);
+  border-bottom: 1px solid var(--okf-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
+}
+.okf-topbar__brand { display: flex; align-items: baseline; gap: var(--okf-space-2); min-width: 0; }
+.okf-topbar__brand strong { font-size: var(--okf-text-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.okf-brand-link { color: inherit; }
+.okf-brand-link:hover { text-decoration: none; color: var(--okf-accent); }
+.okf-topbar__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  flex-wrap: nowrap;
+}
+.okf-topbar__controls input[type="search"],
+.okf-topbar__controls select,
+.okf-topbar__controls button,
+.okf-btn {
+  font: inherit;
+  font-size: var(--okf-text-sm);
+  padding: 6px 10px;
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-elev);
+  color: var(--okf-fg);
+}
+.okf-topbar__controls input[type="search"] { min-width: 200px; }
+.okf-topbar__controls button, .okf-btn {
+  cursor: pointer;
+  background: var(--okf-bg-inset);
+  transition: background 0.12s ease;
+}
+.okf-topbar__controls button:hover, .okf-btn:hover { background: var(--okf-border); }
+.okf-search-form { display: contents; }
+/* P2-65: static-build search notice. */
+.okf-search-note {
+  font-size: var(--okf-text-xs);
+  color: var(--okf-fg-muted);
+  padding: 2px var(--okf-space-2);
+  white-space: nowrap;
+}
+.okf-search-note a { color: var(--okf-accent); }
+
+/* ---- Two-pane layout (graph view, single-file) ------------------------ */
+.okf-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.okf-layout > .okf-graph {
+  flex: 1 1 60%;
+  background: var(--okf-bg-elev);
+  border-right: 1px solid var(--okf-border);
+  min-width: 0;
+  position: relative;
+}
+.okf-layout > .okf-detail {
+  flex: 0 0 40%;
+  overflow-y: auto;
+  padding: var(--okf-space-5) var(--okf-space-6);
+  background: var(--okf-bg-elev);
+}
+
+/* ---- Detail panel ------------------------------------------------------ */
+.okf-detail__empty { text-align: center; margin-top: 3rem; }
+.okf-detail__header { margin-bottom: var(--okf-space-3); }
+/* P2-2 (iter-1): detail-title is now an <h2>; a .sr-only <h1> sits above
+ * the layout so the graph view has a real top-level heading. */
+.okf-detail__header h2 { font-size: var(--okf-text-lg); margin: 6px 0 2px; }
+.okf-detail__open { margin-top: var(--okf-space-3); }
+/* P1-3 (iter-1): governed keys inside the graph detail panel share the
+ * concept-page treatment (smaller, denser). */
+.okf-detail__governed { margin: var(--okf-space-3) 0; }
+.okf-detail__governed .okf-governed--block { margin: var(--okf-space-2) 0; }
+
+/* okf-type-chip: base styles above. Background set inline per-type. */
+
+dl.okf-frontmatter {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  row-gap: 6px;
+  column-gap: 14px;
+  margin: 10px 0 14px;
+  font-size: var(--okf-text-sm);
+}
+dl.okf-frontmatter dt { color: var(--okf-fg-muted); font-weight: 500; }
+dl.okf-frontmatter dd { margin: 0; word-break: break-word; }
+
+/* ---- Governed keys (aliases, entities, provenance, citations) ---------- *
+ * P2-6 (iter-1): each section now has distinct treatment sized to its
+ * semantic weight (was a single flat inline run for all four). */
+.okf-governed { margin: var(--okf-space-1) 0; font-size: 0.82rem; }
+/* Structured sections (entities/provenance/citations/relations) get a
+ * little vertical breathing room so the page scans top-to-bottom instead
+ * of reading as one dense inline block. */
+.okf-governed--block { margin: var(--okf-space-3) 0; }
+.okf-governed-label {
+  color: var(--okf-fg-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--okf-text-xs);
+  display: block;
+  margin-bottom: var(--okf-space-1);
+}
+.okf-alias-pill { font-size: var(--okf-text-xs); margin: 0 var(--okf-space-1) var(--okf-space-1) 0; }
+.okf-aliases .okf-governed-label { display: inline; margin-right: var(--okf-space-1); }
+
+/* Entities (phase 2): pill chips in a wrapping row — the stacked <dl>
+ * spent a full line per entity. dt = pill (label + kind chip); non-empty
+ * dd (aliases) trails the pill as muted text; empty dds collapse. */
+.okf-entity-list {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--okf-space-1) var(--okf-space-2);
+}
+.okf-entity-list dt {
+  font-weight: 500;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  background: var(--okf-bg-inset);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-pill);
+  font-size: var(--okf-text-sm);
+}
+.okf-entity-list dd { margin: 0; }
+.okf-entity-list dd:empty { display: none; }
+.okf-entity { font-weight: 500; }
+.okf-entity-kind {
+  padding: 0 var(--okf-space-1);
+  border-radius: var(--okf-radius-sm);
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+.okf-entity-aliases { color: var(--okf-fg-muted); font-size: 0.78rem; }
+
+/* Provenance - stacked list (P2-6): source link / muted note / <time> */
+.okf-provenance-list { list-style: none; padding: 0; margin: 0; }
+.okf-provenance-item {
+  display: block;
+  margin: 0 0 var(--okf-space-1) 0;
+  padding: var(--okf-space-1) 0;
+  border-top: 1px solid var(--okf-border);
+}
+.okf-provenance-item:first-child { border-top: none; padding-top: 0; }
+.okf-provenance-item a,
+.okf-provenance-source {
+  display: block;
+  color: var(--okf-accent);
+  font-size: var(--okf-text-sm);
+  word-break: break-all;
+}
+.okf-provenance-note {
+  display: block;
+  color: var(--okf-fg-muted);
+  font-size: var(--okf-text-sm);
+  margin-top: 1px;
+}
+.okf-provenance-time {
+  display: block;
+  color: var(--okf-fg-muted);
+  font-size: var(--okf-text-xs);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC",
+    "PingFang SC", "Microsoft YaHei", monospace;
+  margin-top: 1px;
+}
+
+/* Citations - numbered list (P2-6): the [id] is the marker context */
+.okf-citation-list {
+  list-style: none;
+  counter-reset: okf-cite;
+  padding: 0;
+  margin: 0;
+}
+.okf-citation { display: block; margin: 2px 0; font-size: var(--okf-text-sm); }
+.okf-citation .okf-cite-id { color: var(--okf-fg-muted); font-weight: 500; }
+.okf-cite-text { color: var(--okf-fg); }
+.okf-citation a { color: var(--okf-accent); word-break: break-all; }
+
+/* Frontmatter table formatting */
+details.okf-frontmatter td code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Typed-relation chips (governed key rendering) */
+.okf-relation { display: inline-block; margin: 1px 0; }
+/* .okf-rel-type styles declared with the chip base above (P0-3). */
+.okf-rel-detail { color: var(--okf-fg-muted); font-size: 0.78rem; }
+.okf-relations-fm { margin-top: var(--okf-space-1); }
+
+/* Connections (phase 2): outgoing/backlink targets render as compact
+ * cards in a responsive grid — type icon + tinted accent + title + id +
+ * directional relation chip — instead of a bare link list. */
+.okf-linklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: var(--okf-space-2);
+}
+.okf-conn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--okf-space-2);
+  padding: var(--okf-space-2) var(--okf-space-3);
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-left: 3px solid var(--okf-type-accent, var(--okf-border-strong));
+  border-radius: var(--okf-radius);
+  transition: border-color 0.12s ease;
+}
+.okf-conn:hover { border-color: var(--okf-type-accent, var(--okf-border-strong)); }
+.okf-conn__icon { display: inline-flex; margin-top: 2px; flex-shrink: 0; }
+.okf-conn__body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.okf-conn__title { font-weight: 600; font-size: var(--okf-text-sm); }
+.okf-conn__id {
+  font-size: var(--okf-text-xs);
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okf-conn .okf-rel-type { flex-shrink: 0; align-self: center; }
+/* Compatibility fallback for plain-list contexts (graph detail panel reuses
+ * okf-linklist without the card classes). */
+.okf-linklist li:not(.okf-conn) {
+  padding: var(--okf-space-1) 0;
+  border-bottom: 1px solid var(--okf-border);  /* P3-7: was dashed */
+}
+.okf-linklist li:not(.okf-conn):last-child { border-bottom: none; }
+
+/* ---- Prose (markdown body) -------------------------------------------- *
+ * P2-59: cap prose at 70ch so reading width stays in the 65–75ch sweet
+ * spot. P2-60: 1.25 modular type ratio for headings. P3-16: keep
+ * blockquote border-left at 1px.
+ */
+.okf-prose {
+  font-size: var(--okf-text-base);
+  line-height: 1.65;
+  word-wrap: break-word;
+}
+/* User feedback: the rendered body spans the FULL main column —
+ * the same width as the header band above it. The 76ch cap made the
+ * article stop halfway across the header on wide screens. Long-form
+ * readability is preserved by capping the page shell itself
+ * (--okf-page-maxw) rather than the body. */
+.okf-page__body { max-width: none; }
+.okf-prose h2 { font-family: var(--okf-font-display); letter-spacing: -0.01em; }
+/* Heading deep-link anchors (phase 2): invisible until heading hover. */
+.okf-heading-anchor {
+  margin-left: var(--okf-space-2);
+  color: var(--okf-fg-muted);
+  opacity: 0;
+  text-decoration: none;
+  font-size: 0.8em;
+  transition: opacity 0.12s ease;
+}
+.okf-prose h1:hover .okf-heading-anchor,
+.okf-prose h2:hover .okf-heading-anchor,
+.okf-prose h3:hover .okf-heading-anchor,
+.okf-prose h4:hover .okf-heading-anchor,
+.okf-heading-anchor:focus-visible { opacity: 1; }
+.okf-heading-anchor:hover { color: var(--okf-accent); }
+.okf-prose h1 {
+  font-size: var(--okf-text-xl);
+  margin: 1.4rem 0 0.5rem;
+  padding-bottom: var(--okf-space-1);
+  border-bottom: 1px solid var(--okf-border);
+}
+.okf-prose h2 { font-size: var(--okf-text-lg); margin: 1.2rem 0 0.4rem; }
+.okf-prose h3 { font-size: var(--okf-text-md); margin: 1rem 0 0.3rem; }
+.okf-prose h4 { font-size: 0.95rem; margin: 0.8rem 0 0.2rem; }
+.okf-prose p { margin: 0.6rem 0; }
+.okf-prose ul, .okf-prose ol { padding-left: 1.5rem; margin: 0.6rem 0; }
+.okf-prose li { margin: 0.2rem 0; }
+.okf-prose blockquote {
+  margin: 0.8rem 0;
+  padding: 0.4rem 1rem;
+  border-left: 1px solid var(--okf-border-strong);  /* P3-16: keep at 1px */
+  background: var(--okf-bg-inset);
+  color: var(--okf-fg-muted);
+  border-radius: var(--okf-radius-sm);
+}
+.okf-prose code {
+  background: var(--okf-code-bg);
+  color: var(--okf-code-fg);
+  padding: 1px 5px;
+  border-radius: 4px;                /* P3-8: was 3px */
+  font-size: 0.85em;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC",
+    "PingFang SC", "Microsoft YaHei", monospace;
+}
+.okf-prose pre {
+  background: var(--okf-pre-bg);
+  color: var(--okf-pre-fg);
+  padding: var(--okf-space-3) 14px;
+  border-radius: var(--okf-radius);
+  overflow-x: auto;
+  font-size: var(--okf-text-sm);
+  margin: 0.8rem 0;
+}
+.okf-prose pre code { background: transparent; color: inherit; padding: 0; }
+/* P2-76 / P2-22: tables scroll horizontally on narrow viewports.
+ * Previously ``.okf-table`` set ``display: block; overflow-x: auto`` AND
+ * ``border-collapse: collapse`` - but ``border-collapse`` is ignored by
+ * browsers when ``display != table``, so the grid rendered with the
+ * default 2px ``border-spacing`` between cells (visually gappy). We now
+ * keep the block+scroll behaviour (it's the only way to scroll a table
+ * without a wrapper div, and markdown.py emits the bare ``<table>``) but
+ * switch to ``border-collapse: separate; border-spacing: 0`` so adjacent
+ * cell borders touch instead of gaping. Cells keep their 1px borders; the
+ * outer grid reads as a clean single-width line grid (the standard
+ * "faked collapse" workaround). */
+.okf-table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.8rem 0;
+  width: auto;
+  max-width: 100%;
+}
+.okf-table th, .okf-table td {
+  border: 1px solid var(--okf-border);
+  padding: var(--okf-space-1) var(--okf-space-3);
+  font-size: var(--okf-text-sm);
+  text-align: left;
+}
+.okf-table th { background: var(--okf-bg-inset); font-weight: 600; }
+
+/* ---- Index page (UI overhaul phase 1: hero + card grid) ---------------- */
+.okf-index {
+  flex: 1;
+  max-width: var(--okf-maxw);
+  margin: 0 auto;
+  padding: 28px var(--okf-space-6) 64px;
+  width: 100%;
+}
+.okf-index__title {
+  font-size: var(--okf-text-xl);
+  margin: 0 0 var(--okf-space-2);
+  font-family: var(--okf-font-display);
+  letter-spacing: -0.015em;
+}
+.okf-index__intro {
+  margin-bottom: var(--okf-space-3);
+  color: var(--okf-fg-muted);
+  max-width: var(--okf-prose-maxw);
+}
+
+/* Hero band: title + intro + stats + graph entry point. */
+.okf-hero {
+  margin: var(--okf-space-3) 0 var(--okf-space-6);
+  padding-bottom: var(--okf-space-5);
+  border-bottom: 1px solid var(--okf-border);
+}
+.okf-hero__stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--okf-space-2);
+}
+.okf-stat {
+  padding: 4px 12px;
+  background: var(--okf-bg-inset);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-pill);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+}
+.okf-stat strong { color: var(--okf-fg); font-variant-numeric: tabular-nums; }
+.okf-hero__graph-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 14px;
+  background: var(--okf-accent);
+  color: var(--okf-accent-on);
+  border-radius: var(--okf-radius-pill);
+  font-size: var(--okf-text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.okf-hero__graph-link:hover { background: var(--okf-accent-hover); text-decoration: none; }
+
+.okf-section { margin: var(--okf-space-6) 0; }
+.okf-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  font-size: var(--okf-text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--okf-fg);
+  margin: 0 0 var(--okf-space-3);
+  border-bottom: 1px solid var(--okf-border);
+  padding-bottom: 8px;
+}
+.okf-section__icon { display: inline-flex; align-items: center; }
+.okf-section__count {
+  font-weight: 500;
+  color: var(--okf-fg-muted);
+  background: var(--okf-bg-inset);
+  border-radius: var(--okf-radius-pill);
+  padding: 1px 8px;
+  font-size: var(--okf-text-xs);
+}
+
+/* Concept cards. The ul/li/a skeleton keeps the .okf-concept-list li a
+ * contract (presence highlight, stampConceptIds); the card presentation
+ * is purely CSS. --okf-type-accent is set inline per card. */
+.okf-concept-list { list-style: none; padding: 0; margin: 0; }
+.okf-cardgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--okf-space-3);
+}
+.okf-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--okf-space-3) var(--okf-space-4);
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-left: 3px solid var(--okf-type-accent, var(--okf-border-strong));
+  border-radius: var(--okf-radius);
+  box-shadow: var(--okf-shadow);
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.okf-card:hover {
+  border-color: var(--okf-type-accent, var(--okf-border-strong));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), var(--okf-shadow);
+}
+.okf-card__link { font-weight: 600; font-size: var(--okf-text-base); }
+.okf-card__id { font-size: var(--okf-text-xs); font-family: ui-monospace, monospace; }
+.okf-card__desc {
+  color: var(--okf-fg-muted);
+  font-size: var(--okf-text-sm);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.okf-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: var(--okf-text-xs);
+  color: var(--okf-fg-muted);
+}
+.okf-card__links { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.okf-tag--card { font-size: var(--okf-text-xs); }
+/* Phase 5: live comment-count chip (injected by studio.js in serve mode). */
+.okf-card__comments {
+  color: var(--okf-accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Phase 5: recently-changed rail in the hero (studio.js, serve mode). */
+.okf-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--okf-space-2);
+  margin-top: var(--okf-space-3);
+  font-size: var(--okf-text-sm);
+}
+.okf-recent__label {
+  font-size: var(--okf-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--okf-fg-muted);
+}
+.okf-recent__item {
+  padding: 2px 10px;
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-pill);
+  color: var(--okf-fg-muted);
+  text-decoration: none;
+}
+.okf-recent__item:hover { border-color: var(--okf-accent); text-decoration: none; }
+.okf-recent__item strong { color: var(--okf-fg); font-weight: 600; }
+/* Compatibility flat-list fallback (search results reuse .okf-concept-list). */
+.okf-concept-list:not(.okf-cardgrid) li {
+  padding: var(--okf-space-2) 0;
+  border-bottom: 1px solid var(--okf-border);
+}
+.okf-concept-list:not(.okf-cardgrid) li:last-child { border-bottom: none; }
+.okf-concept-list a { font-weight: 500; }
+.okf-concept-list .okf-concept-desc { color: var(--okf-fg-muted); font-size: var(--okf-text-sm); }
+
+.okf-subdirs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.okf-subdirs a {
+  display: block;
+  padding: 10px var(--okf-space-3);
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius);
+  box-shadow: var(--okf-shadow);
+}
+.okf-subdirs a:hover { border-color: var(--okf-border-strong); text-decoration: none; }
+.okf-subdirs strong { display: block; }
+.okf-subdirs .okf-muted { display: block; margin-top: 2px; }
+
+/* ---- Page (concept) layout -------------------------------------------- */
+.okf-page {
+  display: grid;
+  grid-template-columns: var(--okf-sidebar-w, 272px) minmax(0, 1fr);
+  gap: var(--okf-space-6);
+  flex: 1;
+  max-width: var(--okf-page-maxw);
+  margin: 0 auto;
+  padding: var(--okf-space-5) var(--okf-space-6);
+  width: 100%;
+}
+.okf-page__sidebar {
+  position: sticky;
+  top: calc(var(--okf-topbar-h) + 16px);
+  align-self: start;
+  max-height: calc(100vh - var(--okf-topbar-h) - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--okf-space-2);
+  resize: horizontal;
+  min-width: 180px;
+  max-width: 600px;
+}
+
+/* Sidebar panel system (user-requested feature) */
+.okf-sidebar-panel {
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius);
+  overflow: hidden;
+}
+.okf-sidebar-panel__header {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-1);
+  padding: var(--okf-space-2) var(--okf-space-3);
+  cursor: grab;
+  user-select: none;
+  border-bottom: 1px solid var(--okf-border);
+  font-size: var(--okf-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--okf-fg-muted);
+}
+.okf-sidebar-panel__header:hover { color: var(--okf-fg); }
+.okf-sidebar-panel__header:active { cursor: grabbing; }
+.okf-sidebar-panel__toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+  line-height: 1;
+}
+.okf-sidebar-panel__toggle:hover { color: var(--okf-accent); }
+.okf-sidebar-panel__title { flex: 1; }
+.okf-sidebar-panel__body {
+  padding: var(--okf-space-2) var(--okf-space-3);
+  font-size: var(--okf-text-sm);
+}
+.okf-sidebar-panel--collapsed .okf-sidebar-panel__body { display: none; }
+.okf-sidebar-panel--collapsed .okf-sidebar-panel__header { border-bottom: none; }
+.okf-sidebar-panel--dragging { opacity: 0.5; }
+.okf-sidebar-panel--drag-target { border-color: var(--okf-accent); border-style: dashed; }
+
+/* Sections TOC panel */
+.okf-sidebar-toc { list-style: none; padding: 0; margin: 0; }
+.okf-sidebar-toc li { padding: 2px 0; }
+.okf-sidebar-toc a {
+  color: var(--okf-fg-muted);
+  text-decoration: none;
+  font-size: var(--okf-text-sm);
+  display: block;
+  padding: 1px 0 1px var(--okf-space-2);
+  border-left: 2px solid transparent;
+}
+.okf-sidebar-toc a:hover { color: var(--okf-accent); }
+/* Phase 2 scroll-spy: the on-screen section's entry gets an accent rail. */
+.okf-sidebar-toc a.is-active {
+  color: var(--okf-accent);
+  border-left-color: var(--okf-accent);
+  font-weight: 600;
+}
+.okf-sidebar-toc .toc-h1 { font-weight: 600; }
+.okf-sidebar-toc .toc-h2 { padding-left: var(--okf-space-2); }
+.okf-sidebar-toc .toc-h3 { padding-left: calc(var(--okf-space-2) * 2); }
+
+/* Quick intents panel. Phase 1: these are BUTTONS — they used to render
+ * as what looked like empty text inputs (white fill, thin border). The
+ * inset fill + chevron + hover accent make the affordance unmistakable. */
+.okf-sidebar-intents { display: flex; flex-direction: column; gap: var(--okf-space-1); }
+.okf-sidebar-intent {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  padding: var(--okf-space-2) var(--okf-space-3);
+  background: var(--okf-bg-inset);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  cursor: pointer;
+  font-size: var(--okf-text-sm);
+  font-weight: 500;
+  color: var(--okf-fg);
+  text-align: left;
+  width: 100%;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.okf-sidebar-intent::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-right: 2px solid var(--okf-fg-muted);
+  border-top: 2px solid var(--okf-fg-muted);
+  transform: rotate(45deg);
+  transition: border-color 0.12s ease;
+}
+.okf-sidebar-intent:hover {
+  border-color: var(--okf-accent);
+  background: var(--okf-accent-bg);
+  color: var(--okf-accent);
+}
+.okf-sidebar-intent:hover::before { border-color: var(--okf-accent); }
+/* P2-62: local graph widget is now a labelled pill list, not unlabeled
+ * SVG dots. Each pill shows a colour swatch + truncated neighbour title. */
+.okf-local-graph {
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius);
+  padding: var(--okf-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--okf-space-1);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.okf-local-graph__title {
+  font-size: var(--okf-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--okf-fg-muted);
+  margin: 0 0 var(--okf-space-1);
+}
+/* When the local-graph widget lives inside a studio sidebar
+   panel, the panel header is the user-facing label. We do TWO things:
+   1. Hide the widget's own title (the panel header replaces it).
+   2. Flatten the widget's wrapper with `display: contents` so the
+      neighbour pills become direct children of the panel body —
+      no nested inner container, just the pills themselves inside
+      the Related panel.
+   In read-only mode (no studio boot), the widget is a direct child
+   of .okf-page__sidebar and these rules don't fire, so it renders
+   normally with its own title + wrapper. */
+.okf-sidebar-panel__body .okf-local-graph {
+  display: contents;
+}
+.okf-sidebar-panel__body .okf-local-graph__title {
+  display: none;
+}
+.okf-local-graph__node {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  padding: var(--okf-space-1) var(--okf-space-2);
+  border-radius: var(--okf-radius-sm);
+  text-decoration: none;
+  color: var(--okf-fg);
+  font-size: var(--okf-text-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  font-family: inherit;
+}
+.okf-local-graph__node:hover {
+  background: var(--okf-bg-inset);
+  text-decoration: none;
+  border-color: var(--okf-border);
+  color: var(--okf-fg);
+}
+.okf-local-graph__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--okf-radius-pill);
+  flex-shrink: 0;
+  border: 1px solid var(--okf-border-strong);
+}
+.okf-local-graph__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.okf-local-graph__empty { color: var(--okf-fg-muted); font-size: var(--okf-text-sm); padding: var(--okf-space-2); }
+
+.okf-page__main { min-width: 0; max-width: none; }
+/* Concept header band (UI overhaul phase 1): the type accent tints a left
+ * border + a faint wash so every concept page carries its type identity.
+ * color-mix keeps the wash theme-aware; browsers without it fall back to
+ * the plain elevated surface. */
+.okf-page__header {
+  margin-bottom: var(--okf-space-5);
+  padding: var(--okf-space-4) var(--okf-space-5);
+  border: 1px solid var(--okf-border);
+  border-left: 4px solid var(--okf-type-accent, var(--okf-accent));
+  border-radius: var(--okf-radius);
+  background: var(--okf-bg-elev);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--okf-type-accent, var(--okf-accent)) 7%, var(--okf-bg-elev)),
+    var(--okf-bg-elev) 55%
+  );
+}
+.okf-page__typerow {
+  display: flex;
+  align-items: center;
+  gap: var(--okf-space-2);
+  margin: var(--okf-space-2) 0 0;
+}
+.okf-type-iconwrap { display: inline-flex; align-items: center; }
+.okf-readtime {
+  margin-left: auto;
+  font-size: var(--okf-text-xs);
+  color: var(--okf-fg-muted);
+  white-space: nowrap;
+}
+.okf-page__title {
+  font-size: var(--okf-text-xl);
+  margin: var(--okf-space-2) 0 6px;
+  font-family: var(--okf-font-display);
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+.okf-page__description {
+  color: var(--okf-fg-muted);
+  margin: 6px 0;
+  font-size: var(--okf-text-md);
+  line-height: 1.45;
+  max-width: var(--okf-prose-maxw);
+}
+/* P2-7 (iter-1): subtitle token rule. Previously the subtitle was the ONLY
+ * rendered element with inline styles (render.py emitted style="...").
+ * Now it lives on the token system so theme overrides reach it. */
+.okf-subtitle {
+  margin: 2px 0 var(--okf-space-2);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+}
+/* P2-3 (iter-1): clickable breadcrumb trail (was a flat raw-id <p>). */
+.okf-breadcrumb {
+  font-size: var(--okf-text-sm);
+  margin: 0 0 var(--okf-space-1);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--okf-space-1);
+}
+.okf-breadcrumb a { color: var(--okf-fg-muted); }
+.okf-breadcrumb a:hover { color: var(--okf-accent); }
+.okf-breadcrumb__current { color: var(--okf-fg); font-weight: 600; }
+.okf-breadcrumb__sep {
+  color: var(--okf-border-strong);
+  user-select: none;
+}
+.okf-breadcrumb__id {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC",
+    "PingFang SC", "Microsoft YaHei", monospace;
+  margin-left: var(--okf-space-2);
+  font-size: var(--okf-text-xs);
+}
+.okf-page__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--okf-space-2); margin-top: var(--okf-space-2); }
+.okf-page__meta a { word-break: break-all; font-size: var(--okf-text-sm); }
+/* The resource URL reads as an action chip, not a bare wrapped URL. */
+.okf-page__meta .okf-external {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 10px;
+  background: var(--okf-bg-inset);
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-pill);
+  font-size: var(--okf-text-xs);
+  color: var(--okf-accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okf-page__meta .okf-external:hover { border-color: var(--okf-accent); }
+
+/* P2-8 (iter-1): the frontmatter <details> drops its card chrome and sits
+ * on the page background with a subtle top-rule. Collapsed it reads as a
+ * thin divider; opened the raw table sits on the page bg. Reserved full
+ * bordered cards for genuinely pop-out content (subdirs, popover). */
+details.okf-frontmatter {
+  margin: var(--okf-space-5) 0 0;
+  border-top: 1px solid var(--okf-border);
+  border-radius: 0;
+  padding: var(--okf-space-2) 0 0;
+}
+details.okf-frontmatter summary { cursor: pointer; font-weight: 600; }
+details.okf-frontmatter[open] { padding-bottom: var(--okf-space-2); }
+details.okf-frontmatter table { width: 100%; border-collapse: collapse; margin-top: var(--okf-space-2); }
+details.okf-frontmatter th, details.okf-frontmatter td {
+  border: 1px solid var(--okf-border);
+  padding: var(--okf-space-1) var(--okf-space-2);
+  font-size: 0.82rem;
+  vertical-align: top;
+  text-align: left;
+}
+details.okf-frontmatter th { background: var(--okf-bg-inset); }
+
+.okf-relations { margin: var(--okf-space-6) 0; display: grid; gap: var(--okf-space-4); }
+/* P2-8 (iter-1): relations blocks drop the card chrome; sit on the page
+ * background with a top-rule so they don't read as "box box box".
+ * Phase 2: headings become small-caps section labels (matching the index
+ * section titles) so "Links to"/"Cited by" read as wayfinding, not
+ * content headings competing with the body's h2s. */
+.okf-relations__block {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--okf-border);
+  border-radius: 0;
+  padding: var(--okf-space-3) 0 0;
+}
+.okf-relations__block h2 {
+  font-size: var(--okf-text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--okf-fg-muted);
+  margin: 0 0 var(--okf-space-3);
+}
+
+/* ---- Search page ------------------------------------------------------ */
+.okf-search {
+  flex: 1;
+  max-width: var(--okf-maxw);
+  margin: 0 auto;
+  padding: 28px var(--okf-space-6) 64px;
+  width: 100%;
+}
+.okf-search__title { font-size: var(--okf-text-xl); margin: 0 0 var(--okf-space-4); font-family: var(--okf-font-display); letter-spacing: -0.015em; }
+.okf-search__results { display: grid; gap: 0; }
+/* P2-8 (iter-1): search results use dividers (like the index concept-list)
+ * instead of identical cards - breaks the card monoculture. */
+.okf-search-result {
+  padding: var(--okf-space-3) 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--okf-border);
+  border-radius: 0;
+}
+.okf-search-result:last-child { border-bottom: none; }
+.okf-search-result h3 { margin: 0 0 var(--okf-space-1); font-size: var(--okf-text-base); }
+/* Phase 2: type identity on results (icon + name in the type colour). */
+.okf-search-result__type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--okf-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: var(--okf-space-2);
+}
+.okf-search-result .okf-search-snippet {
+  color: var(--okf-fg-muted); font-size: var(--okf-text-sm); margin: var(--okf-space-1) 0 0;
+}
+.okf-search-empty { color: var(--okf-fg-muted); padding: var(--okf-space-7) 0; text-align: center; }
+
+/* ---- Hover popover (P2-70: role=tooltip, focus + hover) --------------- */
+.okf-popover {
+  position: fixed;
+  z-index: 50;
+  max-width: 320px;
+  padding: 10px var(--okf-space-3);
+  background: var(--okf-bg-elev);
+  border: 1px solid var(--okf-border-strong);
+  border-radius: var(--okf-radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.okf-popover h4 { margin: 0 0 var(--okf-space-1); font-size: var(--okf-text-base); }
+.okf-popover .okf-popover__type { font-size: var(--okf-text-xs); color: var(--okf-fg-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.okf-popover .okf-popover__body { margin-top: 6px; color: var(--okf-fg-muted); }
+
+/* ---- Responsive ------------------------------------------------------- */
+/* iter2 CRI2-001: on small screens the topbar stays a SINGLE ~52px sticky
+ * row (it no longer wraps to 2-3 rows). The decorative ".okf-muted" brand
+ * suffix is dropped, the brand name truncates, and the controls row scrolls
+ * horizontally rather than forcing a wrap. Combined with the non-sticky
+ * studio bar (studio.css §1), sticky chrome above the concept h1 stays at
+ * one topbar row (~52px, well under the 64px mobile fold budget). */
+@media (max-width: 900px) {
+  .okf-topbar { flex-wrap: nowrap; height: var(--okf-topbar-h); padding: 0 var(--okf-space-3); gap: var(--okf-space-2); }
+  .okf-topbar__brand .okf-muted { display: none; }
+  .okf-topbar__brand strong { max-width: 32vw; }
+  .okf-topbar__controls { width: auto; min-width: 0; overflow-x: auto; flex-wrap: nowrap; }
+  .okf-topbar__controls input[type="search"] { min-width: 90px; flex: 1 1 100px; width: 100px; }
+  .okf-layout { flex-direction: column; }
+  .okf-layout > .okf-graph { flex: 0 0 50vh; border-right: none; border-bottom: 1px solid var(--okf-border); }
+  .okf-layout > .okf-detail { flex: 1; }
+  .okf-page { grid-template-columns: 1fr; padding: var(--okf-space-4); }
+  /* Phase 1 mobile fix: content FIRST. The sidebar used to stack ABOVE
+   * the article (three boxes before the title, ~700px of scrolling);
+   * grid rows + order put the article on top and the rail below it. */
+  .okf-page__sidebar { position: static; order: 2; resize: none; max-width: none; }
+  .okf-page__main { order: 1; }
+  .okf-local-graph { max-height: 200px; }
+  .okf-index, .okf-search { padding: var(--okf-space-4); }
+  .okf-cardgrid { grid-template-columns: 1fr; }
+  .okf-hero__graph-link { margin-left: 0; }
+}
+
+/* iter2 CRI2-002: under 600px the static-mode search helper text
+ * ("Press Enter to search, or Open search.") clipped at the form's right
+ * edge because the topbar controls + nowrap note did not fit. Drop the prose
+ * (wiki.js wraps it in .okf-search-note__prose spans) and keep only the
+ * linked "Open search" chip, which carries its own aria-label so the action
+ * stays announced. The icon + input remain. */
+@media (max-width: 600px) {
+  .okf-search-note { padding: 0; }
+  .okf-search-note__prose { display: none; }
+  .okf-search-note a {
+    font-size: var(--okf-text-xs);
+    padding: 2px 6px;
+    border: 1px solid var(--okf-border);
+    border-radius: var(--okf-radius-sm);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .okf-skip-link { transition: none; }
+}

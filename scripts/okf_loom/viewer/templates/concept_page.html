@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<!--
+  OKF concept page template.
+
+  Placeholder convention (str.replace):
+      __LANG__             → document language (default "en")
+      __THEME_ATTR__       → ` data-theme="light|dark"` (or empty)
+      __DATA_ATTRS__       → extra data-* attributes for the SPA/static JS hook
+      __HEAD_TITLE__       → <title> text
+      __BUNDLE_NAME__      → display name shown in the topbar
+      __NAV_HTML__         → topbar inner HTML (search, links)
+       __STATIC_PREFIX__    → URL prefix for /__static/ assets
+  __BRAND_HREF__       → URL of the bundle root for the topbar brand link
+                         (P1-8: "/" for serve/spa, "./" or "../../" for
+                          static: never resolves to the parent dir of a
+                         nested concept)
+  __ROOT_PREFIX__      → URL prefix the local-graph pill nav uses to build
+                         neighbour links (P1-9). Only consumed by wiki.js
+                         in static mode; empty for serve/spa.
+  __WIKI_CSS_LINK__    → <link rel="stylesheet" href="...wiki.css">
+  __WIKI_JS_LINK__     → <script src="...wiki.js" defer></script>
+       __CONCEPT_ID__       → concept id string (escaped; kept for compatibility
+                              references; the visible breadcrumb is
+                              __BREADCRUMB_HTML__)
+       __BREADCRUMB_HTML__  → clickable breadcrumb <nav> (P2-3 iter-1)
+      __CONCEPT_TYPE__     → type (escaped)
+      __CONCEPT_TYPE_COLOR__ → CSS colour for the type chip
+       __CONCEPT_TITLE__    → page <h1> text (phrasing content only)
+       __CONCEPT_SUBTITLE__ → sibling subtitle <p> after the h1 (P1-1 iter-2):
+                              empty string when the concept has no aliases.
+                              Kept OUT of the h1 so the heading's accessible
+                              name is just the title (HTML validity + AT).
+       __CONCEPT_DESCRIPTION__ → description text
+      __CONCEPT_RESOURCE__  → resource URL HTML (link or empty)
+      __CONCEPT_TAGS__     → rendered tags HTML
+      __CONCEPT_BODY__     → rendered markdown body HTML
+      __BACKLINKS_HTML__   → rendered "Cited by" list
+      __OUTGOING_HTML__    → rendered "Links to" list
+      __FRONTMATTER_HTML__ → rendered frontmatter table
+      __LOCAL_GRAPH_DATA__ → JSON-encoded {nodes, edges} for the local graph widget
+-->
+<html lang="__LANG__"__THEME_ATTR__>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>__HEAD_TITLE__</title>
+__WIKI_CSS_LINK__
+</head>
+<body class="okf-viewer okf-viewer--page" __DATA_ATTRS__>
+<a href="#okf-main" class="okf-skip-link">Skip to content</a>
+<header class="okf-topbar">
+  <div class="okf-topbar__brand">
+    <a href="__BRAND_HREF__" class="okf-brand-link"><strong>__BUNDLE_NAME__</strong></a>
+    <span class="okf-muted">okf-loom wiki</span>
+  </div>
+  __NAV_HTML__
+</header>
+
+<!-- iter1 CRI-019: SSR / no-JS fallback banner. Visible by default; hidden
+     by studio.js on successful boot (html.okf-studio-booted) and suppressed
+     in static builds (data-okf-mode="static"). If studio.js fails to load
+     the banner stays so the user knows live updates are off, not silently
+     missing. The <noscript> variant covers the JS-disabled case. -->
+<noscript><p class="okf-studio-fallback-banner" role="alert">JavaScript is off. The live studio needs it, so this is a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p></noscript>
+<p class="okf-studio-fallback-banner" role="status">Live studio unavailable. Showing a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p>
+
+<main id="okf-main" class="okf-page">
+  <aside class="okf-page__sidebar" aria-label="Related concepts">
+    <div class="okf-local-graph" id="okf-local-graph" data-graph="__LOCAL_GRAPH_DATA__" data-root-prefix="__ROOT_PREFIX__"></div>
+  </aside>
+
+  <article class="okf-page__main">
+    <header class="okf-page__header" style="--okf-type-accent:__CONCEPT_TYPE_COLOR__">
+      __BREADCRUMB_HTML__
+      <div class="okf-page__typerow">
+        <span class="okf-type-iconwrap" style="color:__CONCEPT_TYPE_COLOR__" aria-hidden="true">__TYPE_ICON__</span>
+        <span class="okf-type-chip" style="background:__CONCEPT_TYPE_COLOR__;color:__CONCEPT_TYPE_FG__">__CONCEPT_TYPE__</span>
+        __READTIME_HTML__
+      </div>
+      <h1 class="okf-page__title">__CONCEPT_TITLE__</h1>
+      __CONCEPT_SUBTITLE__
+      <p class="okf-page__description">__CONCEPT_DESCRIPTION__</p>
+      <div class="okf-page__meta">__CONCEPT_RESOURCE__ __CONCEPT_TAGS__</div>
+      __GOVERNED_HTML__
+    </header>
+
+    <div class="okf-prose okf-page__body">
+      __CONCEPT_BODY__
+    </div>
+
+    <details class="okf-frontmatter">
+      <summary>All fields</summary>
+      __FRONTMATTER_HTML__
+    </details>
+
+    <nav class="okf-relations">
+      <section class="okf-relations__block" id="okf-outgoing">
+        <h2>Links to</h2>
+        __OUTGOING_HTML__
+      </section>
+      <section class="okf-relations__block" id="okf-backlinks">
+        <h2>Cited by</h2>
+        __BACKLINKS_HTML__
+      </section>
+    </nav>
+  </article>
+</main>
+
+__WIKI_JS_LINK__
+__RENDERERS_JS_LINK__
+</body>
+</html>

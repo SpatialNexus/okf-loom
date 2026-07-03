@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!--
+  OKF directory index / root index page template.
+
+  Placeholders (str.replace):
+      __LANG__           → document language
+      __THEME_ATTR__     → ` data-theme="light|dark"` (or empty)
+      __HEAD_TITLE__     → <title> text
+      __BUNDLE_NAME__    → display name
+  __STATIC_PREFIX__  → URL prefix for /__static/ assets
+  __DATA_ATTRS__     → extra data-* attributes for the SPA/static JS hook
+                       (P1-10: lets wiki.js detect static mode on index pages
+                       so the static-search-note shows correctly)
+  __WIKI_CSS_LINK__  → <link rel="stylesheet" href="...wiki.css">
+  __WIKI_JS_LINK__   → <script src="...wiki.js" defer></script>
+      __INDEX_TITLE__    → page <h1>
+      __INDEX_INTRO__    → optional intro HTML (e.g. bundle description)
+      __GROUPS_HTML__    → concepts grouped by type, as HTML cards/lists
+      __SUBDIRS_HTML__   → subdirectory index links
+      __GLOBAL_GRAPH_LINK__ → URL to the global graph page
+-->
+<html lang="__LANG__"__THEME_ATTR__>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>__HEAD_TITLE__</title>
+__WIKI_CSS_LINK__
+</head>
+<body class="okf-viewer okf-viewer--index" __DATA_ATTRS__>
+<a href="#okf-main" class="okf-skip-link">Skip to content</a>
+<header class="okf-topbar">
+  <div class="okf-topbar__brand">
+    <a href="__BRAND_HREF__" class="okf-brand-link"__BRAND_ARIA_CURRENT__><strong>__BUNDLE_NAME__</strong></a>
+    <span class="okf-muted">okf-loom wiki</span>
+  </div>
+  __NAV_HTML__
+</header>
+
+<!-- iter1 CRI-019: SSR / no-JS fallback banner (see concept_page.html). -->
+<noscript><p class="okf-studio-fallback-banner" role="alert">JavaScript is off. The live studio needs it, so this is a read-only view.</p></noscript>
+<p class="okf-studio-fallback-banner" role="status">Live studio unavailable. Showing a read-only view.</p>
+
+<main id="okf-main" class="okf-index">
+  <header class="okf-hero">
+    <h1 class="okf-index__title">__INDEX_TITLE__</h1>
+    __HERO_STATS__
+    <div class="okf-index__intro okf-prose">__INDEX_INTRO__</div>
+  </header>
+
+  __SUBDIRS_HTML__
+
+  __GROUPS_HTML__
+</main>
+
+__WIKI_JS_LINK__
+</body>
+</html>
