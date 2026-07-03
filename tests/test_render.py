@@ -196,6 +196,43 @@ def test_build_site_unknown_target_raises(tiny_good_bundle: Path) -> None:
         build_site(b, tiny_good_bundle / "x", target="bogus")
 
 
+def test_build_site_static_has_no_dead_internal_links(tmp_path: Path) -> None:
+    """End-to-end link integrity for the static build of the real docs
+    bundle (the artifact deployed to GitHub Pages).
+
+    Guards the family of static-only link bugs fixed together: the root
+    index.md body skipping ``rewrite_internal_links``, anchored
+    ``cli.md#x`` links never matching the anchor-stripped rewrite lookup,
+    sub-index concept cards missing source relativisation, and raw
+    ``/a/b.md`` resource/provenance hrefs. All were invisible in serve
+    mode because the live server resolves raw .md paths. Out-of-bundle
+    repo references (``../../SKILL.md``) and external URLs are exempt —
+    they have no static-build page by design.
+    """
+    import posixpath
+
+    b = Bundle.load(TOOLKIT_ROOT / "docs-bundle")
+    out_dir = tmp_path / "_site"
+    build_site(b, out_dir, target="static")
+    dead: list[str] = []
+    for page in out_dir.rglob("*.html"):
+        rel_dir = page.parent.relative_to(out_dir)
+        for href in re.findall(r'href="([^"]+)"', page.read_text(encoding="utf-8")):
+            if href.startswith(("http://", "https://", "#", "mailto:")):
+                continue
+            target = posixpath.normpath(
+                posixpath.join(str(rel_dir), href.split("#")[0].split("?")[0])
+            )
+            if target.startswith(".."):  # out-of-bundle repo reference
+                continue
+            p = out_dir / target
+            if not (p.is_file() or (p.is_dir() and (p / "index.html").is_file())):
+                dead.append(f"{page.relative_to(out_dir)} -> {href}")
+    assert not dead, (
+        "dead internal links in static build:\n  " + "\n  ".join(dead)
+    )
+
+
 # --- atomic writes: no .tmp leftovers ---------------------------------------
 
 

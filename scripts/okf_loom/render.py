@@ -1077,15 +1077,77 @@ def _root_prefix_for(mode: str, source_cid: ConceptId | None = None) -> str:
 
 
 def _render_link_map(bundle: Bundle, concept: Concept, mode: str) -> dict[str, str | None]:
-    """Build a target_raw → url map for the concept's outgoing links."""
+    """Build a target_raw → url map for the concept's outgoing links.
+
+    Keys are ANCHOR-STRIPPED: ``rewrite_internal_links`` looks hrefs up
+    with the ``#fragment`` removed (and re-appends it to the mapped URL),
+    so a map keyed by the full ``cli.md#validate`` target_raw would never
+    match — anchored internal links then silently stayed raw and 404'd in
+    static builds (the live server resolves raw .md paths, which masked
+    this).
+    """
     out: dict[str, str | None] = {}
     for link in bundle.graph().out_edges.get(concept.id, []):
+        key = link.target_raw.split("#", 1)[0]
+        if not key:
+            continue  # pure-anchor link; not a rewrite candidate
         if link.target is None:
-            out[link.target_raw] = None
+            out.setdefault(key, None)
             continue
-        out[link.target_raw] = url_for_concept(
+        out[key] = url_for_concept(
             link.target, mode, source_cid=concept.id,
         )
+    return out
+
+
+def _static_md_href(href: str, root_prefix: str) -> str | None:
+    """Map an internal ``/a/b.md`` href to its static-build page URL.
+
+    Static builds contain only ``.html`` files and are served under an
+    arbitrary path prefix (e.g. GitHub Pages project sites), so a
+    bundle-absolute raw-file href would 404 twice over. Returns
+    ``<root_prefix>a/b.html`` for internal bundle-absolute ``.md`` hrefs,
+    None for anything else (external URLs, anchors, non-md paths).
+    """
+    if not (href.startswith("/") and href.endswith(".md")):
+        return None
+    return root_prefix + href[1:-3] + ".html"
+
+
+def _index_body_link_map(bundle: Bundle, body_md: str, mode: str) -> dict[str, str | None]:
+    """target_raw → url map for the root ``index.md`` body.
+
+    The root index is a reserved file, not a concept, so it has no graph
+    out-edges; extract and resolve its links directly. External /
+    out-of-bundle / anchor-only links are left untouched (absent from the
+    map); internal links resolve to the mode URL — or None (rendered with
+    ``data-okf-broken``) — exactly like concept bodies do via
+    :func:`_render_link_map`. The index page sits at the bundle root, so
+    static URLs need no ``source_cid`` relativisation.
+    """
+    from .parse import extract_links
+    out: dict[str, str | None] = {}
+    for link in extract_links(body_md, source_dir=bundle.root, bundle_root=bundle.root):
+        if link.form in ("external", "external_out_of_bundle", "anchor"):
+            continue
+        key = link.target_raw.split("#", 1)[0]  # match _render_link_map keying
+        if not key:
+            continue
+        cid = link.concept_id
+        if cid is not None and cid in bundle.concepts:
+            out[key] = url_for_concept(cid, mode)
+            continue
+        # Links to reserved sub-index files (`explanation/index.md`) are
+        # not concepts but DO have a page: map them to the sub-index URL
+        # in static builds; the live server already resolves them (serve
+        # renders /<sub>/index.md directly), so leave them alone there.
+        if cid is not None and cid[-1] == "index" and len(cid) > 1:
+            sub_dir = "/".join(cid[:-1])
+            if (bundle.root / sub_dir).is_dir():
+                if mode == "static":
+                    out[key] = f"{sub_dir}/index.html"
+                continue
+        out.setdefault(key, None)
     return out
 
 
@@ -1162,7 +1224,7 @@ def _render_concept_page(
     frontmatter_html = "\n".join(fm_rows) if concept.frontmatter else "<p class='okf-muted'>(none)</p>"
 
     # Dedicated sections for governed frontmatter keys.
-    governed_html = _render_governed_keys(concept)
+    governed_html = _render_governed_keys(concept, mode=mode, root_prefix=root_prefix)
 
     # Resource.
     resource_html = ""
@@ -1172,6 +1234,11 @@ def _render_concept_page(
         from .viewer.markdown import _safe_url
         safe_resource = _safe_url(concept.resource)
         if safe_resource is not None:
+            # Static builds have no server to render raw bundle paths, so
+            # an internal /a/b.md resource must point at its built page.
+            static_href = _static_md_href(safe_resource, root_prefix)
+            if mode == "static" and static_href is not None:
+                safe_resource = static_href
             resource_html = (
                 f'<a class="okf-external" href="{_esc(safe_resource)}" '
                 f'target="_blank" rel="noopener noreferrer">{_esc(concept.resource)}</a>'
@@ -1560,7 +1627,9 @@ def _render_breadcrumb(concept: Concept, *, mode: str, name: str) -> str:
     )
 
 
-def _render_governed_keys(concept: Concept) -> str:
+def _render_governed_keys(
+    concept: Concept, *, mode: str = "serve", root_prefix: str = "",
+) -> str:
     """Render governed keys (aliases, entities, provenance, citations, relations).
 
     P2-6 (iter-1): each section now has distinct treatment sized to its
@@ -1635,6 +1704,11 @@ def _render_governed_keys(concept: Concept) -> str:
                 from .viewer.markdown import _safe_url
                 safe = _safe_url(str(source))
                 if safe:
+                    # Same static-build mapping as the resource chip: an
+                    # internal /a/b.md source must point at its built page.
+                    static_href = _static_md_href(safe, root_prefix)
+                    if mode == "static" and static_href is not None:
+                        safe = static_href
                     line_bits.append(f'<a href="{_esc(safe)}" rel="noopener">{_esc(str(source))}</a>')
                 else:
                     line_bits.append(f'<span class="okf-provenance-source">{_esc(str(source))}</span>')
@@ -1735,6 +1809,14 @@ def _render_index_page(
         # render.py:1062; this matches the discipline.
         if intro_md:
             intro = _demote_headings(intro)
+            # The root index.md body was the ONE rendered-markdown surface
+            # that skipped rewrite_internal_links (concept bodies route
+            # through _render_link_map): in static builds every
+            # hand-authored `demo/showcase.md`-style link 404'd because
+            # only .html files exist in the output.
+            intro = rewrite_internal_links(
+                intro, _index_body_link_map(bundle, intro_md, mode)
+            )
 
     # Hero stat chips (root index only): concepts / types / links, plus a
     # prominent graph entry point. Fail-soft on graph errors.
@@ -1793,7 +1875,12 @@ def _render_index_page(
         rows = []
         for c in items:
             cid_str = concept_id_to_str(c.id)
-            url = url_for_concept(c.id, mode)
+            # Static sub-index pages live at <sub>/index.html, so concept
+            # URLs must be relativised against that location (a root-
+            # relative "explanation/x.html" would resolve to
+            # explanation/explanation/x.html from there).
+            sub_source = tuple(sub.split("/")) + ("index",) if sub else None
+            url = url_for_concept(c.id, mode, source_cid=sub_source)
             desc = _esc(c.description[:140] + ("…" if len(c.description) > 140 else ""))
             # Card footer: outgoing/incoming counts + first few tags.
             meta_bits: list[str] = []
