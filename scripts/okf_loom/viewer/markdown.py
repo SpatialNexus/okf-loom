@@ -1,10 +1,13 @@
-"""Small pure-Python Markdown renderer for the OKF viewer.
+r"""Small pure-Python Markdown renderer for the OKF viewer.
 
 Scope: the subset used in OKF bundles — headings, paragraphs, unordered /
-ordered lists (incl. nested), blockquotes, fenced code blocks, inline code,
-GFM-style tables, links, emphasis + strong, horizontal rules. This is NOT
-a full CommonMark implementation; it is a deliberate minimal subset (no
-markdown package dependency, per the hard constraints).
+ordered lists (incl. nested), task lists, blockquotes, fenced code blocks,
+inline code, GFM-style tables (incl. column alignment and ``\|`` escaped
+pipes), links, images, autolinks (``<https://…>`` and bare URLs),
+emphasis + strong, strikethrough, hard line breaks (trailing two spaces or
+``\``), single-line footnotes (``[^id]`` / ``[^id]: text``), horizontal
+rules. This is NOT a full CommonMark implementation; it is a deliberate
+minimal subset (no markdown package dependency, per the hard constraints).
 
 Raw HTML is ESCAPED, not passed through. All link ``href`` and image
 ``src`` attributes pass through a URL-scheme allowlist (see
@@ -44,7 +47,7 @@ _FENCE_RE = re.compile(
 )
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?$", re.MULTILINE)
 _HR_RE = re.compile(r"^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$", re.MULTILINE)
-_TABLE_SEP_RE = re.compile(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$")
+_TABLE_SEP_RE = re.compile(r"^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$")
 
 # Anchors / fragment links (passed through untouched).
 _LINK_HREF_RE = re.compile(r'(<a\s+[^>]*?)href=("|\')(?P<href>[^"\']+)\2', re.IGNORECASE)
@@ -68,35 +71,129 @@ _EMPH_RES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"__(.+?)__"), "<strong>\\1</strong>"),
     (re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)\*(?![\w*])"), "<em>\\1</em>"),
     (re.compile(r"(?<![\w_])_(?!\s)([^_\n]+?)_(?![\w_])"), "<em>\\1</em>"),
+    # GFM strikethrough. After strong/em so ~~a **b** c~~ nests correctly.
+    (re.compile(r"~~(?!\s)(.+?)(?<!\s)~~"), "<del>\\1</del>"),
 ]
 
+# GFM autolinks. Angle form takes any allowlisted scheme; the bare form is
+# restricted to http(s) and must not fire inside markdown link syntax — the
+# lookbehind excludes positions right after ``(`` (that is ``](href``),
+# ``[`` (labels), quotes (titles) and word chars (schemes mid-token).
+_AUTOLINK_ANGLE_RE = re.compile(
+    r"<(?P<url>(?:https?|ftp)://[^\s<>]+|mailto:[^\s<>]+|tel:[^\s<>]+)>"
+)
+_AUTOLINK_EMAIL_RE = re.compile(
+    r"<(?P<addr>[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)>"
+)
+_AUTOLINK_BARE_RE = re.compile(
+    r"(?<![(\[\"'=\w])(?P<url>https?://[^\s<>()\"']+)"
+)
 
-def _render_inline(text: str) -> str:
+# Footnote references: [^id]. Substituted BEFORE the link regex so a ref is
+# never mistaken for a link label (mirrors GFM precedence).
+_FOOTNOTE_REF_RE = re.compile(r"\[\^(?P<id>[^\]\s]+)\]")
+# Footnote definition line: [^id]: text (block-level, single line).
+_FOOTNOTE_DEF_RE = re.compile(r"^\[\^(?P<id>[^\]\s]+)\]:\s+(?P<text>.+)$")
+
+
+def _footnote_slug(fid: str) -> str:
+    """Sanitize a footnote id for use inside an HTML id attribute."""
+    return re.sub(r"[^\w-]", "-", fid)
+
+
+def _render_inline(text: str, *, _escaped: bool = False) -> str:
     """Render inline markdown to HTML.
 
     Inline code spans are extracted first into placeholders so emphasis /
     link regexes never touch their contents, then restored at the end.
+    Autolinks are rendered from the RAW (pre-escape) text and stashed the
+    same way, so their hrefs are never entity-mangled.
+
+    ``_escaped=True`` is the internal recursion form used for link labels:
+    the text has already been HTML-escaped by the outer call, so escaping
+    (and raw-text autolinking) must not run a second time — re-escaping was
+    the historical ``&`` → ``&amp;amp;`` double-escape bug.
     """
     stash: list[str] = []
 
-    def _stash_code(m: re.Match[str]) -> str:
-        body = m.group("s")
-        rendered = f'<code>{_escape(body)}</code>'
+    def _stash(rendered: str) -> str:
         token = f"\x01{len(stash)}\x01"
         stash.append(rendered)
         return token
 
+    def _stash_code(m: re.Match[str]) -> str:
+        return _stash(f'<code>{_escape(m.group("s"))}</code>')
+
     # Pull out inline code.
     text = _INLINE_CODE_RE.sub(_stash_code, text)
 
-    # Escape the rest.
-    text = _escape(text, escape_quotes=False)
+    def _autolink(url: str, label: str | None = None) -> str | None:
+        safe = _safe_url(url)
+        if safe is None:
+            return None
+        return _stash(
+            f'<a href="{_escape_attr(safe)}" class="okf-external" '
+            f'rel="noopener noreferrer" target="_blank">{_escape(label or url)}</a>'
+        )
+
+    if not _escaped:
+        # Autolinks run on raw text: <https://…>, <user@host>, bare http(s).
+        def _angle(m: re.Match[str]) -> str:
+            out = _autolink(m.group("url"))
+            return out if out is not None else m.group(0)
+
+        def _email(m: re.Match[str]) -> str:
+            addr = m.group("addr")
+            out = _autolink("mailto:" + addr, addr)
+            return out if out is not None else m.group(0)
+
+        def _bare(m: re.Match[str]) -> str:
+            url = m.group("url")
+            # Trailing sentence punctuation belongs to the prose, not the URL.
+            trimmed = url.rstrip(".,;:!?")
+            if not trimmed:
+                return url
+            out = _autolink(trimmed)
+            if out is None:
+                return url
+            return out + url[len(trimmed):]
+
+        text = _AUTOLINK_ANGLE_RE.sub(_angle, text)
+        text = _AUTOLINK_EMAIL_RE.sub(_email, text)
+        text = _AUTOLINK_BARE_RE.sub(_bare, text)
+
+        # Escape the rest.
+        text = _escape(text, escape_quotes=False)
+
+    # Footnote references (before links, so [^1] is never a link label).
+    def _footnote_ref(m: re.Match[str]) -> str:
+        slug = _footnote_slug(m.group("id"))
+        return (
+            f'<sup class="okf-footnote-ref" id="fnref-{_escape_attr(slug)}">'
+            f'<a href="#fn-{_escape_attr(slug)}">[{m.group("id")}]</a></sup>'
+        )
+
+    text = _FOOTNOTE_REF_RE.sub(_footnote_ref, text)
+
+    # Images: ![alt](src) — MUST run before the link regex, which would
+    # otherwise consume the [alt](src) part and leave a stray "!<a…>"
+    # (the historical broken-images bug). alt/src come from escaped text,
+    # so unescape before _img_tag applies its own single escape.
+    text = re.sub(
+        r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)\s]+)\)",
+        lambda m: _stash(_img_tag(_html.unescape(m.group("alt")),
+                                  _html.unescape(m.group("src")))),
+        text,
+    )
 
     # Links: [label](href "title?")
     def _link(m: re.Match[str]) -> str:
-        label = _render_inline(m.group("label"))
-        href = m.group("href").strip()
-        title = (m.group("title") or "").strip().strip('"')
+        label = _render_inline(m.group("label"), _escaped=True)
+        # The regex ran over escaped text; unescape so _safe_url sees the
+        # real URL (also catches entity-smuggled schemes) and so the single
+        # _escape_attr below does not double-escape ampersands.
+        href = _html.unescape(m.group("href").strip())
+        title = _html.unescape((m.group("title") or "").strip().strip('"'))
         # URL scheme allowlist (defence against javascript:/data:/vbscript: XSS).
         safe_href = _safe_url(href)
         if safe_href is None:
@@ -118,26 +215,13 @@ def _render_inline(text: str) -> str:
         text,
     )
 
-    # Emphasis / strong.
+    # Emphasis / strong / strikethrough.
     for pat, repl in _EMPH_RES:
         text = pat.sub(repl, text)
 
-    # Images: ![alt](src) — emit after link substitution so the link regex
-    # does not eat them. We re-scan raw text here. Apply the same URL
-    # scheme allowlist to image sources.
-    text = re.sub(
-        r'!<img[^>]*alt="([^"]*)"[^>]*src="([^"]+)"[^>]*>',
-        lambda m: _img_tag(m.group(1), m.group(2)),
-        text,
-    )
-    text = re.sub(
-        r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)\s]+)\)",
-        lambda m: _img_tag(m.group("alt"), m.group("src")),
-        text,
-    )
-
-    # Restore stashed inline code.
-    for i in range(len(stash)):
+    # Restore stashed inline code / autolinks / images. A stashed fragment
+    # may itself contain an earlier token (nesting), so resolve repeatedly.
+    for i in reversed(range(len(stash))):
         text = text.replace(f"\x01{i}\x01", stash[i])
     return text
 
@@ -272,26 +356,84 @@ def _render_fenced(code: str, lang: str, indent: str) -> str:
     return f"<pre><code{cls}>{_escape(code)}</code></pre>"
 
 
-def _render_table(header: str, rows: list[str]) -> str:
-    def _row(line: str, tag: str) -> str:
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        rendered = "".join(f"<{tag}>{_render_inline(c)}</{tag}>" for c in cells)
+# Cell delimiter: an unescaped pipe. GFM: ``\|`` embeds a literal pipe in a
+# cell (the only way — pipes split cells even inside code spans).
+_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
+
+def _split_table_row(line: str) -> list[str]:
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    return [c.strip().replace("\\|", "|") for c in _CELL_SPLIT_RE.split(s)]
+
+
+def _render_table(header: str, rows: list[str], sep: str = "") -> str:
+    # GFM column alignment from the separator row: ``:---`` left (default),
+    # ``:---:`` center, ``---:`` right. Emitted as classes so the stylesheet
+    # (not inline styles) owns the presentation.
+    aligns: list[str] = []
+    if sep:
+        for cell in _split_table_row(sep):
+            if cell.startswith(":") and cell.endswith(":") and len(cell) > 1:
+                aligns.append(' class="okf-al-c"')
+            elif cell.endswith(":"):
+                aligns.append(' class="okf-al-r"')
+            else:
+                aligns.append("")
+
+    header_cells = _split_table_row(header) if header else []
+    # GFM: body rows are padded/truncated to the header width. This also
+    # keeps every column rectangular for the client-side sorter/resizer.
+    ncols = len(header_cells)
+
+    def _cls(idx: int) -> str:
+        return aligns[idx] if idx < len(aligns) else ""
+
+    def _row(cells: list[str], tag: str) -> str:
+        if ncols:
+            cells = (cells + [""] * ncols)[:ncols]
+        rendered = "".join(
+            f"<{tag}{_cls(i)}>{_render_inline(c)}</{tag}>"
+            for i, c in enumerate(cells)
+        )
         return f"<tr>{rendered}</tr>"
 
     out = ['<table class="okf-table">']
     if header:
         out.append("<thead>")
-        out.append(_row(header, "th"))
+        out.append(_row(header_cells, "th"))
         out.append("</thead>")
     out.append("<tbody>")
     for r in rows:
-        out.append(_row(r, "td"))
+        out.append(_row(_split_table_row(r), "td"))
     out.append("</tbody>")
     out.append("</table>")
     return "\n".join(out)
 
 
 _LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<marker>[-*+]|\d+\.)\s+(?P<text>.*)$")
+# GFM task-list item body: "[ ] text" / "[x] text" right after the marker.
+_TASK_ITEM_RE = re.compile(r"^\[(?P<state>[ xX])\]\s+(?P<text>.*)$", re.DOTALL)
+
+
+def _render_list_item_text(text: str) -> str:
+    """Render one list item's text, honouring GFM task-list syntax.
+
+    Returns the inner HTML for the ``<li>`` (checkbox + text for tasks).
+    The checkbox is disabled: OKF's directing model is "the user comments,
+    the agent edits", so state changes flow through markdown edits.
+    """
+    m = _TASK_ITEM_RE.match(text)
+    if not m:
+        return _render_inline(text)
+    checked = ' checked=""' if m.group("state") in "xX" else ""
+    return (
+        f'<input type="checkbox" class="okf-task__box" disabled=""{checked} /> '
+        f"{_render_inline(m.group('text'))}"
+    )
 
 
 def _render_list_block(lines: list[str]) -> str:
@@ -332,7 +474,8 @@ def _render_list_block(lines: list[str]) -> str:
 
     def _emit(node: dict, _d: int = 0) -> str:
         tag = "ol" if node["ordered"] else "ul"
-        body = f"<li>{_render_inline(node['text'])}"
+        li_cls = ' class="okf-task"' if _TASK_ITEM_RE.match(node["text"]) else ""
+        body = f"<li{li_cls}>{_render_list_item_text(node['text'])}"
         if node["children"] and _d < _MAX_LIST_NESTING:
             child_items = "".join(_emit(c, _d + 1) for c in node["children"])
             body += f"\n<{tag}>{child_items}</{tag}>"
@@ -340,7 +483,7 @@ def _render_list_block(lines: list[str]) -> str:
             # At the cap: flatten remaining children as inline text so the
             # content is still readable without recursing further.
             flat = "; ".join(
-                _render_inline(child["text"])
+                _render_list_item_text(child["text"])
                 for child in _iter_all_children(node)
             )
             body += f" ({flat})"
@@ -442,16 +585,29 @@ def _split_blocks(text: str) -> list[tuple[str, str]]:
             i += 1
             continue
 
-        # Table: a line with '|' followed by a separator line.
+        # Table: a line with '|' followed by a separator line. The separator
+        # travels with the block (after \x03) so the renderer can apply GFM
+        # column alignment.
         if "|" in stripped and i + 1 < n and _TABLE_SEP_RE.match(lines[i + 1].strip()):
             header = stripped
+            sep = lines[i + 1].strip()
             j = i + 2
             rows: list[str] = []
             while j < n and lines[j].strip() and "|" in lines[j]:
                 rows.append(lines[j].strip())
                 j += 1
-            blocks.append(("table", f"{header}\x04" + "\x04".join(rows)))
+            blocks.append(("table", f"{header}\x03{sep}\x04" + "\x04".join(rows)))
             i = j
+            continue
+
+        # Footnote definition: "[^id]: text" on its own line. Single-line
+        # only (indented continuation lines are out of scope for this
+        # renderer subset); collected and emitted as a trailing footnotes
+        # section by markdown_to_html.
+        m_fn = _FOOTNOTE_DEF_RE.match(stripped)
+        if m_fn:
+            blocks.append(("footnote", f"{m_fn.group('id')}\x03{m_fn.group('text')}"))
+            i += 1
             continue
 
         # Blockquote: collect consecutive lines starting with '>'
@@ -507,9 +663,17 @@ def _split_blocks(text: str) -> list[tuple[str, str]]:
                 break
             if _LIST_ITEM_RE.match(cur):
                 break
+            if _FOOTNOTE_DEF_RE.match(cur_stripped):
+                break
             if "|" in cur_stripped and i + 1 < n and _TABLE_SEP_RE.match(lines[i + 1].strip()):
                 break
-            para.append(cur_stripped)
+            # Hard line break: trailing two+ spaces or a trailing backslash
+            # (CommonMark §6.7). Marked with \x05; the paragraph renderer
+            # turns the marker into <br />.
+            hard_break = bool(re.search(r"(  +|\\)$", cur))
+            if cur_stripped.endswith("\\"):
+                cur_stripped = cur_stripped[:-1].rstrip()
+            para.append(cur_stripped + ("\x05" if hard_break else ""))
             i += 1
         if para:
             blocks.append(("para", " ".join(para)))
@@ -544,6 +708,9 @@ def markdown_to_html(text: str, *, _depth: int = 0) -> str:
     out: list[str] = []
     # Slug counters for duplicate headings.
     seen_slugs: dict[str, int] = {}
+    # Footnote definitions collected in document order; emitted as a
+    # trailing <section> so refs anywhere in the body can jump to them.
+    footnotes: list[tuple[str, str]] = []
 
     for kind, payload in blocks:
         if kind == "fence":
@@ -565,9 +732,12 @@ def markdown_to_html(text: str, *, _depth: int = 0) -> str:
             out.append("<hr />")
         elif kind == "table":
             parts = payload.split("\x04")
-            header = parts[0]
+            header, _, sep = parts[0].partition("\x03")
             rows = [p for p in parts[1:] if p]
-            out.append(_render_table(header, rows))
+            out.append(_render_table(header, rows, sep))
+        elif kind == "footnote":
+            fid, _, ftext = payload.partition("\x03")
+            footnotes.append((fid, ftext))
         elif kind == "quote":
             if _depth >= 32:
                 # P1-1: recursion cap — escape deeply nested quotes as text.
@@ -578,7 +748,26 @@ def markdown_to_html(text: str, *, _depth: int = 0) -> str:
         elif kind == "list":
             out.append(_render_list_block(payload.split("\n")))
         elif kind == "para":
-            out.append(f"<p>{_render_inline(payload)}</p>")
+            rendered = _render_inline(payload)
+            # \x05 markers are hard line breaks (trailing two spaces / "\").
+            # "\x05 " eats the join-space; a trailing bare \x05 (paragraph's
+            # last line) renders nothing.
+            rendered = rendered.replace("\x05 ", "<br />").replace("\x05", "")
+            out.append(f"<p>{rendered}</p>")
+
+    if footnotes:
+        items: list[str] = []
+        for fid, ftext in footnotes:
+            slug = _escape_attr(_footnote_slug(fid))
+            items.append(
+                f'<li id="fn-{slug}">{_render_inline(ftext)} '
+                f'<a href="#fnref-{slug}" class="okf-footnote-back" '
+                f'aria-label="Back to reference">↩</a></li>'
+            )
+        out.append(
+            '<section class="okf-footnotes" role="doc-endnotes" '
+            'aria-label="Footnotes"><ol>' + "".join(items) + "</ol></section>"
+        )
 
     return "\n".join(out)
 

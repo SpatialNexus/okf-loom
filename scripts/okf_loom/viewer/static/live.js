@@ -421,6 +421,10 @@
       const body = document.querySelector(".okf-page__body");
       if (body) body.innerHTML = doc.html || "";
       restoreBodySelection(selSnapshot);
+      // studio.js dispatches this after its block diff; the fallback swap
+      // must too, or renderers.js never re-runs (mermaid/hljs/KaTeX plus
+      // the table/code/image enhancers) over the fresh body.
+      try { window.dispatchEvent(new CustomEvent("okf-loom:bodyPatched")); } catch (e) {}
     }
 
     // Record what we rendered so the ready/doc_revs path can detect drift.

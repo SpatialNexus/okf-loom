@@ -1,10 +1,19 @@
 /**
  * OKF renderers.js — progressive enhancement for rich content blocks.
  *
- * Loads Mermaid (diagrams), highlight.js (syntax highlighting), and KaTeX
- * (math) from CDN ONLY when the page contains elements that need them.
- * Degrades gracefully: if the CDN is unreachable, the raw source text
- * remains visible (readable but unstyled).
+ * Two halves:
+ *
+ * 1. CDN renderers: Mermaid (diagrams), highlight.js (syntax highlighting),
+ *    and KaTeX (math), loaded ONLY when the page contains elements that
+ *    need them. Degrades gracefully: if the CDN is unreachable, the raw
+ *    source text remains visible (readable but unstyled).
+ *
+ * 2. Local markdown UX enhancers (no CDN, no network): sortable /
+ *    filterable / column-resizable tables with sticky headers and
+ *    copy-as-CSV, copy buttons + language badges on code blocks, and a
+ *    click-to-zoom lightbox for images. All DOM the enhancers inject is
+ *    additive and idempotent; studio.js's live block-diff sees through the
+ *    wrappers via their data-source attribute (same contract as mermaid).
  *
  * CSP-safe: loaded as a local <script defer> from /__static/renderers.js.
  * The CDN scripts are dynamically inserted only when needed, so pages
@@ -211,23 +220,428 @@
       });
   }
 
-  // Run after DOM is ready.
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () {
-      initMermaid();
-      initHighlight();
-      initMath();
+  // ====================================================================
+  // Local markdown UX enhancers (tables / code blocks / images)
+  // ====================================================================
+  // Scope: rendered concept bodies everywhere they appear — concept pages
+  // (.okf-prose.okf-page__body), the index intro (.okf-prose), and the
+  // graph / single-file detail panel (graph.js swaps the class list to
+  // .okf-page__body). NOT the studio source pane (pre.okf-source lives
+  // outside these containers) and NOT the frontmatter table.
+  var PROSE_SELECTOR = ".okf-prose, .okf-page__body";
+  // Show the filter/count/copy toolbar only when a table has enough rows
+  // for scanning to hurt; sorting + resizing apply to every table.
+  var TABLE_TOOLBAR_MIN_ROWS = 5;
+
+  function proseRoots() {
+    return Array.prototype.slice.call(document.querySelectorAll(PROSE_SELECTOR));
+  }
+
+  function collapseWs(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
+  }
+
+  // --- clipboard helper (shared by table CSV + code copy buttons) -------
+  function copyText(text, btn, okLabel) {
+    function flash(label) {
+      var prev = btn.textContent;
+      btn.textContent = label;
+      btn.disabled = true;
+      setTimeout(function () { btn.textContent = prev; btn.disabled = false; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () { flash(okLabel); },
+        function () { flash("Copy failed"); }
+      );
+      return;
+    }
+    // Legacy fallback (non-secure contexts): hidden textarea + execCommand.
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    flash(ok ? okLabel : "Copy failed");
+  }
+
+  // --- tables: sort / filter / resize / sticky / copy --------------------
+  function initTables() {
+    proseRoots().forEach(function (root) {
+      Array.prototype.forEach.call(root.querySelectorAll("table"), function (t) {
+        if (t.dataset.okfEnhanced) return;
+        if (t.closest(".okf-tablewrap")) return; // already wrapped (nested scan)
+        enhanceTable(t);
+      });
     });
-  } else {
+    updateTableFits();
+  }
+
+  function tbodyRows(table) {
+    var tb = table.tBodies[0];
+    return tb ? Array.prototype.slice.call(tb.rows) : [];
+  }
+
+  function enhanceTable(table) {
+    table.dataset.okfEnhanced = "1";
+    if (!table.tHead || !table.tHead.rows.length) return; // headerless: leave as-is
+
+    // Wrapper carries the horizontal scroll (previously on the table itself)
+    // plus data-source: the ORIGINAL whitespace-collapsed text, which
+    // studio.js's blockSig uses so a user-applied sort/filter never makes an
+    // unchanged table look "changed" to the live diff (and vice versa).
+    var wrap = document.createElement("div");
+    wrap.className = "okf-tablewrap";
+    wrap.setAttribute("data-source", collapseWs(table.textContent));
+    table.parentNode.insertBefore(wrap, table);
+
+    var rows = tbodyRows(table);
+    if (rows.length >= TABLE_TOOLBAR_MIN_ROWS) {
+      wrap.appendChild(buildTableToolbar(table));
+    }
+    wrap.appendChild(table);
+    table.classList.add("okf-table--enhanced");
+
+    // Original row order, for the third state of the sort cycle.
+    var originalRows = rows.slice();
+
+    var headRow = table.tHead.rows[0];
+    Array.prototype.forEach.call(headRow.cells, function (th) {
+      th.classList.add("okf-th-sortable");
+      th.setAttribute("aria-sort", "none");
+      th.tabIndex = 0;
+      // The resizer is a drag handle on the column's right edge. It sits
+      // inside the th but is aria-hidden decorative chrome; keyboard users
+      // get horizontal scrolling instead (resize is a pointer nicety).
+      var grip = document.createElement("span");
+      grip.className = "okf-col-resizer";
+      grip.setAttribute("aria-hidden", "true");
+      th.appendChild(grip);
+      wireColumnResize(table, wrap, th, grip);
+
+      th.addEventListener("click", function (e) {
+        if (e.target.closest(".okf-col-resizer")) return;
+        cycleSort(table, th, originalRows);
+      });
+      th.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        cycleSort(table, th, originalRows);
+      });
+    });
+  }
+
+  function buildTableToolbar(table) {
+    var bar = document.createElement("div");
+    bar.className = "okf-table-toolbar";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Table tools");
+
+    var filter = document.createElement("input");
+    filter.type = "search";
+    filter.className = "okf-table-filter";
+    filter.placeholder = "Filter rows…";
+    filter.setAttribute("aria-label", "Filter table rows");
+
+    var count = document.createElement("span");
+    count.className = "okf-table-count";
+    count.setAttribute("aria-live", "polite");
+
+    var copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "okf-table-copy";
+    copy.textContent = "Copy CSV";
+    copy.setAttribute("aria-label", "Copy table as CSV");
+
+    function updateCount() {
+      var rows = tbodyRows(table);
+      var visible = rows.filter(function (r) { return !r.classList.contains("okf-row-hidden"); });
+      count.textContent = filter.value
+        ? visible.length + " of " + rows.length + " rows"
+        : rows.length + " rows";
+    }
+    updateCount();
+
+    filter.addEventListener("input", function () {
+      var q = filter.value.trim().toLowerCase();
+      tbodyRows(table).forEach(function (r) {
+        var hit = !q || (r.textContent || "").toLowerCase().indexOf(q) >= 0;
+        r.classList.toggle("okf-row-hidden", !hit);
+      });
+      updateCount();
+    });
+    filter.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && filter.value) {
+        filter.value = "";
+        filter.dispatchEvent(new Event("input"));
+        e.stopPropagation(); // keep Esc from also closing studio panels
+      }
+    });
+    copy.addEventListener("click", function () {
+      copyText(tableToCsv(table), copy, "Copied ✓");
+    });
+
+    bar.appendChild(filter);
+    bar.appendChild(count);
+    bar.appendChild(copy);
+    return bar;
+  }
+
+  function tableToCsv(table) {
+    // Current sort order, ALL rows (a filtered view still copies the whole
+    // table — partial exports silently masquerading as full ones are worse).
+    var lines = [];
+    function pushRow(cells) {
+      lines.push(Array.prototype.map.call(cells, function (c) {
+        var v = collapseWs(c.textContent);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(","));
+    }
+    if (table.tHead && table.tHead.rows.length) pushRow(table.tHead.rows[0].cells);
+    tbodyRows(table).forEach(function (r) { pushRow(r.cells); });
+    return lines.join("\n");
+  }
+
+  // Sort comparator: numeric when every non-empty cell in the column parses
+  // as a number (currency/percent/thousands tolerated), else natural-order
+  // string compare (so v1.10 > v1.9). Empty cells always sort last.
+  function numericValue(s) {
+    if (!s) return null;
+    var cleaned = s.replace(/[,$£€%\s]/g, "");
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(cleaned)) return null;
+    return parseFloat(cleaned);
+  }
+
+  function cycleSort(table, th, originalRows) {
+    var headRow = table.tHead.rows[0];
+    var prev = th.getAttribute("aria-sort") || "none";
+    Array.prototype.forEach.call(headRow.cells, function (h) {
+      h.setAttribute("aria-sort", "none");
+    });
+    var next = prev === "none" ? "ascending" : prev === "ascending" ? "descending" : "none";
+    th.setAttribute("aria-sort", next);
+
+    var tb = table.tBodies[0];
+    if (!tb) return;
+    if (next === "none") {
+      originalRows.forEach(function (r) { tb.appendChild(r); });
+      return;
+    }
+    var idx = th.cellIndex;
+    var rows = tbodyRows(table);
+    var keys = rows.map(function (r) {
+      var c = r.cells[idx];
+      return collapseWs(c ? c.textContent : "");
+    });
+    var nonEmpty = keys.filter(function (k) { return k !== ""; });
+    var numeric = nonEmpty.length > 0 && nonEmpty.every(function (k) { return numericValue(k) !== null; });
+    var dir = next === "ascending" ? 1 : -1;
+    var decorated = rows.map(function (r, i) { return { row: r, key: keys[i], i: i }; });
+    decorated.sort(function (a, b) {
+      if (a.key === "" || b.key === "") {
+        if (a.key === b.key) return a.i - b.i;
+        return a.key === "" ? 1 : -1; // empties last regardless of direction
+      }
+      var cmp;
+      if (numeric) {
+        cmp = numericValue(a.key) - numericValue(b.key);
+      } else {
+        cmp = a.key.localeCompare(b.key, undefined, { numeric: true, sensitivity: "base" });
+      }
+      return cmp !== 0 ? dir * cmp : a.i - b.i; // stable
+    });
+    decorated.forEach(function (d) { tb.appendChild(d.row); });
+  }
+
+  function wireColumnResize(table, wrap, th, grip) {
+    var startX = 0;
+    var startW = 0;
+    function freezeWidths() {
+      // First drag: pin every column at its rendered width and switch to
+      // fixed layout so one column's change doesn't reflow the others.
+      if (table.style.tableLayout === "fixed") return;
+      Array.prototype.forEach.call(table.tHead.rows[0].cells, function (h) {
+        h.style.width = h.offsetWidth + "px";
+      });
+      table.style.tableLayout = "fixed";
+    }
+    grip.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      freezeWidths();
+      startX = e.clientX;
+      startW = th.offsetWidth;
+      grip.setPointerCapture(e.pointerId);
+      grip.classList.add("okf-col-resizer--active");
+    });
+    grip.addEventListener("pointermove", function (e) {
+      if (!grip.classList.contains("okf-col-resizer--active")) return;
+      th.style.width = Math.max(48, startW + (e.clientX - startX)) + "px";
+    });
+    function endDrag() {
+      if (!grip.classList.contains("okf-col-resizer--active")) return;
+      grip.classList.remove("okf-col-resizer--active");
+      updateTableFits();
+    }
+    grip.addEventListener("pointerup", endDrag);
+    grip.addEventListener("pointercancel", endDrag);
+    // Double-click a grip → back to automatic layout for the whole table.
+    grip.addEventListener("dblclick", function (e) {
+      e.stopPropagation();
+      Array.prototype.forEach.call(table.tHead.rows[0].cells, function (h) {
+        h.style.width = "";
+      });
+      table.style.tableLayout = "";
+      updateTableFits();
+    });
+  }
+
+  // Sticky headers only work when the wrapper is NOT a horizontal scroll
+  // container (position:sticky pins to the nearest scrollport). When the
+  // table fits, mark the wrapper so the stylesheet can lift the overflow
+  // and let thead stick under the page topbar.
+  function updateTableFits() {
+    Array.prototype.forEach.call(document.querySelectorAll(".okf-tablewrap"), function (wrap) {
+      var table = wrap.querySelector("table");
+      if (!table) return;
+      wrap.classList.toggle("okf-tablewrap--fit", table.scrollWidth <= wrap.clientWidth + 1);
+    });
+  }
+  var fitTimer = null;
+  window.addEventListener("resize", function () {
+    if (fitTimer) clearTimeout(fitTimer);
+    fitTimer = setTimeout(updateTableFits, 150);
+  });
+
+  // --- code blocks: copy button + language badge -------------------------
+  function initCodeBlocks() {
+    proseRoots().forEach(function (root) {
+      Array.prototype.forEach.call(root.querySelectorAll("pre"), function (pre) {
+        if (pre.dataset.okfEnhanced) return;
+        if (pre.closest(".okf-codewrap")) return;
+        pre.dataset.okfEnhanced = "1";
+        var wrap = document.createElement("div");
+        wrap.className = "okf-codewrap";
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+
+        var tools = document.createElement("div");
+        tools.className = "okf-code-tools";
+        var code = pre.querySelector("code");
+        var m = code && /language-([\w+-]+)/.exec(code.className || "");
+        if (m) {
+          var badge = document.createElement("span");
+          badge.className = "okf-code-lang";
+          badge.setAttribute("aria-hidden", "true");
+          badge.textContent = m[1];
+          tools.appendChild(badge);
+        }
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "okf-code-copy";
+        btn.textContent = "Copy";
+        btn.setAttribute("aria-label", "Copy code to clipboard");
+        btn.addEventListener("click", function () {
+          copyText((code || pre).textContent || "", btn, "Copied ✓");
+        });
+        tools.appendChild(btn);
+        wrap.appendChild(tools);
+      });
+    });
+  }
+
+  // --- images: click-to-zoom lightbox ------------------------------------
+  var lightbox = null;
+  var lightboxReturnFocus = null;
+  function closeLightbox() {
+    if (!lightbox) return;
+    lightbox.remove();
+    lightbox = null;
+    if (lightboxReturnFocus && typeof lightboxReturnFocus.focus === "function") {
+      try { lightboxReturnFocus.focus({ preventScroll: true }); } catch (e) {}
+    }
+    lightboxReturnFocus = null;
+  }
+  function openLightbox(img) {
+    closeLightbox();
+    lightboxReturnFocus = img;
+    lightbox = document.createElement("div");
+    lightbox.className = "okf-lightbox";
+    lightbox.setAttribute("role", "dialog");
+    lightbox.setAttribute("aria-modal", "true");
+    lightbox.setAttribute("aria-label", img.alt || "Image preview");
+
+    var fig = document.createElement("figure");
+    fig.className = "okf-lightbox__figure";
+    var full = document.createElement("img");
+    full.src = img.src;
+    full.alt = img.alt || "";
+    fig.appendChild(full);
+    if (img.alt) {
+      var cap = document.createElement("figcaption");
+      cap.textContent = img.alt;
+      fig.appendChild(cap);
+    }
+    var close = document.createElement("button");
+    close.type = "button";
+    close.className = "okf-lightbox__close";
+    close.textContent = "×";
+    close.setAttribute("aria-label", "Close image preview");
+    close.addEventListener("click", closeLightbox);
+
+    lightbox.appendChild(close);
+    lightbox.appendChild(fig);
+    lightbox.addEventListener("click", function (e) {
+      if (e.target === lightbox) closeLightbox();
+    });
+    document.body.appendChild(lightbox);
+    try { close.focus({ preventScroll: true }); } catch (e) {}
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeLightbox();
+  });
+
+  function initImages() {
+    proseRoots().forEach(function (root) {
+      Array.prototype.forEach.call(root.querySelectorAll("img"), function (img) {
+        if (img.dataset.okfZoom) return;
+        if (img.closest("a")) return; // linked images navigate, not zoom
+        img.dataset.okfZoom = "1";
+        img.classList.add("okf-zoomable");
+        img.tabIndex = 0;
+        img.setAttribute("role", "button");
+        img.setAttribute("aria-label", "View full-size image" + (img.alt ? ": " + img.alt : ""));
+        img.addEventListener("click", function () { openLightbox(img); });
+        img.addEventListener("keydown", function (e) {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          openLightbox(img);
+        });
+      });
+    });
+  }
+
+  function initAll() {
     initMermaid();
     initHighlight();
     initMath();
+    initTables();
+    initCodeBlocks();
+    initImages();
+  }
+
+  // Run after DOM is ready.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initAll);
+  } else {
+    initAll();
   }
 
   // Re-run on live studio patches (when the concept body is re-rendered).
-  window.addEventListener("okf-loom:bodyPatched", function () {
-    initMermaid();
-    initHighlight();
-    initMath();
-  });
+  window.addEventListener("okf-loom:bodyPatched", initAll);
 })();

@@ -609,6 +609,26 @@
       var source = el.getAttribute("data-source") || el.textContent || "";
       return tag + "|" + id + "|" + source.replace(/\s+/g, " ").trim().slice(0, 200);
     }
+    // Enhancement wrappers (renderers.js table/code UX): sign as the INNER
+    // block so an enhanced live table/pre compares equal to the bare
+    // server-rendered element on the other side of the diff. The tablewrap
+    // uses data-source (the original text captured at enhance time) because
+    // user-applied sorting reorders the live textContent without the
+    // content having changed. Full-length (no 200-char slice) on both the
+    // wrapper AND bare table/pre sides: a sorted table means row-level
+    // recursion can't reconcile order, so equality must be exact — a
+    // truncated signature would silently drop edits past the prefix.
+    if (el.classList && el.classList.contains("okf-tablewrap")) {
+      return "table|" + id + "|" + (el.getAttribute("data-source") || "");
+    }
+    if (el.classList && el.classList.contains("okf-codewrap")) {
+      var inner = el.querySelector("pre");
+      var innerText = inner ? (inner.textContent || "") : "";
+      return "pre|" + id + "|" + innerText.replace(/\s+/g, " ").trim();
+    }
+    if (tag === "table" || tag === "pre") {
+      return tag + "|" + id + "|" + (el.textContent || "").replace(/\s+/g, " ").trim();
+    }
     const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200);
     return tag + "|" + id + "|" + text;
   }
