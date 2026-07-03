@@ -33,41 +33,32 @@ changes nothing underneath:
   drop a note; your agent claims it, edits the files, and resolves it —
   and the page patches live in your browser while you keep reading.
 
-## Quickstart: zero → commenting to your agent
+## Quickstart
 
-All you need is Python 3.11+ and a clone — nothing to install.
+From the folder you want documented, give your agent one prompt:
 
-**1. Serve.**
-
-```bash
-git clone <this-repo> okf-loom && cd okf-loom
-scripts/okf-loom serve docs-bundle        # opens http://127.0.0.1:8787/
+```text
+Clone https://github.com/ojamin/okf-loom into ./okf-loom and load
+okf-loom/SKILL.md. Start the live studio on ./docs (import or bootstrap
+it as an OKF bundle first if it isn't one), give me the URL, then wait
+for my comments and work each one to resolution.
 ```
 
-**2. Comment.** In the browser, select any sentence — a **Comment**
-button appears. Type what you want changed and hit Enter.
+The agent serves the studio and blocks on the comment feed. You open the
+URL, select any sentence, type a note — and watch the agent's edit patch
+back into the page live. That's the whole workflow.
 
-**3. Point your agent at it.** Tell Claude Code, opencode, or any
-skill-loading agent to work in this repo — [`CLAUDE.md`](CLAUDE.md),
-[`AGENTS.md`](AGENTS.md), and [`SKILL.md`](SKILL.md) already tell it to
-run the comment loop, which is just CLI:
+No agent handy? The same flow by hand:
 
 ```bash
-scripts/okf-loom wait docs-bundle         # blocks until your comment arrives
+git clone https://github.com/ojamin/okf-loom
+okf-loom/scripts/okf-loom serve docs        # opens http://127.0.0.1:8787/
+okf-loom/scripts/okf-loom wait docs         # second terminal: blocks until a comment
 ```
 
-The agent claims your comment, edits the Markdown, resolves — and the
-page patches live in your open tab. That's the whole workflow.
-
-To run it on your own notes instead of the bundled docs:
-
-```bash
-scripts/okf-loom import path/to/your/notes my-bundle   # copy + stamp frontmatter
-scripts/okf-loom serve my-bundle
-```
-
-Add `--tunnel` to get a shareable `https://…trycloudflare.com` link
-(needs `cloudflared`; see [Sharing & security](#sharing--security)).
+Requirements: Python 3.11+, nothing to install. Add `--tunnel` to `serve`
+for a shareable `https://…trycloudflare.com` link (needs `cloudflared`;
+see [Sharing & security](#sharing--security)).
 
 ## Tour
 
