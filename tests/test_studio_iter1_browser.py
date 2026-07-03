@@ -184,13 +184,20 @@ def test_block_patch_preserves_selection_in_unchanged_block(server_url: str, pag
             const kids = Array.from(body.children).filter(n => n.nodeType === 1);
             if (kids.length < 2) return { error: 'need >= 2 blocks, got ' + kids.length };
             const first = kids[0];
-            const second = kids[1];
-            // Find a text node in the SECOND block to select.
-            let txt = second;
-            while (txt && txt.nodeType !== 3) {
-                txt = txt.firstChild;
+            // Find the first LATER block containing a non-empty text node.
+            // (A naive firstChild descent dead-ends now that table/code
+            // blocks lead with toolbar elements - filter input, copy
+            // button - so walk ALL text nodes per block instead.)
+            let txt = null;
+            for (const kid of kids.slice(1)) {
+                const walker = document.createTreeWalker(kid, NodeFilter.SHOW_TEXT);
+                let n;
+                while ((n = walker.nextNode())) {
+                    if (n.nodeValue.trim().length > 0) { txt = n; break; }
+                }
+                if (txt) break;
             }
-            if (!txt) return { error: 'second block has no text node' };
+            if (!txt) return { error: 'no later block has a selectable text node' };
             const len = Math.min(15, txt.nodeValue.length);
             const r = document.createRange();
             r.setStart(txt, 0);

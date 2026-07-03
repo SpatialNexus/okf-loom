@@ -131,7 +131,7 @@ class _LiveServer:
     def __enter__(self) -> str:
         self._proc = subprocess.Popen(
             [
-                str(REPO_ROOT / "scripts" / "okf"), "serve", str(self.bundle),
+                str(REPO_ROOT / "scripts" / "okf-loom"), "serve", str(self.bundle),
                 "--host", "127.0.0.1", "--port", str(self.port),
                 "--no-watch", "--no-open",
             ],
@@ -221,7 +221,7 @@ def _build_static_site(bundle: Path, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         [
-            str(REPO_ROOT / "scripts" / "okf"), "build", str(bundle),
+            str(REPO_ROOT / "scripts" / "okf-loom"), "build", str(bundle),
             "--out", str(out_dir), "--target", "static",
         ],
         cwd=str(REPO_ROOT),
