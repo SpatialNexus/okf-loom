@@ -2,13 +2,14 @@
 
 # okf-loom
 
-**Turn a folder of Markdown into a living knowledge studio — a rendered
-wiki, an evidence-ranked graph, hybrid search, and a select-to-comment
-loop that your coding agent works for you.**
+**A better agent + human experience for OKF knowledge trees. Serve any
+folder of plain Markdown as a live studio: you read, explore, and drop
+comments on any sentence — your agent picks them up and edits the files.
+The files stay plain Markdown throughout.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](#quickstart-60-seconds)
-[![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-zero-brightgreen.svg)](#quickstart-60-seconds)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](docs-bundle/tutorials/install.md)
+[![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-zero-brightgreen.svg)](docs-bundle/explanation/zero_dependencies.md)
 [![Tests](https://img.shields.io/badge/tests-1200%2B%20passing-brightgreen.svg)](tests/)
 
 </div>
@@ -17,37 +18,80 @@ loop that your coding agent works for you.**
 
 okf-loom is a toolkit and loadable agent skill for
 [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-bundles: knowledge kept as plain Markdown files with YAML frontmatter,
-cross-linked into a graph. No database, no build pipeline, no package to
-install — clone this repo, point it at a folder of Markdown, and you get
-the studio above.
+trees — knowledge kept as plain Markdown files with YAML frontmatter,
+cross-linked into a graph. It adds the experience layer on top and
+changes nothing underneath:
 
-## Quickstart (60 seconds)
+- **Your files stay plain OKF/Markdown — always.** No database, no
+  sidecar schema, no proprietary state. Every page you see is one `.md`
+  file that stays readable on GitHub, greppable, and diffable; every
+  edit okf-loom makes is an atomic, attributed write to that file.
+- **You get a studio, not a file browser.** A rendered wiki (Mermaid,
+  KaTeX, code), an evidence-ranked graph with six lenses, and six search
+  modes — live over your working tree, with zero install.
+- **Your agent gets a directable work queue.** Select any sentence and
+  drop a note; your agent claims it, edits the files, and resolves it —
+  and the page patches live in your browser while you keep reading.
 
-All you need is Python 3.11+ and a clone. There is nothing to install —
-the checked-in helper runs straight from the checkout (PyYAML is used if
-present; a built-in fallback covers the rest):
+## Quickstart: zero → commenting to your agent
+
+All you need is Python 3.11+ and a clone — nothing to install.
+
+**1. Serve.**
 
 ```bash
-git clone <this-repo> okf-loom
-cd okf-loom
-
-scripts/okf-loom serve docs-bundle --no-open    # → http://127.0.0.1:8787/
+git clone <this-repo> okf-loom && cd okf-loom
+scripts/okf-loom serve docs-bundle        # opens http://127.0.0.1:8787/
 ```
 
-That serves okf-loom's own documentation as a live studio — the same
-pages, graph, and screenshots you see on this page. Then try it on your
-own notes:
+**2. Comment.** In the browser, select any sentence — a **Comment**
+button appears. Type what you want changed and hit Enter.
+
+**3. Point your agent at it.** Tell Claude Code, opencode, or any
+skill-loading agent to work in this repo — [`CLAUDE.md`](CLAUDE.md),
+[`AGENTS.md`](AGENTS.md), and [`SKILL.md`](SKILL.md) already tell it to
+run the comment loop, which is just CLI:
+
+```bash
+scripts/okf-loom wait docs-bundle         # blocks until your comment arrives
+```
+
+The agent claims your comment, edits the Markdown, resolves — and the
+page patches live in your open tab. That's the whole workflow.
+
+To run it on your own notes instead of the bundled docs:
 
 ```bash
 scripts/okf-loom import path/to/your/notes my-bundle   # copy + stamp frontmatter
-scripts/okf-loom serve my-bundle --no-open
+scripts/okf-loom serve my-bundle
 ```
 
 Add `--tunnel` to get a shareable `https://…trycloudflare.com` link
 (needs `cloudflared`; see [Sharing & security](#sharing--security)).
 
 ## Tour
+
+### Select text, leave a comment, let your agent do the work
+
+Commenting is the studio's native editing gesture. Select any sentence
+and a *Comment* button appears; the comment is anchored to that exact
+text and lands in a queue your agent consumes:
+
+![The comment composer opened from a text selection, with the selected sentence as the anchor and an instruction typed for the agent](docs/media/comment-composer.png)
+
+While a studio is up, an agent runs the loop from the CLI — no plugins,
+no webhooks:
+
+```bash
+scripts/okf-loom wait docs-bundle                     # blocks until a comment arrives
+scripts/okf-loom comment-claim docs-bundle <id> --summary "what I will do"
+# … edit via attributed, undoable mutators (write-concept, link-add, update…) …
+scripts/okf-loom comment-resolve docs-bundle <id> --summary "what I did"
+```
+
+Edits broadcast live to every open tab over SSE — the page patches in
+place, no reload. Agent activity, pending changes, and group-undo are all
+first-class panels in the top bar.
 
 ### A wiki, not a file browser
 
@@ -74,28 +118,6 @@ this node's neighbourhood?). The side panel ranks the answers as clickable
 evidence, not just pixels:
 
 ![Animated cycle through the Map, Themes, Flow, Bridges, and Recent graph lenses](docs/media/graph-lenses.gif)
-
-### Select text, leave a comment, let your agent do the work
-
-Commenting is the studio's native editing gesture. Select any sentence
-and a *Comment* button appears; the comment is anchored to that exact
-text and lands in a queue your agent consumes:
-
-![The comment composer opened from a text selection, with the selected sentence as the anchor and an instruction typed for the agent](docs/media/comment-composer.png)
-
-While a studio is up, an agent runs the loop from the CLI — no plugins,
-no webhooks:
-
-```bash
-scripts/okf-loom wait docs-bundle                     # blocks until a comment arrives
-scripts/okf-loom comment-claim docs-bundle <id> --summary "what I will do"
-# … edit via attributed, undoable mutators (write-concept, link-add, update…) …
-scripts/okf-loom comment-resolve docs-bundle <id> --summary "what I did"
-```
-
-Edits broadcast live to every open tab over SSE — the page patches in
-place, no reload. Agent activity, pending changes, and group-undo are all
-first-class panels in the top bar.
 
 ### Five colour themes
 
