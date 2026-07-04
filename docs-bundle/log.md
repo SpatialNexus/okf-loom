@@ -1,5 +1,8 @@
 # Update Log
 
+## 2026-07-04
+* **Update**: Friction-report round: added block-level partial updates (`update-section`, `replace-text` — CLI verbs + `/__apply` op kinds), mid-thread `comment-reply` (agent replies post resolved under the thread root; parent stays open), user-side comment body editing over `/__comment-update`, strict-friendly `write-concept` defaults (resource + timestamp on create, `--no-defaults` opts out), runtime tunnel attach (`tunnel` verb + `POST /__tunnel` + session `server.json`), `wait` queue visibility, and live presence `--message` updates. Spec §7/§9/§11–§14/§17 and the CLI/http/comment references updated.
+
 ## 2026-07-01
 
 * **Consolidation**: Added [`reference/spec.md`](reference/spec.md) as the

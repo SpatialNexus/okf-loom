@@ -33,8 +33,10 @@ See [index.md](/reference/index.md) for the rest of the reference quadrant.
 | [`watch`](#watch) | Headless change feed; no HTTP server. |
 | [`wait`](#wait) | Foreground block-once for the next comment/change. |
 | [`token`](#token) | Print the per-session CSRF token. |
+| [`tunnel`](#tunnel) | Attach/detach a cloudflared quick tunnel on a RUNNING studio (no restart). |
 | [`comment-claim`](#comment-claim) | Mark a comment `claimed` by the agent, with optional `--summary`. |
 | [`comment-resolve`](#comment-resolve) | Mark a comment `resolved` with reply/activity links and optional `--summary`. |
+| [`comment-reply`](#comment-reply) | Post a threaded reply under the thread root WITHOUT resolving the parent. |
 | [`comment-list`](#comment-list) | List comments/directives, optionally filtered. |
 | [`presence`](#presence) | Set agent presence (mirror of `POST /__presence`). |
 | [`render`](#render) | Render a self-contained `viz.html`. |
@@ -48,6 +50,8 @@ See [index.md](/reference/index.md) for the rest of the reference quadrant.
 | [`init`](#init) | Scaffold a bundle with `index.md`, `log.md`, `okf-loom.config.yaml`. |
 | [`write-concept`](#write-concept) | Create or update a single concept file. |
 | [`set-frontmatter`](#set-frontmatter) | Set one frontmatter key on a concept. |
+| [`update-section`](#update-section) | Replace (or append to) ONE section of a concept body. |
+| [`replace-text`](#replace-text) | Exact textual patch on a concept body (fail-closed). |
 | [`link-add`](#link-add) | Add a markdown link (and optionally a typed relation). |
 | [`entity-add`](#entity-add) | Add an entity to a concept's `entities:` list. |
 | [`repair`](#repair) | Apply mechanical fixes (index regen + relation mirroring). |
@@ -57,11 +61,11 @@ See [index.md](/reference/index.md) for the rest of the reference quadrant.
 | Command shape | Commands |
 |---|---|
 | Positional `<bundle>` + `--format {text,json,md,dot}` | `info`, `validate`, `graph`, `search`, `discover`, `repair` |
-| Positional `<bundle>` + `--format {text,json}` | `plan`, `comment-claim`, `comment-resolve`, `comment-list`, `presence`, `index`, `update` |
+| Positional `<bundle>` + `--format {text,json}` | `plan`, `tunnel`, `comment-claim`, `comment-resolve`, `comment-reply`, `comment-list`, `presence`, `index`, `update` |
 | Optional/no positional bundle + `--format {text,json}` | `capabilities` uses optional `--bundle`; `init` requires `--bundle` |
 | Positional or bundle option, no `--format` | `serve`, `watch`, `wait`, `token`, `render`, `build`, `log`, `upgrade` (`upgrade` accepts optional positional `<bundle>` or `--bundle`) |
 | Non-bundle source/destination, no `--format` | `bootstrap <dest>`, `import <src> <dest>` |
-| Authoring verbs | `write-concept`, `set-frontmatter`, `link-add`, `entity-add` use `--bundle` and support `--format {text,json}` |
+| Authoring verbs | `write-concept`, `set-frontmatter`, `update-section`, `replace-text`, `link-add`, `entity-add` use `--bundle` and support `--format {text,json}` |
 
 | Convention | Detail |
 |---|---|
@@ -70,8 +74,8 @@ See [index.md](/reference/index.md) for the rest of the reference quadrant.
 | Atomic writes | Every file mutation goes through tmp + rename (AGENTS.md hard rule #8). |
 | Studio detection | Mutators detect the configured studio session directory (`.okf-loom/session/` by default) and route through `Studio.save_concept` (attribution + undo + events + SSE). Without a session they take the non-studio atomic write path. |
 | Exit `0` | Success (or `scripts/okf-loom wait` returned work). |
-| Exit `1` | Conformance failure (`validate`), or `scripts/okf-loom wait --timeout` expired with no work. |
-| Exit `2` | Strict-mode failure (`validate --strict`); `scripts/okf-loom init` on a non-empty destination; `scripts/okf-loom serve --public` on a non-TTY without `--public-ack`. |
+| Exit `1` | Conformance failure (`validate`), `scripts/okf-loom wait --timeout` expired with no work, or a fail-closed mutator refusal (`section_not_found`, `text_ambiguous:N`, missing link target, …). |
+| Exit `2` | Strict-mode failure (`validate --strict`); `scripts/okf-loom init` on a non-empty destination; `scripts/okf-loom serve --public` on a non-TTY without `--public-ack`; `scripts/okf-loom tunnel` with no live `server.json`. |
 
 # info
 
@@ -203,6 +207,9 @@ Run the live collaborative studio. Default bind is `127.0.0.1:8787`.
 | `--no-watch-ui` | Disable SSE live push server-side (`/__events` returns 503). |
 
 Writes `<bundle>/<studio.session_dir>/.token` (`.okf-loom/session/.token` by default, mode `0600`) on boot.
+Also writes `<session>/server.json` (`{host, port, pid, started, url, tunnel_url}`) at
+startup — refreshed on tunnel attach/detach, removed on clean shutdown —
+which [`tunnel`](#tunnel) reads to find the running server.
 See [http_routes.md](/reference/http_routes.md),
 [comment_lifecycle.md](/reference/comment_lifecycle.md),
 [/tutorials/live_studio_basics.md](/tutorials/live_studio_basics.md),
@@ -249,6 +256,11 @@ Run this in the agent's foreground; never background it.
 Without `--since`, the first call drains the oldest pre-existing open
 comment; subsequent calls drain the rest, then settle into wait-for-new.
 
+A returned comment carries a `queue: {pending: N, ids: [...]}` field —
+the other open comments still pending — so the agent sees backlog depth
+without diffing `comment-list` between loop turns. The one-work-item
+contract (block once, print one item, exit) is unchanged.
+
 # token
 
 ```bash
@@ -261,6 +273,35 @@ to `/__apply` / `/__undo` / `/__presence` / `/__comment` over HTTP
 directly; the CLI mutators attach the token automatically.
 Exits non-zero with a clear message if no session exists.
 
+# tunnel
+
+```bash
+scripts/okf-loom tunnel <bundle> [--stop] [--status] [--format {text,json}]
+```
+
+Attach a cloudflared quick tunnel to an ALREADY RUNNING studio session
+— no restart, no lost session token, no dropped SSE clients. Reads the
+live server's address from `<session>/server.json` plus the session
+`.token`, then drives the token-guarded `POST /__tunnel` admin route
+(see [http_routes.md](/reference/http_routes.md)). Startup-time
+alternative: [`serve --tunnel`](#serve).
+
+| Flag | Effect |
+|---|---|
+| `--stop` | Detach the running tunnel and restore the pre-tunnel `allowed_hosts`. |
+| `--status` | Print the current tunnel URL (or none) and exit. |
+
+On start, the tunnel hostname joins `allowed_hosts` immediately
+(checked per request), so comments/edits work through the link without
+a restart. The tunnel process belongs to the serve process and dies
+with it. Anyone with the link can READ the bundle; studio writes still
+require the per-session token.
+
+No `<session>/server.json` (no live server): exit `2`. Connection
+refused (stale session state; server crashed): diagnostic + exit `1`.
+`cloudflared` missing or slow to come up: the server answers `502` and
+the CLI exits `1`.
+
 # comment-claim
 
 ```bash
@@ -269,7 +310,9 @@ scripts/okf-loom comment-claim <bundle> <comment_id> [--actor ACTOR]
 ```
 
 Mark a comment `claimed` by the agent. Sets `claimed_by`; auto-flips
-presence to `editing <concept>` unless `--no-presence` is given.
+presence to `editing <concept>` unless `--no-presence` is given. The
+auto-presence carries the claim summary as the presence `message`, so
+the user sees WHAT is being edited, not just that editing happens.
 
 | Flag | Effect |
 |---|---|
@@ -296,6 +339,32 @@ Mark a comment `resolved` with an optional reply and activity links.
 | `--activity ID,ID` | Comma-separated change-list entry ids the resolution produced (drives one-click group undo). |
 | `--actor ACTOR` | Who is resolving (default `agent`). |
 
+# comment-reply
+
+```bash
+scripts/okf-loom comment-reply <bundle> <comment_id> [--body BODY] [--body-file BODY_FILE]
+            [--actor ACTOR] [--format {text,json}]
+```
+
+Post a threaded reply WITHOUT resolving the comment — the
+clarifying-question channel for an ambiguous ask. `--body` (or
+`--body-file`) is required and must be non-empty.
+
+| Flag | Effect |
+|---|---|
+| `--body BODY` | Reply text shown in the thread. |
+| `--body-file FILE` | Read the reply text from this file. |
+| `--actor ACTOR` | Who is replying (default `agent`). |
+
+The reply lands under the thread **root** (replying to a reply hoists
+to the root, matching the 2-level display cap) and never touches the
+parent's lifecycle state. It is created with `state=resolved` and
+`claimed_by=<actor>` (a statement, not an ask), so
+[`wait --for comment`](#wait) never returns the agent its own reply
+and thread archive (all-resolved) stays satisfiable. Unknown comment
+id: exit `1`. The user's answer — their reply — wakes `wait` as new
+work.
+
 # comment-list
 
 ```bash
@@ -313,8 +382,8 @@ See [comment_lifecycle.md](/reference/comment_lifecycle.md) and
 # presence
 
 ```bash
-scripts/okf-loom presence <bundle> [--state STATE] [--focus FOCUS] [--actor ACTOR]
-            [--format {text,json}]
+scripts/okf-loom presence <bundle> [--state STATE] [--focus FOCUS] [--message MESSAGE]
+            [--actor ACTOR] [--format {text,json}]
 ```
 
 CLI mirror of `POST /__presence`.
@@ -323,6 +392,7 @@ CLI mirror of `POST /__presence`.
 |---|---|
 | `--state STATE` | One of `idle`, `watching`, `thinking`, `editing` (default `idle`). |
 | `--focus FOCUS` | Concept id the agent is focused on. |
+| `--message MESSAGE` | Free-text progress line (max 200 chars; longer is truncated) rendered next to the presence chip and in the presence history. Re-post to update it mid-pass (`"linking 3 of 7 tables…"`). |
 | `--actor ACTOR` | Who is setting presence (default `agent`). |
 
 Stale presence is auto-recovered: a watcher sweep reverts to `idle`
@@ -454,7 +524,8 @@ Scaffold a new bundle at `<bundle>` (must not exist or be empty; exit
 scripts/okf-loom write-concept --bundle BUNDLE --id ID --type TYPE
             [--title TITLE] [--description DESCRIPTION] [--resource RESOURCE]
             [--timestamp TIMESTAMP] [--tag TAG] [--body BODY] [--body-file BODY_FILE]
-            [--force] [--format {text,json}] [--group-id GROUP_ID] [--actor ACTOR]
+            [--force] [--no-defaults] [--format {text,json}]
+            [--group-id GROUP_ID] [--actor ACTOR]
 ```
 
 Create or update a single concept (current spec §7). `--id` is the concept
@@ -463,6 +534,15 @@ required. Updating merges frontmatter (only the passed keys are
 touched; unknown keys are preserved). The body is replaced only if
 `--body`/`--body-file` is given AND the existing body is empty;
 otherwise `--force` is required to overwrite prose.
+
+On CREATE, the mechanically derivable recommended keys are defaulted so
+the new concept passes `validate --strict` without follow-up
+`set-frontmatter` calls: `resource` defaults to the bundle-absolute
+concept path (e.g. `/topics/x.md`) and `timestamp` to now UTC
+(ISO-8601 `Z`). Explicit `--resource`/`--timestamp` win; UPDATE never
+injects defaults; `--no-defaults` opts out. The JSON result carries
+`defaults_applied: ["resource", "timestamp"]` when defaults fired.
+Content keys (title, description, tags) are never auto-invented.
 
 Refuses reserved filenames (`index.md`, `log.md`) case-insensitively.
 See [/how-to/author_with_verbs.md](/how-to/author_with_verbs.md) and
@@ -479,6 +559,60 @@ scripts/okf-loom set-frontmatter --bundle BUNDLE --id ID --key KEY --value VALUE
 Set one frontmatter key on a concept. `--json-value` parses the value
 as JSON (lists/objects). Thin wrapper over the `set_frontmatter`
 update op.
+
+# update-section
+
+```bash
+scripts/okf-loom update-section --bundle BUNDLE --id ID --heading HEADING
+            [--body BODY] [--body-file BODY_FILE] [--append] [--create-if-missing]
+            [--dry-run] [--format {text,json}] [--group-id GROUP_ID] [--actor ACTOR]
+```
+
+Block-level partial update: replace (or append to) ONE section of a
+concept body, keeping the rest of the document — and all frontmatter —
+untouched. Exactly one of `--body`/`--body-file` is required. Thin
+wrapper over the `update_section` update op.
+
+| Flag | Effect |
+|---|---|
+| `--heading HEADING` | Section to target. Level-pinned (`"## Banking"`) or bare (`"Banking"`, matches any level); case-insensitive. |
+| `--append` | Append to the end of the section instead of replacing it. |
+| `--create-if-missing` | Create the section at the end of the body when the heading is absent (success reason `section_created`). |
+
+The section span includes its subsections (up to the next heading of
+the same or higher level). A leading copy of the target heading in the
+fragment is stripped, so a fragment file may repeat the heading.
+Headings inside fenced code blocks are ignored.
+
+| Outcome | Reason | Exit |
+|---|---|---|
+| Heading absent (without `--create-if-missing`). | `section_not_found` | `1` |
+| Duplicate matches — pin the level to disambiguate. | `section_ambiguous:N` | `1` |
+| Content already as requested (idempotent no-op). | `section_unchanged` | `0` |
+
+# replace-text
+
+```bash
+scripts/okf-loom replace-text --bundle BUNDLE --id ID
+            [--old OLD] [--old-file OLD_FILE] [--new NEW] [--new-file NEW_FILE]
+            [--all] [--dry-run] [--format {text,json}]
+            [--group-id GROUP_ID] [--actor ACTOR]
+```
+
+Exact textual patch on a concept body: swap `--old` for `--new`.
+Exactly one of `--old`/`--old-file` and exactly one of
+`--new`/`--new-file` is required. Thin wrapper over the `replace_text`
+update op. On success the reason string is `replaced N occurrence(s)`.
+
+| Flag | Effect |
+|---|---|
+| `--all` | Replace every occurrence (default: more than one match fails closed). |
+
+| Outcome | Reason | Exit |
+|---|---|---|
+| Zero matches. | `text_not_found` | `1` |
+| More than one match without `--all` — add surrounding context to `--old` to pin one occurrence. | `text_ambiguous:N` | `1` |
+| `--old` equals `--new` (idempotent no-op). | `same_value` | `0` |
 
 # link-add
 

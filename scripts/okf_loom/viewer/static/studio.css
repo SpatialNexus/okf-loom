@@ -157,6 +157,8 @@
 }
 .okf-presence__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .okf-presence__actor { font-weight: 600; }
+/* Free-text progress line ("linking 3 of 7 tables…") beside the state. */
+.okf-presence__message { color: var(--okf-fg-muted); font-style: italic; }
 
 /* iter2 G13: Agent-activity panel presence-history log. A compact transition
  * list (state + focus + time) the presence chip can't show. Reads as a small
@@ -184,6 +186,7 @@
 .okf-presence-log__item[data-state="editing"] .okf-presence-log__state { border-color: var(--okf-accent); color: var(--okf-accent); }
 .okf-presence-log__item[data-state="watching"] .okf-presence-log__state { border-color: var(--okf-ok); color: var(--okf-ok); }
 .okf-presence-log__focus { color: var(--okf-fg); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.okf-presence-log__message { color: var(--okf-fg-muted); font-style: italic; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .okf-presence-log__ts { color: var(--okf-fg-muted); font-size: var(--okf-text-xs); white-space: nowrap; }
 
 /* iter2 G11 (§3): the "Agent watching" switch. A toggle button (aria-pressed)

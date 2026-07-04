@@ -39,18 +39,44 @@ comments/edits work through the link. The server itself stays bound to
 the bundle — say so when you hand the URL over. Requires `cloudflared` on
 PATH; without it the command warns and serves local-only.
 
+Forgot `--tunnel`? Attach one to the RUNNING session — no restart, no lost
+session token or undo history:
+
+```bash
+scripts/okf-loom tunnel docs-bundle           # prints the public URL
+scripts/okf-loom tunnel docs-bundle --status  # current URL (or none)
+scripts/okf-loom tunnel docs-bundle --stop    # detach, restore local-only allowlist
+```
+
+## Partial body updates
+
+Change one block of a concept without touching the rest (no whole-body
+`write-concept --force`, no staging copies):
+
+```bash
+# Replace ONE section (subsections included); fail-closed on missing/ambiguous headings.
+scripts/okf-loom update-section --bundle docs-bundle --id reference/cli --heading "## Examples" --body-file /tmp/frag.md
+# Append to a section instead of replacing; create it if absent.
+scripts/okf-loom update-section --bundle docs-bundle --id reference/cli --heading "Notes" --body "extra line" --append --create-if-missing
+# Exact textual patch; must match exactly once (or pass --all).
+scripts/okf-loom replace-text --bundle docs-bundle --id reference/cli --old "old exact text" --new "new exact text"
+```
+
 ## Full surface
 
 - `validate`, `info`, `graph`, `search`
 - `discover`, `plan`, `repair`, `update`
-- `write-concept`, `set-frontmatter`, `link-add`, `entity-add`
+- `write-concept`, `set-frontmatter`, `link-add`, `entity-add`,
+  `update-section`, `replace-text`
 - `index`, `log`, `init`, `bootstrap`, `import`
-- `serve`, `wait`, `watch`, `token`, `comment-claim`, `comment-resolve`,
-  `comment-list`, `presence`
+- `serve`, `tunnel`, `wait`, `watch`, `token`, `comment-claim`,
+  `comment-reply`, `comment-resolve`, `comment-list`, `presence`
 - `render`, `build`, `capabilities`, `upgrade`
 
 Most read/report commands accept `--format json`. `wait` prints one JSON work
-item. `watch --emit jsonl` tails change events.
+item (with a `queue` field showing other still-open comments). `watch --emit
+jsonl` tails change events. `write-concept` fills `resource`/`timestamp` on
+create so new concepts pass `--strict` (opt out with `--no-defaults`).
 
 ## Dependencies
 

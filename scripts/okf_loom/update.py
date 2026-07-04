@@ -1070,6 +1070,163 @@ def _h_append_body_section(_bundle: Bundle, c: Concept, args: dict) -> _HandlerR
     return True, None, True
 
 
+# ---- update_section / replace_text (block-level partial updates) -----------
+#
+# The partial-update mutators exist so an agent can say "swap this block,
+# keep the rest" instead of reconstructing a whole document through
+# ``write-concept --force`` (which is where staging copies — and their
+# clobber-drift risk — come from). Both mutate ONLY the body; frontmatter
+# stays untouched, so the round-trip serializer preserves it byte-for-byte.
+
+
+def _parse_heading_spec(spec: str) -> tuple[int | None, str]:
+    """Parse a heading spec into ``(level, text)``.
+
+    ``"## Banking"`` → ``(2, "Banking")`` (level-pinned match);
+    ``"Banking"`` → ``(None, "Banking")`` (matches any level).
+    """
+    s = spec.strip()
+    m = re.match(r"^(#{1,6})\s+(.+?)\s*$", s)
+    if m:
+        return len(m.group(1)), m.group(2).strip()
+    return None, s
+
+
+def _section_spans(body: str) -> list[dict]:
+    """Locate every ATX heading outside fenced code blocks.
+
+    Returns dicts of ``{level, text, start, content_start, end}`` where
+    ``start`` is the offset of the heading line, ``content_start`` is the
+    offset just past the heading line's newline, and ``end`` is the offset
+    of the next heading with level <= this level (subsections belong to
+    their parent section — same outline semantics as the viewer's section
+    rail), or ``len(body)``.
+    """
+    heading_re = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+    fence_re = re.compile(r"^(```|~~~)")
+    spans: list[dict] = []
+    offset = 0
+    in_fence = False
+    for line in body.splitlines(keepends=True):
+        stripped = line.rstrip("\n")
+        if fence_re.match(stripped):
+            in_fence = not in_fence
+        elif not in_fence:
+            m = heading_re.match(stripped)
+            if m:
+                spans.append({
+                    "level": len(m.group(1)),
+                    "text": m.group(2).strip(),
+                    "start": offset,
+                    "content_start": offset + len(line),
+                })
+        offset += len(line)
+    for i, span in enumerate(spans):
+        end = len(body)
+        for nxt in spans[i + 1:]:
+            if nxt["level"] <= span["level"]:
+                end = nxt["start"]
+                break
+        span["end"] = end
+    return spans
+
+
+def _strip_leading_matching_heading(fragment: str, section_text: str) -> str:
+    """Drop the fragment's first line when it repeats the target heading.
+
+    Agents naturally include the heading in a ``frag.md`` they hand to
+    ``update-section``; without this, the section would render its own
+    heading twice.
+    """
+    lead = fragment.lstrip("\n")
+    first, sep, rest = lead.partition("\n")
+    lvl, text = _parse_heading_spec(first)
+    if lvl is not None and text.casefold() == section_text.casefold():
+        return rest if sep else ""
+    return fragment
+
+
+def _h_update_section(_bundle: Bundle, c: Concept, args: dict) -> _HandlerResult:
+    """Replace (or append to) ONE section's content, keeping the rest.
+
+    ``heading`` may be level-pinned (``"## Banking"``) or bare
+    (``"Banking"``, any level); matching is case-insensitive on the heading
+    text. Fail-closed: a missing section is ``section_not_found`` (unless
+    ``create_if_missing``), a duplicate heading is ``section_ambiguous:N`` —
+    never a silent guess. The section span includes its subsections (up to
+    the next heading of the same or higher level).
+    """
+    heading_spec = str(args.get("heading", "")).strip()
+    if not heading_spec:
+        raise KeyError("heading")
+    if args.get("body") is None:
+        raise KeyError("body")
+    fragment = str(args.get("body"))
+    mode = str(args.get("mode", "replace"))
+    if mode not in ("replace", "append"):
+        raise ValueError(f"mode must be replace|append, got {mode!r}")
+    level_req, text_req = _parse_heading_spec(heading_spec)
+    matches = [
+        s for s in _section_spans(c.body)
+        if s["text"].casefold() == text_req.casefold()
+        and (level_req is None or s["level"] == level_req)
+    ]
+    if not matches:
+        if bool(args.get("create_if_missing")):
+            level = level_req or 2
+            block = f"\n{'#' * level} {text_req}\n\n{fragment.strip()}\n"
+            c.body = c.body.rstrip("\n") + block
+            _refresh_headings(c)
+            return True, "section_created", True
+        return False, "section_not_found", False
+    if len(matches) > 1:
+        return False, f"section_ambiguous:{len(matches)}", False
+    sec = matches[0]
+    fragment = _strip_leading_matching_heading(fragment, sec["text"])
+    content = fragment.strip("\n")
+    tail = c.body[sec["end"]:]
+    if mode == "append":
+        prefix = c.body[:sec["end"]]
+        if not prefix.endswith("\n"):
+            prefix += "\n"
+        candidate = prefix.rstrip("\n") + "\n\n" + content + "\n" + ("\n" if tail else "") + tail
+    else:
+        mid = ("\n" + content + "\n") if content else "\n"
+        if tail:
+            mid += "\n"
+        candidate = c.body[:sec["content_start"]] + mid + tail
+    if candidate == c.body:
+        return False, "section_unchanged", False
+    c.body = candidate
+    _refresh_headings(c)
+    return True, None, True
+
+
+def _h_replace_text(_bundle: Bundle, c: Concept, args: dict) -> _HandlerResult:
+    """Exact textual patch on the body: swap ``old`` for ``new``.
+
+    Fail-closed: zero matches is ``text_not_found``; multiple matches is
+    ``text_ambiguous:N`` unless ``all`` is set (include more surrounding
+    context in ``old`` to disambiguate — same contract as an editor's
+    replace-exact).
+    """
+    old = args.get("old")
+    if not old:
+        raise KeyError("old")
+    old = str(old)
+    new = str(args.get("new", ""))
+    if old == new:
+        return False, "same_value", False
+    count = c.body.count(old)
+    if count == 0:
+        return False, "text_not_found", False
+    if count > 1 and not bool(args.get("all")):
+        return False, f"text_ambiguous:{count}", False
+    c.body = c.body.replace(old, new)
+    _refresh_headings(c)
+    return True, f"replaced {count} occurrence(s)", True
+
+
 # ---- remove_link -----------------------------------------------------------
 
 
@@ -1148,6 +1305,8 @@ _HANDLERS: dict[str, Any] = {
     "set_frontmatter": _h_set_frontmatter,
     "add_relation": _h_add_relation,
     "append_body_section": _h_append_body_section,
+    "update_section": _h_update_section,
+    "replace_text": _h_replace_text,
     "remove_link": _h_remove_link,
     "add_entity": _h_add_entity,
 }
@@ -1224,6 +1383,7 @@ def write_concept(
     body: str | None = None,
     body_file: str | Path | None = None,
     force: bool = False,
+    defaults: bool = True,
     studio: Any = None,
     actor: str = "agent",
     origin: str = "mutator",
@@ -1250,6 +1410,14 @@ def write_concept(
             Without ``--force``, supplying ``body``/``body_file`` against a
             concept whose existing body is non-empty raises
             ``WriteConceptError(code='body_refused')``.
+        defaults: when True (the default), CREATE fills the mechanically
+            derivable recommended keys that ``validate --strict`` would
+            otherwise flag: ``resource`` defaults to the bundle-absolute
+            concept path (the ``/demo/showcase.md`` convention) and
+            ``timestamp`` to the current UTC instant. Explicit values always
+            win; UPDATE never injects defaults (an existing concept may
+            deliberately omit them). Pass ``defaults=False`` (CLI:
+            ``--no-defaults``) for the bare pre-existing behaviour.
         studio: optional :class:`okf_loom.studio.Studio`. When provided
             (current spec §10/§13), the write is routed through
             ``studio.save_concept(...)`` — the single internal write funnel
@@ -1418,6 +1586,23 @@ def write_concept(
     # ----- CREATE -----
     concept_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Strict-friendly defaults: fill the mechanically derivable recommended
+    # keys so a freshly created concept doesn't immediately fail
+    # ``validate --strict`` on resource/timestamp (feedback: creating then
+    # needing two set-frontmatter calls to satisfy strict). Only the keys a
+    # machine can derive without inventing content — title/description/tags
+    # stay the author's job (AGENTS.md hard rule #7: no placeholder prose).
+    defaults_applied: list[str] = []
+    if defaults:
+        if resource is None:
+            rel = str(concept_path.relative_to(bundle_root)).replace(os.sep, "/")
+            resource = f"/{rel}"
+            defaults_applied.append("resource")
+        if timestamp is None:
+            from datetime import datetime, timezone
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            defaults_applied.append("timestamp")
+
     # Build frontmatter in canonical order (SPEC §8.1).
     fm: dict[str, Any] = {"type": type}
     if title is not None:
@@ -1448,7 +1633,7 @@ def write_concept(
     else:
         atomic_write_text(concept_path, content)
 
-    return {
+    out: dict[str, Any] = {
         "status": "created",
         "path": str(concept_path),
         "id": cid_str,
@@ -1456,3 +1641,6 @@ def write_concept(
         # Compatibility alias (deprecated; P2-27 spec wording is status+path).
         "created": str(concept_path),
     }
+    if defaults_applied:
+        out["defaults_applied"] = defaults_applied
+    return out

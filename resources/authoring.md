@@ -119,8 +119,21 @@ scripts/okf-loom link-add --bundle path/to/bundle \
 
 scripts/okf-loom entity-add --bundle path/to/bundle \
   --id tables/orders --label Order --kind business_entity
+
+# Partial body updates — swap one block, keep the rest. Fail-closed on
+# missing or ambiguous targets; never reconstruct a whole document.
+scripts/okf-loom update-section --bundle path/to/bundle \
+  --id tables/orders --heading "## Schema" --body-file /tmp/schema.md
+
+scripts/okf-loom replace-text --bundle path/to/bundle \
+  --id tables/orders --old "one row per order" --new "one row per completed order"
 ```
 
 All mutators parse, modify, serialize, and atomically rename. They preserve
 unknown frontmatter keys and are idempotent where repeated application should
 be safe.
+
+`write-concept` fills `resource` (the bundle-absolute concept path) and
+`timestamp` (now, UTC) on create so a fresh concept passes
+`validate --strict` without follow-up `set-frontmatter` calls. Explicit
+values win; `--no-defaults` opts out; updates never inject them.

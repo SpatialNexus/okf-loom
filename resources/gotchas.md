@@ -22,7 +22,9 @@
 11. `serve` binds 127.0.0.1:8787 by default and auto-opens a browser
     unless `--no-open`. Going public is an explicit choice:
     `--tunnel` (cloudflared quick tunnel, read-open to link holders) or
-    `--public --public-ack` (raw network bind).
+    `--public --public-ack` (raw network bind). Forgot `--tunnel`? Do NOT
+    kill and restart serve — `scripts/okf-loom tunnel <bundle>` attaches
+    one to the running session (`--stop` detaches).
 
 ## Common traps
 

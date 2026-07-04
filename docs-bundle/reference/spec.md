@@ -303,10 +303,29 @@ scripts/okf-loom write-concept --bundle docs-bundle --id reference/new_topic --t
 scripts/okf-loom set-frontmatter --bundle docs-bundle --id reference/new_topic --key tags --json-value '["reference"]'
 scripts/okf-loom link-add --bundle docs-bundle --source reference/new_topic --target reference/spec --label "current spec"
 scripts/okf-loom entity-add --bundle docs-bundle --id reference/new_topic --label "okf-loom" --kind Product
+scripts/okf-loom update-section --bundle docs-bundle --id reference/new_topic --heading "## Usage" --body-file /tmp/frag.md
+scripts/okf-loom replace-text --bundle docs-bundle --id reference/new_topic --old "exact old text" --new "exact new text"
 ```
 
 `link-add` is fail-closed on missing targets unless `--allow-forward-reference` is passed intentionally.
 Repeated actions should converge to no-op or already-present results rather than duplicate content.
+
+Partial body updates are first-class: `update-section` replaces (or, with
+`--append`, appends to) exactly one section — matched by heading text,
+optionally level-pinned (`"## Banking"`), including its subsections — and
+`replace-text` applies an exact textual patch. Both mutate only the body,
+fail closed on a missing target (`section_not_found` / `text_not_found`)
+and on ambiguity (`section_ambiguous:N` / `text_ambiguous:N`), and are
+available as `/__apply` op kinds `update_section` / `replace_text`. An
+agent should never need to reconstruct a whole document (or stage a copy)
+to change one block.
+
+`write-concept` CREATE fills the mechanically derivable recommended keys
+by default so a fresh concept passes `validate --strict` without follow-up
+`set-frontmatter` calls: `resource` defaults to the bundle-absolute
+concept path and `timestamp` to the current UTC instant. Explicit values
+win; UPDATE never injects defaults; `--no-defaults` opts out. Content
+keys (title, description, tags) are never auto-invented.
 
 ## 8. Indexes, logs, scaffolding, and derived artifacts
 
@@ -377,6 +396,12 @@ are part of the contract.
 `serve --tunnel` starts a Cloudflare quick tunnel, prints the public
 URL, and injects the tunnel hostname into the studio's runtime
 `allowed_hosts`.
+`scripts/okf-loom tunnel <bundle>` attaches the same quick tunnel to an
+ALREADY RUNNING session (no restart, no lost token/undo history) by
+driving the token-guarded `POST /__tunnel` admin route; `--stop`
+detaches it and restores the pre-tunnel allowlist, `--status` reports
+the current URL. The tunnel process always belongs to the serve
+process and dies with it.
 
 Active viewer code has a two-layer gate.
 The bundle must declare `viewer.allow_active_code: true`, and the operator must also consent with `--allow-active-code` or a truthy `OKF_LOOM_ALLOW_ACTIVE_CODE`.
@@ -429,11 +454,12 @@ Key routes:
 | `GET /__diff` | Token-protected diff between saved revisions. |
 | `GET /<path>.<media ext>` | Bundle-local media file (image/video/PDF allowlist). |
 | `POST /__comment` | User comment or threaded reply. |
-| `POST /__comment-update` | User-facing lifecycle/archive transition. |
-| `POST /__presence` | Agent presence update. |
+| `POST /__comment-update` | User-facing lifecycle/archive transition, or a body edit of a not-yet-resolved comment. |
+| `POST /__presence` | Agent presence update (`state`, `focus`, optional free-text `message` ≤200 chars). |
 | `POST /__apply` | Whitelisted update operation. |
 | `POST /__undo` | Single or group undo. |
 | `POST /__preview` | Render capped in-flight Markdown. |
+| `POST /__tunnel` | Server admin: attach/detach/status a quick tunnel at runtime (`action: start\|stop\|status`). Exempt from `--no-edit` (sharing a kiosk is the use case) but never from the token + Origin/Host guard. |
 
 Bundle-local media serving is contract-bound: only an allowlisted media
 extension routes to the file handler; the file must be reachable by the §5
@@ -472,8 +498,16 @@ State ownership:
 
 - Users create comments with `POST /__comment`.
 - Agents claim comments with `scripts/okf-loom comment-claim`.
+- Agents reply mid-thread with `scripts/okf-loom comment-reply` — the
+  clarifying-question channel. The reply is threaded under the root,
+  posted with `state=resolved` (a statement, not an ask) so `wait` never
+  returns the agent its own reply, and the parent's lifecycle state is
+  untouched: reply-without-resolve is the point.
 - Agents resolve comments with `scripts/okf-loom comment-resolve`.
-- Users dismiss or reopen comments with `/__comment-update`.
+- Users dismiss or reopen comments with `/__comment-update`, and may edit
+  the body of a not-yet-resolved comment (`/__comment-update` with
+  `body`); the edit bumps `updated_at` (so a waiting agent re-receives
+  the corrected ask) and re-derives `request_summary`.
 - Archive is a soft hide and never replaces lifecycle state.
 
 Current comment records include `id`, `ts`, `updated_at`, `concept`, `anchor`, `actor`, `body`, `state`, `claimed_by`, `resolved_activity`, `reply`, `summary`, `request_summary`, `detail`, `archived`, and optional `parent_id`.
@@ -492,7 +526,8 @@ Canonical foreground agent loop:
 ```bash
 scripts/okf-loom wait path/to/bundle --for comment
 scripts/okf-loom comment-claim path/to/bundle 01JABED9K0 --summary "adding dependency link"
-scripts/okf-loom presence path/to/bundle --state editing --focus tables/orders
+scripts/okf-loom comment-reply path/to/bundle 01JABED9K0 --body "Did you mean orders or order_items?"  # only when the ask is ambiguous
+scripts/okf-loom presence path/to/bundle --state editing --focus tables/orders --message "linking 3 of 7 tables"
 scripts/okf-loom link-add --bundle path/to/bundle --source tables/orders --target tables/customers --group-id PASS1
 scripts/okf-loom comment-resolve path/to/bundle 01JABED9K0 \
   --activity 01JABED5K7 \
@@ -502,6 +537,10 @@ scripts/okf-loom comment-resolve path/to/bundle 01JABED9K0 \
 
 `scripts/okf-loom wait` is block-once and foreground.
 Do not background it; the caller is the consumer.
+The returned comment carries a `queue` field — `{pending, ids}` for the
+OTHER open comments still waiting — so the agent sees backlog depth
+without diffing `comment-list` between loop turns; the one-work-item
+contract itself is unchanged.
 `scripts/okf-loom watch` is the continuous feed variant for a long-running consumer and can replay from `--since` before tailing live.
 
 See [/reference/comment_lifecycle.md](/reference/comment_lifecycle.md) and [/reference/cli.md](/reference/cli.md).
@@ -516,6 +555,7 @@ Current session shape:
 | Path | Purpose | Cap / invariant |
 |---|---|---|
 | `.token` | Per-session CSRF token, mode `0600`. | Regenerated by `scripts/okf-loom serve`; treat as secret. |
+| `server.json` | Running server address: `{host, port, pid, started, url, tunnel_url}`. | Written by `serve` at startup, refreshed on tunnel attach/detach, removed on clean shutdown. Lets `scripts/okf-loom tunnel` find the live port; stale after a crash (detected by the connect failing). |
 | `events.jsonl` | Activity/change/comment/presence event feed. | Active file cap from `studio.events_max_bytes` default 8 MiB; `studio.events_keep` default 7 rotated files. |
 | `directives.jsonl` | Append-only comment/directive state. | Active file cap 2 MiB; 3 files kept. |
 | `presence.json` | Current presence snapshot. | Stale presence recovers to idle after configured/default TTL. |
@@ -543,7 +583,7 @@ Guards:
 - Every GET is public to the local server, except sensitive diff reads require the session token.
 - Every POST requires `X-OKF-Token` and Origin/Host allow-list acceptance.
 - `studio.allowed_hosts` defaults to `127.0.0.1` and `localhost` and is never empty.
-- `--no-edit` makes the studio read-only; live reads stay on and mutating POST routes return `403`.
+- `--no-edit` makes the studio read-only; live reads stay on and mutating POST routes return `403`. `POST /__tunnel` is the one exemption (server admin, not a bundle write — sharing a read-only kiosk is its use case); it still requires the token and Origin/Host acceptance.
 - Mutating bodies are JSON, size-capped, and schema-checked.
 - `/__apply` accepts whitelisted update operations, not shell or arbitrary argv.
 - Path-bearing config values must remain within the bundle root.
@@ -611,7 +651,7 @@ See [/reference/embedding_guide.md](/reference/embedding_guide.md).
 A build-from-docs implementation must satisfy these acceptance checks:
 
 - `okf_loom.SPEC_VERSION == "0.1"`, and `okf_loom.LOOM_VERSION` matches the v1.0 runtime version printed by `scripts/okf-loom --version`.
-- `validate`, `info`, `graph`, `search`, `discover`, `plan`, `update`, `repair`, `index`, `log`, `init`, `bootstrap`, `import`, `serve`, `wait`, `watch`, `token`, `comment-claim`, `comment-resolve`, `comment-list`, `presence`, `render`, `build`, `capabilities`, `upgrade`, `write-concept`, `set-frontmatter`, `link-add`, and `entity-add` exist on the CLI surface.
+- `validate`, `info`, `graph`, `search`, `discover`, `plan`, `update`, `repair`, `index`, `log`, `init`, `bootstrap`, `import`, `serve`, `tunnel`, `wait`, `watch`, `token`, `comment-claim`, `comment-reply`, `comment-resolve`, `comment-list`, `presence`, `render`, `build`, `capabilities`, `upgrade`, `write-concept`, `set-frontmatter`, `link-add`, `entity-add`, `update-section`, and `replace-text` exist on the CLI surface.
 - Validation profiles and `--fail-on-broken-links` match this spec.
 - Search modes are dependency-free and restricted to the six current modes.
 - `okf-loom.config.yaml` fails closed on unknown enum, invalid bool, and path escape while preserving unknown keys.

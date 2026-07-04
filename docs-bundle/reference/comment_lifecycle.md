@@ -39,7 +39,7 @@ except through the server-side archive gate (see below).
 |---|---|---|
 | `open` | New user comment; not yet picked up. Default on creation. | User (`POST /__comment`) or reopen. |
 | `claimed` | Agent has picked it up and is working on it. Sets `claimed_by`. | Agent ([`scripts/okf-loom comment-claim`](cli.md#comment-claim)). |
-| `resolved` | Agent completed the work and posted a reply + activity links. | Agent ([`scripts/okf-loom comment-resolve`](cli.md#comment-resolve)). |
+| `resolved` | Agent completed the work and posted a reply + activity links. | Agent ([`scripts/okf-loom comment-resolve`](cli.md#comment-resolve)). Agent replies from [`comment-reply`](cli.md#comment-reply) are born `resolved`. |
 | `dismissed` | User cancelled an unclaimed comment. | User (`POST /__comment-update {state:"dismissed"}`). |
 
 ## State diagram
@@ -68,11 +68,24 @@ Each comment carries two timestamps:
 | Field | Mutability | When it changes |
 |---|---|---|
 | `ts` | Immutable | Set once at creation. |
-| `updated_at` | Bumped on every transition | Claim, resolve, dismiss, reopen, archive, unarchive, reply, summary update. |
+| `updated_at` | Bumped on every transition | Claim, resolve, dismiss, reopen, archive, unarchive, reply, summary update, body edit. |
 
 `scripts/okf-loom wait` treats a re-opened comment as fresh work even though its
 `id` is unchanged: it tracks the latest `updated_at` (with a
 compatibility fallback to `ts` for older records).
+
+# Body edits (open/claimed only)
+
+The comment author can amend the text of a not-yet-resolved comment in
+place: `POST /__comment-update` with a non-empty `body`. The studio UI
+shows an Edit button on user-authored, not-yet-resolved comments.
+
+| Rule | Detail |
+|---|---|
+| Allowed states | `open` / `claimed` only. `409` "cannot edit a resolved/dismissed comment (reopen it first)" on `resolved`/`dismissed`. |
+| Empty body | `400`. |
+| `updated_at` | Bumped — an agent blocked in [`scripts/okf-loom wait`](cli.md#wait) re-receives the corrected ask as fresh work. |
+| `request_summary` | Re-derived from the new body, so the collapsed preview tracks the edit. |
 
 # The `summary` field
 
@@ -104,6 +117,19 @@ The studio renders up to **2 levels of nesting**
 
 Use replies to ask the user a clarifying question on an existing
 directive rather than opening a new top-level comment.
+
+## Agent replies (`comment-reply`)
+
+The agent-side channel is
+[`scripts/okf-loom comment-reply`](cli.md#comment-reply). The reply is
+posted under the thread **root** (replying to a reply hoists to the
+root, matching the display cap) and never touches the parent's
+lifecycle state — reply-without-resolve is the point. It is created
+with `state=resolved` and `claimed_by=<actor>` (a statement, not an
+ask), so [`wait --for comment`](cli.md#wait) never returns the agent
+its own reply and the all-resolved archive gate stays satisfiable
+without the agent resolving its own remarks. The user's answer — their
+reply — wakes `wait` as new work.
 
 # Archive rules
 
@@ -196,7 +222,7 @@ A single record as returned by `GET /__comments` or
 | `actor` | string | `user` (default) or `agent`. |
 | `body` | string | The comment text. |
 | `state` | string | `open` / `claimed` / `resolved` / `dismissed`. |
-| `claimed_by` | string \| null | Set on claim; cleared on reopen. |
+| `claimed_by` | string \| null | Set on claim; cleared on reopen. Agent replies born `resolved` set it at creation. |
 | `resolved_activity` | list of strings | Change-list entry ids linked to the resolution (group undo). |
 | `reply` | string \| null | Long-form resolution message (set on resolve). |
 | `request_summary` | string \| null | Short blurb for the ASK — written by `comment-claim --summary`, auto-derived from the first line of `body` when absent. |
@@ -231,11 +257,18 @@ The canonical agent loop:
 ```bash
 scripts/okf-loom wait           <bundle> --for comment     # foreground block-once
 scripts/okf-loom comment-claim  <bundle> <id> --summary "…"
-scripts/okf-loom presence       <bundle> --state editing --focus tables/orders
+scripts/okf-loom comment-reply  <bundle> <id> --body "Did you mean X or Y?"  # only when the ask is ambiguous
+scripts/okf-loom presence       <bundle> --state editing --focus tables/orders --message "linking 3 of 7 tables…"
 # …mutators (link-add / entity-add / update) with --group-id PASS1…
 scripts/okf-loom comment-resolve <bundle> <id> --reply "Done — …" \
        --activity 01JABED5K7,01JABED5K8 --summary "done: …"
 ```
+
+The comment `wait` returns carries a `queue: {pending: N, ids: [...]}`
+field — the other open comments still pending — so the agent sees
+backlog depth without diffing `comment-list` between loop turns; the
+one-work-item contract (block once, print one item, exit) is
+unchanged.
 
 See [/tutorials/author_with_agent.md](/tutorials/author_with_agent.md)
 for the end-to-end walk-through and
@@ -245,7 +278,7 @@ archive/unarchive workflow.
 # See also
 
 - [index.md](/reference/index.md) — reference quadrant index.
-- [cli.md](cli.md) — `wait`, `comment-claim`, `comment-resolve`, `comment-list`, `presence`, `token`.
+- [cli.md](cli.md) — `wait`, `comment-claim`, `comment-reply`, `comment-resolve`, `comment-list`, `presence`, `token`.
 - [http_routes.md](http_routes.md) — `/__comment`, `/__comment-update`, `/__comments`, `/__events`.
 - [config_yaml.md](config_yaml.md) — `studio.presence_ttl_seconds`, `studio.claim_stale_seconds`, rotation caps.
 - [/tutorials/author_with_agent.md](/tutorials/author_with_agent.md) — the agent loop tutorial.

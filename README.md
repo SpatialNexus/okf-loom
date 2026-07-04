@@ -213,6 +213,8 @@ scripts/okf-loom bootstrap path/to/new-bundle
 scripts/okf-loom write-concept --bundle path/to/bundle --id notes/decision \
     --type decision --title "Use SQLite" --body "## Context ..."
 scripts/okf-loom link-add --bundle path/to/bundle --source tables/orders --target tables/customers
+scripts/okf-loom update-section --bundle path/to/bundle --id notes/decision \
+    --heading "## Context" --body-file /tmp/new-context.md   # swap one block, keep the rest
 ```
 
 Run `scripts/okf-loom --help` for the full verb list (25+ commands), or
@@ -224,7 +226,9 @@ read the [CLI reference](docs-bundle/reference/cli.md).
 is an explicit choice: `--tunnel` starts a Cloudflare quick tunnel
 (anyone with the link can read; mutating routes still require the
 per-session `X-OKF-Token` plus Origin/Host allow-list checks), and
-`--public --public-ack` does a raw network bind. Use `--no-edit` for
+`--public --public-ack` does a raw network bind. Already serving? Attach
+a tunnel to the running session with `scripts/okf-loom tunnel <bundle>`
+(`--stop` detaches) — no restart needed. Use `--no-edit` for
 read-only kiosk sharing. Details: [SECURITY.md](SECURITY.md) and the
 [HTTP routes reference](docs-bundle/reference/http_routes.md).
 

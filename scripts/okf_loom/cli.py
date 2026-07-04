@@ -111,12 +111,16 @@ _HARD_FAILURE_REASONS_EXACT: frozenset[str] = frozenset({
     "concept_not_found",         # update._apply_one: target concept missing
     "target_concept_not_found",  # update._h_add_link: link target missing
     "rev_conflict",              # §9.3 collision: concurrent on-disk edit (INTENT2-001)
+    "section_not_found",         # update._h_update_section: heading missing
+    "text_not_found",            # update._h_replace_text: old text missing
 })
 # These carry a free-form suffix after ":" (e.g. ``bad_args:'key'``,
 # ``unknown_op_kind:foo``); match by prefix.
 _HARD_FAILURE_REASON_PREFIXES: tuple[str, ...] = (
     "bad_args:",
     "unknown_op_kind:",
+    "section_ambiguous:",   # update-section: duplicate headings, refuse to guess
+    "text_ambiguous:",      # replace-text: old matches >1 place without --all
 )
 # Protective no-ops. ``would_overwrite_hand_written`` is intentionally
 # here: it is a guard that REFUSED to clobber hand-curated content, not
@@ -130,6 +134,7 @@ _IDEMPOTENT_NOOP_REASONS: frozenset[str] = frozenset({
     "already_tagged",
     "entity_exists",
     "section_exists",
+    "section_unchanged",
     "not_linked",
     "would_overwrite_hand_written",
 })
@@ -760,6 +765,92 @@ def cmd_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tunnel(args: argparse.Namespace) -> int:
+    """Attach/detach a public tunnel on a RUNNING studio session (§9/§14).
+
+    ``serve --tunnel`` decides at startup; this verb decides at runtime —
+    no restart, no lost session token, no dropped SSE clients. It reads
+    the live server's port from ``<session>/server.json`` and drives the
+    token-guarded ``POST /__tunnel`` admin route.
+    """
+    from .studio import Studio
+    import json as _json
+    import urllib.request
+    import urllib.error
+
+    studio = Studio.for_configured_bundle(args.bundle)
+    state_path = studio.server_state_path
+    if not state_path.is_file():
+        print(
+            f"error: no live studio server found for this bundle\n"
+            f"error: (missing {state_path}).\n"
+            f"error: start one with `scripts/okf-loom serve {args.bundle} --no-open`.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        state = _json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, _json.JSONDecodeError) as e:
+        print(f"error: could not read server state: {e}", file=sys.stderr)
+        return 1
+    token_path = studio.token_path
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except OSError as e:
+        print(f"error: could not read session token: {e}", file=sys.stderr)
+        return 1
+
+    action = "start"
+    if getattr(args, "stop", False):
+        action = "stop"
+    elif getattr(args, "status", False):
+        action = "status"
+    host = state.get("host") or "127.0.0.1"
+    port = state.get("port")
+    req = urllib.request.Request(
+        f"http://{host}:{port}/__tunnel",
+        data=_json.dumps({"action": action}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-OKF-Token": token},
+        method="POST",
+    )
+    try:
+        # cloudflared start can take a while to print its URL; the server
+        # waits up to 45s for it, so give the HTTP call more than that.
+        with urllib.request.urlopen(req, timeout=60.0) as resp:
+            payload = _json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            payload = _json.loads(e.read().decode("utf-8"))
+        except Exception:
+            payload = {}
+        print(f"error: tunnel {action} failed: "
+              f"{payload.get('error') or e}", file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, OSError) as e:
+        print(
+            f"error: could not reach the studio server on port {port}: {e}\n"
+            f"error: the session state may be stale (server crashed?). "
+            f"Restart with `scripts/okf-loom serve {args.bundle} --no-open`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.format == "json":
+        _print_json(payload)
+        return 0
+    url = payload.get("url")
+    if action == "status":
+        print(f"tunnel: {url or '(none)'}")
+    elif action == "stop":
+        print("tunnel stopped" if payload.get("stopped") else "no tunnel was running")
+    else:
+        already = " (already running)" if payload.get("already_running") else ""
+        print(f"Public tunnel: {url}/{already}  (dies with the serve process)")
+        print("Anyone with this link can READ the bundle; studio writes still "
+              "require the per-session token.")
+    return 0
+
+
 def cmd_comment_claim(args: argparse.Namespace) -> int:
     """Mark a comment ``claimed`` by the agent (current spec §12).
 
@@ -794,7 +885,12 @@ def cmd_comment_claim(args: argparse.Namespace) -> int:
         concept = updated.get("concept")
         if concept:
             try:
-                studio.set_presence(actor=args.actor, state="editing", focus=concept)
+                # Carry the ask into the presence line so the user sees WHAT
+                # the agent is editing, not just that it is editing.
+                studio.set_presence(
+                    actor=args.actor, state="editing", focus=concept,
+                    message=summary or updated.get("request_summary") or None,
+                )
             except Exception:
                 pass  # presence is best-effort; the claim itself succeeded
     if args.format == "json":
@@ -833,6 +929,51 @@ def cmd_comment_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_comment_reply(args: argparse.Namespace) -> int:
+    """Post a threaded agent reply WITHOUT resolving the comment (§12).
+
+    The mid-thread channel: when a comment is ambiguous or arrives cut
+    off, reply in the thread ("did you mean X or Y?") instead of asking
+    out-of-band — the parent stays open/claimed, the reply shows live in
+    the studio thread, and the user's answer (their reply) wakes ``wait``
+    as new work.
+
+    The reply directive is posted with ``state=resolved`` (it is a
+    statement, not an ask) so ``wait`` never returns the agent's own reply
+    and thread archiving stays one-click.
+    """
+    from .studio import Studio
+
+    studio = Studio.for_configured_bundle(args.bundle)
+    studio.ensure_session()
+    parent = studio.get_comment(args.comment_id)
+    if parent is None:
+        print(f"error: no such comment: {args.comment_id}", file=sys.stderr)
+        return 1
+    body = args.body
+    if body is None and args.body_file:
+        body = Path(args.body_file).read_text(encoding="utf-8")
+    if not (body or "").strip():
+        print("error: --body (or --body-file) is required and must be "
+              "non-empty", file=sys.stderr)
+        return 2
+    # Two-level threading cap (§12): replying to a reply hoists to the root
+    # so the thread never nests deeper than the UI displays.
+    root_id = parent.get("parent_id") or args.comment_id
+    reply = studio.post_comment(
+        concept=parent.get("concept", ""),
+        body=body,
+        actor=args.actor,
+        parent_id=root_id,
+        state="resolved",
+    )
+    if args.format == "json":
+        _print_json(reply)
+    else:
+        print(f"  replied to {root_id} (by {args.actor}): {reply['id']}")
+    return 0
+
+
 def cmd_comment_list(args: argparse.Namespace) -> int:
     """List comments / directives (current spec §12)."""
     from .studio import Studio
@@ -866,12 +1007,14 @@ def cmd_presence(args: argparse.Namespace) -> int:
     studio.ensure_session()
     presence = studio.set_presence(
         actor=args.actor, state=args.state, focus=args.focus,
+        message=getattr(args, "message", None),
     )
     if args.format == "json":
         _print_json(presence)
     else:
         focus = f" focus={presence['focus']}" if presence.get("focus") else ""
-        print(f"  presence: {presence['actor']} {presence['state']}{focus}")
+        msg = f" — {presence['message']}" if presence.get("message") else ""
+        print(f"  presence: {presence['actor']} {presence['state']}{focus}{msg}")
     return 0
 
 
@@ -1188,6 +1331,7 @@ def cmd_write_concept(args: argparse.Namespace) -> int:
             body=args.body,
             body_file=args.body_file,
             force=args.force,
+            defaults=not getattr(args, "no_defaults", False),
             studio=studio,
             actor=getattr(args, "actor", "agent") or "agent",
             origin="mutator",
@@ -1210,6 +1354,9 @@ def cmd_write_concept(args: argparse.Namespace) -> int:
     else:
         action = "Created" if result["status"] == "created" else "Updated"
         print(f"{action} concept '{result['id']}' at {result['path']}")
+        if result.get("defaults_applied"):
+            print(f"  (defaulted: {', '.join(result['defaults_applied'])} — "
+                  f"pass --no-defaults to skip)")
     return 0
 
 
@@ -1251,6 +1398,113 @@ def cmd_set_frontmatter(args: argparse.Namespace) -> int:
                 detail = f" ({reason})" if reason else ""
                 print(f"  {status} set {args.key}={value!r} on {args.id}{detail}")
         # P2-28: single-op verbs exit 1 when the target concept doesn't exist.
+        return _single_op_exit_code(result)
+    finally:
+        Path(plan_path).unlink(missing_ok=True)
+
+
+def cmd_update_section(args: argparse.Namespace) -> int:
+    """Replace or append to ONE section of a concept body (current spec §7).
+
+    The block-level partial-update mutator: swap a section, keep the rest
+    of the document — no whole-body reconstruction, no staging copies.
+    Fail-closed on a missing heading (unless ``--create-if-missing``) and
+    on ambiguous duplicate headings.
+    """
+    from .update import load_plan
+    import json as _json
+
+    if (args.body is None) == (args.body_file is None):
+        print("error: exactly one of --body / --body-file is required",
+              file=sys.stderr)
+        return 2
+    body = args.body
+    if args.body_file is not None:
+        body = Path(args.body_file).read_text(encoding="utf-8")
+
+    plan_data = {
+        "bundle_root": args.bundle,
+        "description": f"Update section {args.heading!r} on {args.id}",
+        "plan_kind": "update",
+        "ops": [{
+            "kind": "update_section",
+            "target": args.id,
+            "args": {
+                "heading": args.heading,
+                "body": body,
+                "mode": "append" if args.append else "replace",
+                "create_if_missing": args.create_if_missing,
+            },
+        }],
+    }
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        _json.dump(plan_data, f)
+        plan_path = f.name
+    try:
+        bundle = _load_bundle(args.bundle)
+        plan = load_plan(plan_path)
+        result = _studio_aware_apply(bundle, plan, dry_run=args.dry_run, args=args)
+        if args.format == "json":
+            _print_json(result)
+        else:
+            for _op, op_result in result.get("results", []):
+                status = "✓" if op_result.get("applied") else "·"
+                reason = op_result.get("reason", "")
+                detail = f" ({reason})" if reason else ""
+                verb = "append to" if args.append else "update"
+                print(f"  {status} {verb} section {args.heading!r} on {args.id}{detail}")
+        return _single_op_exit_code(result)
+    finally:
+        Path(plan_path).unlink(missing_ok=True)
+
+
+def cmd_replace_text(args: argparse.Namespace) -> int:
+    """Exact textual patch on a concept body (current spec §7).
+
+    ``--old`` must match exactly once (or pass ``--all``); zero matches or
+    an ambiguous match fails closed with exit 1 — never a silent guess.
+    """
+    from .update import load_plan
+    import json as _json
+
+    if (args.old is None) == (args.old_file is None):
+        print("error: exactly one of --old / --old-file is required",
+              file=sys.stderr)
+        return 2
+    if (args.new is None) == (args.new_file is None):
+        print("error: exactly one of --new / --new-file is required",
+              file=sys.stderr)
+        return 2
+    old = args.old if args.old is not None else Path(args.old_file).read_text(encoding="utf-8")
+    new = args.new if args.new is not None else Path(args.new_file).read_text(encoding="utf-8")
+
+    plan_data = {
+        "bundle_root": args.bundle,
+        "description": f"Replace text on {args.id}",
+        "plan_kind": "update",
+        "ops": [{
+            "kind": "replace_text",
+            "target": args.id,
+            "args": {"old": old, "new": new, "all": args.all},
+        }],
+    }
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        _json.dump(plan_data, f)
+        plan_path = f.name
+    try:
+        bundle = _load_bundle(args.bundle)
+        plan = load_plan(plan_path)
+        result = _studio_aware_apply(bundle, plan, dry_run=args.dry_run, args=args)
+        if args.format == "json":
+            _print_json(result)
+        else:
+            for _op, op_result in result.get("results", []):
+                status = "✓" if op_result.get("applied") else "·"
+                reason = op_result.get("reason", "")
+                detail = f" ({reason})" if reason else ""
+                print(f"  {status} replace text on {args.id}{detail}")
         return _single_op_exit_code(result)
     finally:
         Path(plan_path).unlink(missing_ok=True)
@@ -1781,6 +2035,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_token)
 
     sp = sub.add_parser(
+        "tunnel",
+        help="Attach a public cloudflared quick tunnel to an ALREADY RUNNING "
+             "studio session (no restart). --stop detaches it; --status "
+             "reports the current URL. Startup-time alternative: "
+             "`serve --tunnel`.",
+    )
+    sp.add_argument("bundle", help="Path to an OKF bundle directory")
+    grp = sp.add_mutually_exclusive_group()
+    grp.add_argument("--stop", action="store_true",
+                     help="Detach the running tunnel instead of starting one")
+    grp.add_argument("--status", action="store_true",
+                     help="Print the current tunnel URL (or none) and exit")
+    sp.add_argument("--format", choices=("text", "json"), default="text")
+    sp.set_defaults(func=cmd_tunnel)
+
+    sp = sub.add_parser(
         "comment-claim",
         help="Mark a comment `claimed` by the agent (current spec §12). The agent "
              "loop is: `scripts/okf-loom wait` → claim → do the work via mutators → "
@@ -1830,6 +2100,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_comment_resolve)
 
     sp = sub.add_parser(
+        "comment-reply",
+        help="Post a threaded reply to a comment WITHOUT resolving it "
+             "(current spec §12). Use it to ask a clarifying question in "
+             "the thread when the ask is ambiguous — the comment stays "
+             "open/claimed and the user's answer wakes `wait` again.",
+    )
+    sp.add_argument("bundle", help="Path to an OKF bundle directory")
+    sp.add_argument("comment_id", help="The comment id to reply to (replies "
+                                       "to a reply hoist to the thread root)")
+    sp.add_argument("--body", help="Reply text (shown in the thread)")
+    sp.add_argument("--body-file", help="Read the reply text from this file")
+    sp.add_argument("--actor", default="agent", help="Who is replying (default: agent)")
+    sp.add_argument("--format", choices=("text", "json"), default="text")
+    sp.set_defaults(func=cmd_comment_reply)
+
+    sp = sub.add_parser(
         "comment-list",
         help="List comments / directives, optionally filtered (current spec §12).",
     )
@@ -1847,6 +2133,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--state", default="idle",
                     help="idle|watching|thinking|editing (default: idle)")
     sp.add_argument("--focus", help="The concept id the agent is focused on")
+    sp.add_argument(
+        "--message",
+        help="Short free-text progress line shown next to the state chip "
+             "(max 200 chars). Re-post mid-pass to update it — e.g. "
+             "'linking 3 of 7 tables…' — so a long pass reads as progress, "
+             "not a static 'editing'.",
+    )
     sp.add_argument("--actor", default="agent")
     sp.add_argument("--format", choices=("text", "json"), default="text")
     sp.set_defaults(func=cmd_presence)
@@ -1963,6 +2256,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--body", help="Body text")
     sp.add_argument("--body-file", help="Read body from this file")
     sp.add_argument("--force", action="store_true", help="Allow overwriting existing body")
+    sp.add_argument(
+        "--no-defaults", dest="no_defaults", action="store_true",
+        help="On create, do NOT auto-fill the mechanically derivable "
+             "recommended keys (resource = the bundle-absolute concept "
+             "path, timestamp = now UTC). Default: fill them so the new "
+             "concept passes `validate --strict` without follow-up "
+             "set-frontmatter calls. Explicit --resource/--timestamp "
+             "always win.",
+    )
     sp.add_argument("--format", choices=("text", "json"), default="text")
     add_studio_flags(sp)
     sp.set_defaults(func=cmd_write_concept)
@@ -1977,6 +2279,62 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--format", choices=("text", "json"), default="text")
     add_studio_flags(sp)
     sp.set_defaults(func=cmd_set_frontmatter)
+
+    sp = sub.add_parser(
+        "update-section",
+        help="Replace (or append to) ONE section of a concept body — the "
+             "block-level partial update. Keeps the rest of the document "
+             "untouched; no whole-body --force rewrite needed.",
+    )
+    sp.add_argument("--bundle", required=True, help="Bundle directory")
+    sp.add_argument("--id", required=True, help="Concept id")
+    sp.add_argument(
+        "--heading", required=True,
+        help="Section heading to target. Level-pinned ('## Banking') or "
+             "bare ('Banking', matches any level); case-insensitive. "
+             "Duplicate matches fail closed (section_ambiguous) — pin the "
+             "level to disambiguate.",
+    )
+    sp.add_argument("--body", help="New section content (replaces the whole "
+                                   "section INCLUDING its subsections)")
+    sp.add_argument("--body-file", help="Read the new section content from this file "
+                                        "(a leading copy of the target heading is stripped)")
+    sp.add_argument(
+        "--append", action="store_true",
+        help="Append to the end of the section instead of replacing it",
+    )
+    sp.add_argument(
+        "--create-if-missing", dest="create_if_missing", action="store_true",
+        help="Create the section at the end of the body when the heading "
+             "is absent (default: fail with section_not_found)",
+    )
+    sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--format", choices=("text", "json"), default="text")
+    add_studio_flags(sp)
+    sp.set_defaults(func=cmd_update_section)
+
+    sp = sub.add_parser(
+        "replace-text",
+        help="Exact textual patch on a concept body: swap --old for --new. "
+             "Fail-closed on zero or ambiguous matches.",
+    )
+    sp.add_argument("--bundle", required=True, help="Bundle directory")
+    sp.add_argument("--id", required=True, help="Concept id")
+    sp.add_argument("--old", help="Exact text to replace (must match exactly "
+                                  "once unless --all)")
+    sp.add_argument("--old-file", help="Read the exact old text from this file")
+    sp.add_argument("--new", help="Replacement text")
+    sp.add_argument("--new-file", help="Read the replacement text from this file")
+    sp.add_argument(
+        "--all", action="store_true",
+        help="Replace every occurrence (default: >1 match fails closed "
+             "with text_ambiguous — add surrounding context to --old to "
+             "pin one occurrence)",
+    )
+    sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--format", choices=("text", "json"), default="text")
+    add_studio_flags(sp)
+    sp.set_defaults(func=cmd_replace_text)
 
     sp = sub.add_parser("link-add", help="Add a markdown link (+ optional typed relation)")
     sp.add_argument("--bundle", required=True, help="Bundle directory")

@@ -273,6 +273,14 @@ _APPLY_KIND_SCHEMAS: dict[str, dict[str, dict[str, type]]] = {
         "required": {"heading": str, "body": str},
         "optional": {},
     },
+    "update_section": {
+        "required": {"heading": str, "body": str},
+        "optional": {"mode": str, "create_if_missing": bool},
+    },
+    "replace_text": {
+        "required": {"old": str, "new": str},
+        "optional": {"all": bool},
+    },
     "set_tag": {
         "required": {"tag": str},
         "optional": {},
@@ -860,6 +868,20 @@ class Studio:
         drive ``/__apply`` / ``/__presence`` / ``/__comment`` over HTTP.
         """
         return self.session_dir / ".token"
+
+    @property
+    def server_state_path(self) -> Path:
+        """Live-server state file (``server.json``).
+
+        ``serve`` writes ``{host, port, pid, started, url, tunnel_url}``
+        here at startup (and refreshes it when a tunnel attaches/detaches)
+        so session-aware CLI verbs — ``okf tunnel``, and anything else that
+        must reach the RUNNING server over HTTP rather than the session
+        files — can find the port without scanning processes. Removed on
+        clean shutdown; a stale file (crash) is detected by the connect
+        failing.
+        """
+        return self.session_dir / "server.json"
 
     @property
     def last_logged_path(self) -> Path:
@@ -1605,7 +1627,8 @@ class Studio:
     def post_comment(self, *, concept: str, body: str,
                      anchor: dict[str, Any] | None = None,
                      actor: str = "user", detail: dict[str, Any] | None = None,
-                     parent_id: str | None = None) -> dict[str, Any]:
+                     parent_id: str | None = None,
+                     state: str = "open") -> dict[str, Any]:
         """Append a user comment/ask as an ``open`` directive (§9.1).
 
         ``parent_id`` (optional) creates a threaded reply to a parent
@@ -1614,7 +1637,17 @@ class Studio:
         When replying to an archived parent, the parent is
         auto-unarchived (archive is a soft hide, not a closed state). The
         new reply itself is never archived.
+
+        ``state`` may be ``"open"`` (default — an ask that is work for the
+        agent) or ``"resolved"`` (a statement that needs no follow-up).
+        Agent-authored replies posted via ``okf comment-reply`` use
+        ``"resolved"`` so ``wait --for comment`` never hands the agent its
+        own reply back as new work, and the thread-archive gate (every
+        comment resolved) stays satisfiable without the agent resolving
+        its own remarks.
         """
+        if state not in ("open", "resolved"):
+            raise ValueError(f"comment state must be open|resolved, got {state!r}")
         self.ensure_session()
         # Auto-unarchive parent on reply: adding to an archived thread
         # reopens it for business.
@@ -1644,8 +1677,8 @@ class Studio:
             "anchor": anchor or {},
             "actor": actor,
             "body": body,
-            "state": "open",
-            "claimed_by": None,
+            "state": state,
+            "claimed_by": actor if state == "resolved" else None,
             "resolved_activity": [],
             "detail": detail or {},
             "archived": False,
@@ -1659,13 +1692,20 @@ class Studio:
         # comment panel — but rotation preserves the most recent records.
         _append_jsonl(self.directives_path, directive, proc_lock=self._lock,
                       max_bytes=2 * 1024 * 1024, keep=3)
-        # Broadcast a comment event so the UI + agent see it live.
+        # Broadcast a comment event so the UI + agent see it live. Carries
+        # ``actor`` + ``parent_id`` so a tab that did NOT post the comment
+        # still threads a reply under its parent (before this, only the
+        # posting tab knew — the SSE payload lacked parent_id, so other
+        # open tabs rendered replies as roots until a reload).
         self.append_event({
             "type": "comment", "id": cid, "concept": concept,
-            "anchor": anchor or {}, "state": "open", "claimed_by": None,
+            "anchor": anchor or {}, "state": state,
+            "claimed_by": directive["claimed_by"],
+            "actor": actor,
             "body": body, "resolved_activity": [],
             "archived": False, "updated_at": now, "ts": now,
             "request_summary": _req_sum,
+            **({"parent_id": parent_id} if parent_id else {}),
         })
         return directive
 
@@ -1711,7 +1751,8 @@ class Studio:
                        reply: str | None = None,
                        archived: bool | None = None,
                        summary: str | None = None,
-                       request_summary: str | None = None) -> dict[str, Any] | None:
+                       request_summary: str | None = None,
+                       body: str | None = None) -> dict[str, Any] | None:
         """Transition a comment's lifecycle (§9.1): claim / resolve / dismiss.
 
         ``directives.jsonl`` is append-only; a transition appends a new record
@@ -1755,6 +1796,16 @@ class Studio:
             updated["summary"] = summary
         if request_summary is not None:
             updated["request_summary"] = request_summary
+        if body is not None and body != updated.get("body"):
+            # User-side comment edit (the enter-too-soon fix). The edit
+            # bumps updated_at, so an agent blocked in ``wait`` re-receives
+            # the still-open comment with the corrected body. Re-derive
+            # request_summary from the new body unless this call also sets
+            # it explicitly — the stored short must describe the CURRENT
+            # ask, not the pre-edit one.
+            updated["body"] = body
+            if request_summary is None:
+                updated["request_summary"] = ""
         # Preserve creation ts; bump updated_at on every transition.
         if "ts" not in updated:
             updated["ts"] = _now_iso()
@@ -1785,6 +1836,10 @@ class Studio:
             "request_summary": updated.get("request_summary"),
             "updated_at": updated.get("updated_at"),
             "ts": updated.get("ts"),
+            # actor + parent_id keep non-posting tabs' comment trees correct
+            # (same rationale as post_comment's SSE payload).
+            "actor": updated.get("actor"),
+            **({"parent_id": updated["parent_id"]} if updated.get("parent_id") else {}),
         })
         return updated
 
@@ -1836,17 +1891,29 @@ class Studio:
     # --- presence (current spec §12) --------------------------------------
 
     def set_presence(self, *, actor: str = "agent", state: str = "idle",
-                     focus: str | None = None) -> dict[str, Any]:
+                     focus: str | None = None,
+                     message: str | None = None) -> dict[str, Any]:
         """Set + broadcast agent presence (current spec §12).
 
         INTENT2-008 (iter-3): records a timestamp so the staleness sweep
         can revert to ``idle`` when the agent process drops (§13.8 robust
         liveness). The TTL is configurable via ``self.presence_ttl_s``
         (default 300s = 5 min).
+
+        ``message`` is an optional short free-text progress line ("linking
+        3 of 7 tables…") shown next to the state chip, so a long
+        multi-concept pass reads as visible progress instead of a static
+        "editing". Capped at 200 chars; re-post to update it mid-pass.
         """
         presence = {"actor": actor, "state": state}
         if focus:
             presence["focus"] = focus
+        if message:
+            msg = str(message).strip()
+            if len(msg) > 200:
+                msg = msg[:200].rstrip() + "…"
+            if msg:
+                presence["message"] = msg
         with self._lock:
             self.presence = presence
             self._presence_ts = time.time()
@@ -1859,13 +1926,17 @@ class Studio:
         except OSError:
             pass
         self.append_event({"type": "presence", "actor": actor, "state": state,
-                           **({"focus": focus} if focus else {})})
+                           **({"focus": focus} if focus else {}),
+                           **({"message": presence["message"]}
+                              if presence.get("message") else {})})
         return presence
 
     # §17 library API alias.
     def post_presence(self, *, actor: str = "agent", state: str = "idle",
-                      focus: str | None = None) -> dict[str, Any]:
-        return self.set_presence(actor=actor, state=state, focus=focus)
+                      focus: str | None = None,
+                      message: str | None = None) -> dict[str, Any]:
+        return self.set_presence(actor=actor, state=state, focus=focus,
+                                 message=message)
 
     def get_presence(self) -> dict[str, Any]:
         with self._lock:
@@ -2129,12 +2200,28 @@ def wait_for_work(
     # immediately. This lets the agent pick up work that was posted before
     # it started, rather than skipping it. Subsequent calls drain the rest,
     # then the baseline logic below kicks in for truly new work.
+    # The one-work-item contract stands (block once, print one item, exit),
+    # but the returned comment carries a ``queue`` field — the OTHER open
+    # comments still pending — so the agent can see backlog depth without
+    # diffing ``comment-list`` between loop turns.
+    def _with_queue(comment: dict[str, Any]) -> dict[str, Any]:
+        pending = sorted(
+            (c for c in studio.list_comments(state="open")
+             if c.get("id") != comment.get("id")),
+            key=lambda c: c.get("ts", ""),
+        )
+        return {
+            "kind": "comment", **comment,
+            "queue": {"pending": len(pending),
+                      "ids": [c.get("id") for c in pending]},
+        }
+
     if want_comment and since is None:
         open_comments = studio.list_comments(state="open")
         if open_comments:
             # Return the oldest open comment first (FIFO backlog drain).
             open_comments.sort(key=lambda c: c.get("ts", ""))
-            return {"kind": "comment", **open_comments[0]}
+            return _with_queue(open_comments[0])
 
     # Establish the baseline: the latest ids currently in each feed, so we only
     # return work that is NEW since the call began (unless `since` pins it).
@@ -2182,7 +2269,7 @@ def wait_for_work(
                     and c_ts > base_comment_ts
                 )
                 if is_new_id or is_reopened:
-                    return {"kind": "comment", **c}
+                    return _with_queue(c)
         if want_change:
             for e in studio.read_events(limit=500):
                 eid = e.get("id", "")

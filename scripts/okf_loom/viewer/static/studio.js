@@ -2118,6 +2118,65 @@
     });
     actions.appendChild(replyBtn);
 
+    // Edit: amend the body of a not-yet-resolved comment in place (the
+    // enter-too-soon fix). Shown on user-authored comments only — agent
+    // comments/replies are the agent's record, not the user's to rewrite.
+    // The server rejects edits on resolved/dismissed comments (409).
+    if (c.actor !== "agent" && c.state !== "resolved" && c.state !== "dismissed") {
+      var editBtn = el("button", { type: "button", class: "okf-comment__action", text: "Edit" });
+      editBtn.addEventListener("click", function () {
+        var existing = document.querySelector(".okf-inline-reply");
+        if (existing) existing.remove();
+        var card = document.getElementById("comment-" + c.id);
+        if (!card) return;
+        var editWrap = el("div", { class: "okf-inline-reply okf-inline-edit" });
+        editWrap.appendChild(el("div", {
+          class: "okf-composer__reply-context",
+          text: "Editing comment",
+        }));
+        var ta = el("textarea", {
+          class: "okf-composer__textarea okf-inline-reply__textarea",
+          rows: "3",
+          "aria-label": "Edit comment",
+        });
+        ta.value = c.body || "";
+        editWrap.appendChild(ta);
+        var row = el("div", { class: "okf-composer__actions" });
+        var save = el("button", { type: "button", class: "okf-studiobtn okf-studiobtn--primary", text: "Save" });
+        var cancelEdit = el("button", { type: "button", class: "okf-studiobtn", text: "Cancel" });
+        cancelEdit.addEventListener("click", function () { editWrap.remove(); });
+        save.addEventListener("click", function () {
+          var body = (ta.value || "").trim();
+          if (!body) { ta.focus(); return; }
+          if (body === (c.body || "").trim()) { editWrap.remove(); return; }
+          save.disabled = true; save.textContent = "Saving…";
+          tokenFetch("/__comment-update", {
+            method: "POST",
+            body: { id: c.id, body: body },
+          }).then(function (res) { return res.json(); }).then(function (data) {
+            if (!data.ok) throw new Error(data.error || "failed");
+            upsertComment(data.comment);
+            editWrap.remove();
+            renderCommentsPanel();
+            toast("Comment updated.", { tone: "success" });
+          }).catch(function (e) {
+            save.disabled = false; save.textContent = "Save";
+            toast("Edit failed: " + e.message, { tone: "error" });
+          });
+        });
+        ta.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save.click(); }
+          if (e.key === "Escape") { editWrap.remove(); }
+        });
+        row.appendChild(save);
+        row.appendChild(cancelEdit);
+        editWrap.appendChild(row);
+        card.appendChild(editWrap);
+        setTimeout(function () { ta.focus(); }, 30);
+      });
+      actions.appendChild(editBtn);
+    }
+
     // Lifecycle verbs (Cancel / Reopen). These DO NOT touch the archive
     // flag — archive is a separate track.
     if (c.state === "open" && !c.claimed_by) {
@@ -2231,13 +2290,19 @@
     // show). Dedup consecutive identical (state, focus) so a noisy feed
     // doesn't flood the log; cap at 24 entries.
     const focus = (p && p.focus) || "";
+    // The free-text progress line ("linking 3 of 7 tables…") is part of the
+    // dedup key so mid-pass message updates land in the presence history —
+    // that history IS the progress log for a long multi-concept pass.
+    const message = (p && p.message) || "";
     const last = state.presenceHistory[0];
-    if (!last || last.state !== st || last.focus !== focus) {
-      state.presenceHistory.unshift({ state: st, focus: focus, ts: new Date().toISOString() });
+    if (!last || last.state !== st || last.focus !== focus || (last.message || "") !== message) {
+      state.presenceHistory.unshift({ state: st, focus: focus, message: message, ts: new Date().toISOString() });
       if (state.presenceHistory.length > 24) state.presenceHistory.length = 24;
     }
     presenceChip.dataset.state = st;
-    presenceChip.setAttribute("aria-label", "Agent presence: " + st + (p && p.focus ? " " + p.focus : ""));
+    presenceChip.setAttribute("aria-label", "Agent presence: " + st
+      + (p && p.focus ? " " + p.focus : "")
+      + (message ? " — " + message : ""));
     presenceLabel.innerHTML = "";
     presenceLabel.appendChild(el("span", { class: "okf-presence__actor", text: "Agent" }));
     const verb = ({ idle: "idle", watching: "watching", thinking: "thinking about", editing: "editing" })[st] || st;
@@ -2247,6 +2312,13 @@
       const a = el("a", { href: "/" + p.focus });
       a.textContent = p.focus;
       presenceLabel.appendChild(a);
+    }
+    if (message) {
+      presenceLabel.appendChild(el("span", {
+        class: "okf-presence__message",
+        text: " — " + message,
+        title: message,
+      }));
     }
     // iter2 G11: keep the "Agent watching" toggle in sync with the agent's
     // live presence. Only "watching" reads as on; every other state (idle,
@@ -3216,6 +3288,7 @@
           const li = el("li", { class: "okf-presence-log__item", "data-state": h.state });
           li.appendChild(el("span", { class: "okf-presence-log__state", text: h.state || "idle" }));
           if (h.focus) li.appendChild(el("span", { class: "okf-presence-log__focus", text: h.focus }));
+          if (h.message) li.appendChild(el("span", { class: "okf-presence-log__message", text: h.message, title: h.message }));
           li.appendChild(el("span", { class: "okf-presence-log__ts", text: fmtTime(h.ts) }));
           log.appendChild(li);
         });

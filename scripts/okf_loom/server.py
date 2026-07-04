@@ -449,8 +449,12 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
                 503, "Studio not enabled on this server.",
                 content_type="text/plain; charset=utf-8",
             )
-        # --no-edit kiosk (current spec §9/§14): live reads stay on, but no mutating writes.
-        if not getattr(self.server, "studio_edit", True):
+        # --no-edit kiosk (current spec §9/§14): live reads stay on, but no
+        # mutating writes. ``/__tunnel`` is exempt: it is server admin (start
+        # or stop the share tunnel), not a bundle mutation — sharing a
+        # read-only kiosk is precisely the kiosk use case. It still sits
+        # behind the token + Origin/Host guard above.
+        if not getattr(self.server, "studio_edit", True) and path != "/__tunnel":
             return self._send_text(
                 403, "Read-only kiosk: commenting/directing is disabled (--no-edit).",
                 content_type="text/plain; charset=utf-8",
@@ -463,6 +467,8 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
                 content_type="text/plain; charset=utf-8",
             )
 
+        if path == "/__tunnel":
+            return self._handle_tunnel(data)
         if path == "/__comment":
             return self._handle_comment(data)
         if path == "/__comment-update":
@@ -608,12 +614,29 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         archived_flag = None
         if has_archived:
             archived_flag = bool(data.get("archived"))
-        if not new_state and not has_archived:
-            return self._send_json(400, {"ok": False, "error": "state or archived required"})
+        # Body edit (the enter-too-soon fix): the comment author can amend
+        # the text of a not-yet-resolved comment in place. The edit bumps
+        # updated_at, so an agent blocked in ``wait`` re-receives the
+        # corrected ask.
+        new_body = None
+        if "body" in data:
+            new_body = str(data.get("body") or "").strip()
+            if not new_body:
+                return self._send_json(400, {"ok": False, "error": "body must be non-empty"})
+        if not new_state and not has_archived and new_body is None:
+            return self._send_json(400, {"ok": False, "error": "state, archived, or body required"})
 
         current = self.studio.get_comment(comment_id)
         if current is None:
             return self._send_json(404, {"ok": False, "error": "comment not found"})
+
+        # Body edits are only meaningful while the ask is still actionable.
+        if new_body is not None and current.get("state") in ("resolved", "dismissed"):
+            return self._send_json(
+                409, {"ok": False,
+                      "error": "cannot edit a resolved/dismissed comment "
+                               "(reopen it first)"}
+            )
 
         # State transitions: only dismiss is blocked on claimed comments.
         if new_state == "dismissed" and current.get("claimed_by"):
@@ -649,12 +672,17 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             kwargs["state"] = new_state
         if has_archived:
             kwargs["archived"] = archived_flag
+        if new_body is not None:
+            kwargs["body"] = new_body
         updated = self.studio.update_comment(comment_id, **kwargs)
         self._send_json(200, {"ok": True, "comment": updated})
 
     def _handle_presence(self, data: dict[str, Any]) -> None:
         state = str(data.get("state", "idle"))
         focus = data.get("focus")
+        message = data.get("message")
+        if message is not None:
+            message = str(message)
         actor = str(data.get("actor", "agent")) or "agent"
         # INTENT2-002 fix: don't let a browser boot POST clobber the agent's
         # presence. The studio client used to POST
@@ -670,8 +698,90 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
                 # The agent is actively doing something — keep its presence.
                 self._send_json(200, {"ok": True, "presence": current, "preserved": True})
                 return
-        presence = self.studio.set_presence(actor=actor, state=state, focus=focus)
+        presence = self.studio.set_presence(actor=actor, state=state, focus=focus,
+                                            message=message)
         self._send_json(200, {"ok": True, "presence": presence})
+
+    def _handle_tunnel(self, data: dict[str, Any]) -> None:
+        """Attach/detach a cloudflared quick tunnel to the RUNNING server.
+
+        ``okf tunnel <bundle>`` drives this so going public no longer means
+        killing and restarting ``serve`` (losing the session token, open
+        SSE clients, and undo history). Actions:
+
+        * ``start`` — spawn cloudflared against this server's port, add the
+          tunnel hostname to ``allowed_hosts`` (checked per-request, so it
+          takes effect immediately), record it in ``server.json``, and
+          return the public URL. Idempotent: a second start returns the
+          existing URL with ``already_running: true``.
+        * ``stop`` — terminate the tunnel process, restore the base
+          allowlist, clear ``server.json``'s tunnel_url. Idempotent.
+        * ``status`` — report the current URL (or null).
+
+        The tunnel process belongs to THIS server process (it dies with it
+        — same lifecycle as ``serve --tunnel``). Exempt from --no-edit (it
+        is server admin, not a bundle write) but never from the token +
+        Origin/Host guard.
+        """
+        action = str(data.get("action", "start") or "start").strip()
+        if action not in ("start", "stop", "status"):
+            return self._send_json(
+                400, {"ok": False, "error": "action must be start|stop|status"})
+        server = self.server
+        lock = getattr(server, "_tunnel_lock", None)
+        if lock is None:
+            return self._send_json(
+                503, {"ok": False, "error": "tunnel control not available on this server"})
+        with lock:
+            current_url = getattr(server, "tunnel_url", None)
+            if action == "status":
+                return self._send_json(200, {"ok": True, "url": current_url})
+            if action == "start":
+                if current_url:
+                    return self._send_json(
+                        200, {"ok": True, "url": current_url, "already_running": True})
+                port = server.server_address[1]
+                try:
+                    proc, url = start_quick_tunnel(port)
+                except RuntimeError as e:
+                    return self._send_json(502, {"ok": False, "error": str(e)})
+                server.tunnel_proc = proc  # type: ignore[attr-defined]
+                server.tunnel_url = url  # type: ignore[attr-defined]
+                tunnel_host = url.split("://", 1)[1]
+                base = getattr(server, "base_allowed_hosts", None) or ("127.0.0.1", "localhost")
+                server.allowed_hosts = tuple(base) + (tunnel_host,)  # type: ignore[attr-defined]
+                write_server_state(server, self.studio)
+                self._emit_tunnel_activity("tunnel_attach",
+                                           f"public tunnel attached: {url}")
+                return self._send_json(200, {"ok": True, "url": url})
+            # stop
+            proc = getattr(server, "tunnel_proc", None)
+            if proc is not None:
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
+            server.tunnel_proc = None  # type: ignore[attr-defined]
+            server.tunnel_url = None  # type: ignore[attr-defined]
+            base = getattr(server, "base_allowed_hosts", None) or ("127.0.0.1", "localhost")
+            server.allowed_hosts = tuple(base)  # type: ignore[attr-defined]
+            write_server_state(server, self.studio)
+            if current_url:
+                self._emit_tunnel_activity("tunnel_detach",
+                                           f"public tunnel detached: {current_url}")
+            return self._send_json(200, {"ok": True, "url": None,
+                                         "stopped": current_url is not None})
+
+    def _emit_tunnel_activity(self, action: str, summary: str) -> None:
+        """Best-effort change-list entry so the share/unshare is visible."""
+        try:
+            self.studio.append_event({
+                "type": "activity", "actor": "agent", "origin": "tunnel",
+                "action": action, "ids": [], "summary": summary,
+                "undoable": False,
+            })
+        except Exception:
+            pass
 
     def _handle_apply(self, data: dict[str, Any]) -> None:
         """Run a whitelisted UpdateOp via the studio write funnel (§9.5/§12.3).
@@ -1832,6 +1942,35 @@ def start_quick_tunnel(port: int, *, timeout_s: float = 45.0):
     return proc, found[0]
 
 
+def write_server_state(server: Any, studio: "Studio | None") -> None:
+    """Persist the running server's address to ``<session>/server.json``.
+
+    Best-effort: session-aware CLI verbs (``okf tunnel``) read this to find
+    the live server's port; everything else keeps working without it.
+    """
+    if studio is None:
+        return
+    addr = getattr(server, "server_address", None)
+    if not addr:
+        return  # embedding stubs without a bound socket have no port to record
+    try:
+        from .io_utils import atomic_write_text
+        studio.ensure_session()
+        host, port = addr[:2]
+        state = {
+            "host": host,
+            "port": port,
+            "pid": os.getpid(),
+            "started": getattr(server, "started_iso", None),
+            "url": f"http://{host}:{port}/",
+            "tunnel_url": getattr(server, "tunnel_url", None),
+        }
+        atomic_write_text(studio.server_state_path,
+                          json.dumps(state, indent=2) + "\n")
+    except OSError:
+        pass
+
+
 def run_server(
     bundle_root: str | Path,
     *,
@@ -2113,17 +2252,28 @@ def run_server(
     # bundle config. The tunnel hostname joins allowed_hosts at runtime so
     # studio writes (comments, applies) work through the tunnel; the HTTP
     # server itself stays loopback-only.
-    tunnel_proc = None
-    tunnel_url = None
+    # Tunnel state lives on the server object (not run_server locals) so the
+    # ``POST /__tunnel`` admin route can attach/detach a tunnel at runtime
+    # (``okf tunnel <bundle>``) without restarting serve. base_allowed_hosts
+    # is the pre-tunnel allowlist a detach restores.
+    server.base_allowed_hosts = tuple(allowed_hosts_final)  # type: ignore[attr-defined]
+    server.tunnel_proc = None  # type: ignore[attr-defined]
+    server.tunnel_url = None  # type: ignore[attr-defined]
+    server._tunnel_lock = threading.Lock()  # type: ignore[attr-defined]
+    from datetime import datetime, timezone
+    server.started_iso = (  # type: ignore[attr-defined]
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
     if tunnel:
         actual_port = server.server_address[1]
         try:
-            tunnel_proc, tunnel_url = start_quick_tunnel(actual_port)
+            proc_url = start_quick_tunnel(actual_port)
+            server.tunnel_proc, server.tunnel_url = proc_url  # type: ignore[attr-defined]
         except RuntimeError as e:
             print(f"WARNING: --tunnel failed: {e}", file=sys.stderr)
             print("WARNING: continuing local-only.", file=sys.stderr)
-        if tunnel_url:
-            tunnel_host = tunnel_url.split("://", 1)[1]
+        if server.tunnel_url:  # type: ignore[attr-defined]
+            tunnel_host = server.tunnel_url.split("://", 1)[1]  # type: ignore[attr-defined]
             server.allowed_hosts = tuple(allowed_hosts_final) + (tunnel_host,)  # type: ignore[attr-defined]
             print(
                 f"WARNING: --tunnel makes this bundle READABLE BY ANYONE with the\n"
@@ -2131,6 +2281,11 @@ def run_server(
                 f"WARNING: writes still require the per-session token.",
                 file=sys.stderr,
             )
+    tunnel_url = server.tunnel_url  # type: ignore[attr-defined]
+    # server.json: lets session-aware CLI verbs (``okf tunnel``) find the
+    # running server's port. Written after the tunnel attempt so a
+    # --tunnel start records its URL too.
+    write_server_state(server, studio)
 
     print(
         f"Serving OKF bundle '{display_name}' at http://{host}:{port}/  "
@@ -2156,9 +2311,18 @@ def run_server(
     finally:
         if watcher is not None:
             watcher.stop()
-        if tunnel_proc is not None:
+        # The tunnel may have been attached at startup (--tunnel) OR at
+        # runtime (POST /__tunnel); either way it lives on the server
+        # object and dies with this process.
+        live_tunnel = getattr(server, "tunnel_proc", None)
+        if live_tunnel is not None:
             try:
-                tunnel_proc.terminate()
+                live_tunnel.terminate()
+            except OSError:
+                pass
+        if studio is not None:
+            try:
+                studio.server_state_path.unlink(missing_ok=True)
             except OSError:
                 pass
         server.shutdown()

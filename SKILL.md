@@ -42,18 +42,25 @@ These are the standing expectations for any agent using this skill:
 
    `--tunnel` prints a `https://…trycloudflare.com` link for users who are
    not on this machine and wires the tunnel host into the studio's
-   cross-origin allowlist automatically. Tell the user they can comment by
-   selecting any text; the graph lives at `/__graph`.
+   cross-origin allowlist automatically; `scripts/okf-loom tunnel <bundle>`
+   attaches the same link to an already-running session without a restart.
+   Tell the user they can comment by selecting any text; the graph lives
+   at `/__graph`.
 4. **Run the collaboration loop.** While a studio is up, user comments are
    work for you: `scripts/okf-loom wait <bundle>` blocks until there is a comment
    or change, then claim → edit → resolve
-   (`comment-claim` / mutators / `comment-resolve`). Read
+   (`comment-claim` / mutators / `comment-resolve`). When an ask is
+   ambiguous, ask in the thread with `comment-reply` and `wait` for the
+   answer instead of guessing. Read
    [`resources/studio-agent-loop.md`](resources/studio-agent-loop.md) before
    your first loop.
 5. **Prefer mutators for content changes while a studio session is live**
    (`write-concept`, `set-frontmatter`, `link-add`, `entity-add`,
-   `update`): they are attributed, undoable, and broadcast live to open
-   tabs. Direct file edits are fine otherwise — the watcher picks them up.
+   `update-section`, `replace-text`, `update`): they are attributed,
+   undoable, and broadcast live to open tabs. For edits inside an existing
+   body, reach for `update-section`/`replace-text` (swap one block, keep
+   the rest) rather than a whole-body `write-concept --force`. Direct file
+   edits are fine otherwise — the watcher picks them up.
 
 ## Fast start
 

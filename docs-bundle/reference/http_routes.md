@@ -40,11 +40,12 @@ y/N ack. See [cli.md § serve](cli.md#serve).
 | GET | `/__static/<file>` | Static assets (JS/CSS; bundle overrides first when active-code is on). |
 | GET | `/<path>.<media ext>` | Bundle-local media file (screenshots, diagrams, video, PDF). |
 | POST | `/__comment` | User's comment / threaded reply → `directives.jsonl`. |
-| POST | `/__comment-update` | User-facing state/archive transition. |
-| POST | `/__presence` | Agent presence (idle/watching/thinking/editing). |
+| POST | `/__comment-update` | User-facing state/archive transition, or a body edit of a not-yet-resolved comment. |
+| POST | `/__presence` | Agent presence (idle/watching/thinking/editing) + optional progress `message`. |
 | POST | `/__apply` | Run a whitelisted `UpdateOp` via the studio write funnel. |
 | POST | `/__undo` | Restore a prior snapshot (single or group). |
 | POST | `/__preview` | Render arbitrary in-flight markdown. |
+| POST | `/__tunnel` | Server admin: attach/detach/status a cloudflared quick tunnel at runtime. |
 
 Routing normalises a trailing slash (except root) and a trailing
 `.md` on concept routes (except `/index.md` and `<dir>/index.md`,
@@ -73,7 +74,10 @@ takes effect when the current agent presence is already `idle` or
 `watching`, so a browser boot cannot clobber an active agent.
 
 `--no-edit` flips the studio into a read-only kiosk: live reads
-stay on, every POST returns `403`.
+stay on, every POST returns `403` — except `/__tunnel`, which is
+server admin (not a bundle write; sharing a read-only kiosk is its use
+case) and stays available. It is never exempt from the token +
+Origin/Host guard.
 
 # GET routes
 
@@ -189,7 +193,7 @@ absent / `--no-watch-ui` is set.
 | `changed` / `created` / `removed` | A concept mutation (debounced). |
 | `graph` | A graph-affecting mutation (re-fetch the graph). |
 | `presence` | Agent presence state change. |
-| `comment` | A comment directive was appended or transitioned. |
+| `comment` | A comment directive was appended or transitioned. Carries `actor`, plus `parent_id` when the comment is a reply, so a tab that did not post the reply still threads it under its parent. |
 | `comment_link` | A resolve back-stamped an activity event. |
 | `ping` | Heartbeat. |
 | `resync` | Server instructs client to refetch (rev + per-doc rev map). |
@@ -331,6 +335,9 @@ track from lifecycle state**.
 
 // Archive — archive track only; state is preserved.
 { "id": "01JABED9K0", "archived": true }
+
+// Body edit — amend the comment text in place (open/claimed only).
+{ "id": "01JABED9K0", "body": "Add a depends_on relation to customers AND products." }
 ```
 
 Server-side rules:
@@ -340,6 +347,13 @@ Server-side rules:
 | `state == "dismissed"` on a claimed comment | `409` "cannot dismiss a claimed comment". |
 | `archived: true` on a reply (not a root) | `400` "archive is only available on the top-level comment of a thread". |
 | `archived: true` when any comment in the thread is not `resolved` | `409` with `unresolved_ids: [...]`. |
+| `body` on a `resolved`/`dismissed` comment | `409` "cannot edit a resolved/dismissed comment (reopen it first)". |
+| `body` empty | `400` "body must be non-empty". |
+
+A `body` edit bumps `updated_at` — an agent blocked in
+[`scripts/okf-loom wait`](cli.md#wait) re-receives the corrected ask —
+and re-derives `request_summary` from the new text. The studio UI
+shows an Edit button on user-authored, not-yet-resolved comments.
 
 Response `200 OK`:
 
@@ -354,13 +368,14 @@ See [comment_lifecycle.md § Server-side archive rules](comment_lifecycle.md).
 ## `/__presence`
 
 ```json
-{ "actor": "agent", "state": "editing", "focus": "tables/orders" }
+{ "actor": "agent", "state": "editing", "focus": "tables/orders", "message": "linking 3 of 7 tables…" }
 ```
 
 | Field | Allowed |
 |---|---|
 | `state` | `idle` / `watching` / `thinking` / `editing`. |
 | `focus` | Concept id (optional). |
+| `message` | Optional free-text progress line (max 200 chars; longer is truncated), rendered next to the presence chip and in the presence history. Re-POST to update it mid-pass. [`comment-claim`](cli.md#comment-claim) auto-presence carries the claim summary as the message. |
 | `actor` | Defaults to `agent`. |
 
 A `user` actor's write only takes effect when the current agent
@@ -395,6 +410,15 @@ accepts a shell/argv string — only a known op kind + args.
 | `group_id` | Optional; groups this write with others for one-click group undo. Must be a safe path token. |
 | `expected_rev` | Optional content-hash; mismatch returns `409` (§9.3 collision guard). |
 | `actor` | Defaults to `agent`. |
+
+The block-level partial-update kinds
+([cli.md § update-section](cli.md#update-section) /
+[cli.md § replace-text](cli.md#replace-text)) take these args:
+
+| Kind | Required args | Optional args |
+|---|---|---|
+| `update_section` | `heading` (str), `body` (str) | `mode` (`"replace"` \| `"append"`, default `"replace"`), `create_if_missing` (bool) |
+| `replace_text` | `old` (str), `new` (str) | `all` (bool) |
 
 Response `200 OK`:
 
@@ -448,6 +472,30 @@ Render arbitrary in-flight markdown (DoS-capped).
 { "ok": true, "html": "<h1>Hello</h1><p><strong>bold</strong> text</p>" }
 ```
 
+## `/__tunnel`
+
+Server admin: attach/detach a cloudflared quick tunnel on the RUNNING
+server, so going public does not mean restarting `serve` (losing the
+session token, open SSE clients, and undo history). Driven by
+[`scripts/okf-loom tunnel`](cli.md#tunnel). Exempt from `--no-edit`
+kiosk mode (server admin, not a bundle write) but never from the
+token + Origin/Host guard.
+
+```json
+{ "action": "start" }
+```
+
+| Action | Response |
+|---|---|
+| `start` | `200` `{ok: true, url}`; `{ok, url, already_running: true}` when a tunnel is already up (idempotent); `502` `{ok:false, error}` when `cloudflared` is missing or times out. |
+| `stop` | `200` `{ok: true, url: null, stopped: bool}` (idempotent). |
+| `status` | `200` `{ok: true, url}` (`url` is `null` when no tunnel is up). |
+
+Any other `action` returns `400`. `start` adds the tunnel hostname to
+the per-request `allowed_hosts` immediately and records the URL in
+`<session>/server.json`; `stop` restores the pre-tunnel allowlist.
+The tunnel process belongs to the serve process and dies with it.
+
 # Response shapes (common conventions)
 
 | Status | Body |
@@ -459,6 +507,7 @@ Render arbitrary in-flight markdown (DoS-capped).
 | `409` | JSON `{ok:false, ...}` (conflict, dismiss-on-claimed, unresolved-thread archive, etc.). |
 | `413` | Plain text. Oversized body; connection closed. |
 | `500` | Plain text `Internal Server Error`. Full traceback logged to stderr only (no info disclosure). |
+| `502` | JSON `{ok:false, error:"…"}`. Tunnel start failed (`cloudflared` missing or timed out). |
 | `503` | Plain text. Studio absent, SSE full, or `--no-watch-ui`. |
 
 # Embedding the server
@@ -483,6 +532,7 @@ See [/how-to/embed_in_harness.md](/how-to/embed_in_harness.md).
 
 - [index.md](/reference/index.md) — reference quadrant index.
 - [cli.md § serve](cli.md#serve) — flags, bind, public/kiosk modes.
+- [cli.md § tunnel](cli.md#tunnel) — runtime tunnel attach/detach on a live session.
 - [cli.md § token](cli.md#token) — reading the CSRF token.
 - [comment_lifecycle.md](comment_lifecycle.md) — comment state model and archive rules.
 - [config_yaml.md](config_yaml.md) — `studio.*` keys (`allowed_hosts`, `max_sse_clients`, `theme`, …).
