@@ -180,8 +180,9 @@ _PROFILE_REMAPS: dict[str, dict[str, Severity]] = {
     },
 }
 
-# Codes promoted to ERROR by ``--fail-on-broken-links``.
-_BROKEN_LINK_CODES: frozenset[str] = frozenset({"link.broken"})
+# Codes promoted to ERROR by ``--fail-on-broken-links``. asset.missing is a
+# broken reference to a file just like link.broken, so the flag covers both.
+_BROKEN_LINK_CODES: frozenset[str] = frozenset({"link.broken", "asset.missing"})
 
 
 def apply_profile(
@@ -400,6 +401,7 @@ def validate_bundle(
         _check_reserved_filenames(bundle, report)
     if spec.link_integrity:
         _check_link_integrity(bundle, report)
+        _check_asset_integrity(bundle, report)
         _check_citations_collision(bundle, report)
     if spec.index_structure:
         _check_index_structure(bundle, report)
@@ -450,10 +452,13 @@ _FINDING_CODE_TO_CATEGORY: dict[str, str] = {
     "concept.missing_recommended_keys": "concept_recommended_keys",
     # reserved_filenames (also surfaces non-root index frontmatter)
     "index.non_root_frontmatter": "reserved_filenames",
-    # link_integrity (link checks + citations-collision runs under the same gate)
+    # link_integrity (link checks + asset/image checks + citations-collision
+    # run under the same gate)
     "link.broken": "link_integrity",
     "link.form_inconsistency": "link_integrity",
     "link.wikilink_present": "link_integrity",
+    "asset.missing": "link_integrity",
+    "asset.out_of_bundle": "link_integrity",
     "concept.citations_both_forms": "link_integrity",
     # index_structure (index.missing_for_directory is the check-produced code;
     # index.parse_failed / index.unexpected_frontmatter are load warnings)
@@ -819,6 +824,94 @@ def _check_link_integrity(bundle: Bundle, report: ValidationReport) -> None:
                 },
             )
         )
+
+
+def _check_asset_integrity(bundle: Bundle, report: ValidationReport) -> None:
+    """Image targets must exist for the viewer to display them.
+
+    Images are deliberately not graph edges (spec: only ``[label](x.md)``
+    links are), so a typo'd screenshot path was previously invisible to
+    every check while rendering as a broken image in the studio and in
+    static builds. Two findings:
+
+    * ``asset.missing`` (WARNING, promoted by ``--fail-on-broken-links``):
+      the target file does not exist — neither inside the bundle nor, for
+      relative paths that escape it, anywhere in the workspace.
+    * ``asset.out_of_bundle`` (INFO): the target file exists but lives
+      outside the bundle root. Editors and GitHub render it, but the live
+      studio and static builds only serve files under the bundle root, so
+      it shows as broken there.
+
+    External URLs (any scheme, including the CSP-blocked remote images and
+    the sanitizer-blocked ``data:`` URIs) are skipped: they are not file
+    references. Targets are percent-decoded before the existence check
+    (``foo%20bar.png`` names ``foo bar.png``).
+    """
+    from urllib.parse import unquote
+    from .parse import extract_image_targets
+
+    for cid, concept in bundle.concepts.items():
+        source_dir = concept.path.parent if concept.path else bundle.root
+        seen: set[tuple[str, int]] = set()
+        for target_raw, line in extract_image_targets(concept.body):
+            key = (target_raw, line)
+            if key in seen:
+                continue
+            seen.add(key)
+            target = unquote(target_raw.split("#", 1)[0])
+            if not target or target.startswith("//"):
+                continue
+            if re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:", target):
+                continue  # external URL / data: — not a file reference
+            if target.startswith("/"):
+                candidate = bundle.root / target.lstrip("/")
+                out_of_bundle = False
+            else:
+                candidate = source_dir / target
+                try:
+                    resolved = candidate.resolve()
+                    resolved.relative_to(bundle.root.resolve())
+                    out_of_bundle = False
+                except (ValueError, OSError, RuntimeError):
+                    out_of_bundle = True
+            try:
+                exists = candidate.is_file()
+            except OSError:
+                exists = False
+            if exists and not out_of_bundle:
+                continue
+            if exists and out_of_bundle:
+                report.findings.append(
+                    Finding(
+                        code="asset.out_of_bundle",
+                        severity=Severity.INFO,
+                        message=(
+                            f"Image target {target_raw!r} exists but lives outside "
+                            "the bundle root; the live studio and static builds "
+                            "only serve bundle-local files, so it will render "
+                            "broken there."
+                        ),
+                        path=concept.path,
+                        line=line,
+                        concept_id=cid,
+                        detail={"target_raw": target_raw},
+                    )
+                )
+                continue
+            report.findings.append(
+                Finding(
+                    code="asset.missing",
+                    severity=Severity.WARNING,
+                    message=f"Image target does not exist: {target_raw!r}",
+                    path=concept.path,
+                    line=line,
+                    concept_id=cid,
+                    detail={
+                        "target_raw": target_raw,
+                        "out_of_bundle": out_of_bundle,
+                    },
+                )
+            )
 
 
 def _check_citations_collision(bundle: Bundle, report: ValidationReport) -> None:

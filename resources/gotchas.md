@@ -32,6 +32,12 @@
   added back with `bundle.include` in `okf-loom.config.yaml` (beats every
   exclusion, even nested-repo pruning — e.g. `include: [vendor-repo/]`);
   tune the rest with `bundle.exclude` / `bundle.respect_gitignore`.
+- Images/media must be bundle-local files: the studio serves (and static
+  builds copy) allowlisted media (`.png .jpg .jpeg .gif .webp .avif .bmp
+  .ico .svg .mp4 .webm .pdf`) under the same §5 visibility rules as
+  concepts — a gitignored/pruned asset will 404 in the studio too. Remote
+  hot-linked images are CSP-blocked and `data:` URIs are sanitized by
+  design. `validate` flags missing image targets (`asset.missing`).
 - YAML parses unquoted dates/version-like values. Quote timestamps and versions.
 - `tags` should be a YAML list, not a comma-separated scalar.
 - Markdown links inside code blocks are not graph edges.

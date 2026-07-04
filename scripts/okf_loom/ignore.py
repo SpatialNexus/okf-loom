@@ -335,6 +335,44 @@ def _read_gitignore_rules(dirpath: Path, base: str) -> tuple[IgnoreRule, ...]:
     return compile_rules(text.splitlines(), base=base)
 
 
+# --- Include-rule predicates (shared by the walker and the per-path oracle) --
+
+def _include_matches_file(rules: Sequence[IncludeRule], rel: str) -> bool:
+    return any(not r.dir_only and r.regex.match(rel) for r in rules)
+
+
+def _include_matches_dir(rules: Sequence[IncludeRule], rel: str) -> bool:
+    return any(r.regex.match(rel) for r in rules)
+
+
+def _include_revives(rules: Sequence[IncludeRule], rel: str) -> bool:
+    return any(r.revive and r.regex.match(rel) for r in rules)
+
+
+def _include_reaches(rules: Sequence[IncludeRule], rel: str) -> bool:
+    return any(
+        p.match(rel)
+        for r in rules if r.anchored
+        for p in r.prefix_regexes
+    )
+
+
+def _revival_mask(
+    groups: Sequence[Sequence[IgnoreRule]],
+    rel: str,
+    masked: frozenset[IgnoreRule],
+) -> frozenset[IgnoreRule]:
+    """Anchored exclusion rules matching the revived dir itself."""
+    hit = {
+        rule
+        for group in groups
+        for rule in group
+        if rule.anchored and rule not in masked
+        and _rule_matches(rule, rel, True)
+    }
+    return masked | hit if hit else masked
+
+
 def iter_markdown_files(
     root: str | Path,
     *,
@@ -344,8 +382,31 @@ def iter_markdown_files(
 ) -> list[Path]:
     """All ``*.md`` files under ``root``, minus excluded/pruned subtrees.
 
-    The deterministic replacement for ``sorted(root.rglob("*.md"))``:
-    entries are visited name-sorted per directory, symlinked directories are
+    The deterministic replacement for ``sorted(root.rglob("*.md"))`` — the
+    ``*.md`` specialization of :func:`iter_bundle_files`, which owns the
+    traversal semantics.
+    """
+    return iter_bundle_files(
+        root,
+        name_predicate=lambda name: fnmatch(name, "*.md"),
+        exclude=exclude,
+        include=include,
+        respect_gitignore=respect_gitignore,
+    )
+
+
+def iter_bundle_files(
+    root: str | Path,
+    *,
+    name_predicate,
+    exclude: Sequence[str] = (),
+    include: Sequence[str] = (),
+    respect_gitignore: bool = True,
+) -> list[Path]:
+    """All files matching ``name_predicate`` under ``root``, minus
+    excluded/pruned subtrees.
+
+    Entries are visited name-sorted per directory, symlinked directories are
     never followed (matching ``rglob``'s ``**`` behaviour; symlinked FILES
     are still yielded so the loader's containment guards keep applying),
     and unreadable directories are skipped silently (permissive load, spec
@@ -365,6 +426,10 @@ def iter_markdown_files(
 
     Args:
         root: bundle root directory.
+        name_predicate: ``(filename) -> bool`` filter applied to file
+            basenames (e.g. ``lambda n: fnmatch(n, "*.md")``). Include
+            rules do NOT bypass it — the predicate scopes what kind of
+            file the caller wants at all.
         exclude: ``bundle.exclude`` gitignore-style patterns (negations may
             re-include defaulted-out paths, git-style).
         include: ``bundle.include`` add-back patterns (positive only).
@@ -377,37 +442,18 @@ def iter_markdown_files(
     found: list[Path] = []
 
     def _inc_file(rel: str) -> bool:
-        return any(
-            not r.dir_only and r.regex.match(rel) for r in include_rules
-        )
+        return _include_matches_file(include_rules, rel)
 
     def _inc_dir(rel: str) -> bool:
-        return any(r.regex.match(rel) for r in include_rules)
+        return _include_matches_dir(include_rules, rel)
 
     def _inc_revive(rel: str) -> bool:
-        return any(r.revive and r.regex.match(rel) for r in include_rules)
+        return _include_revives(include_rules, rel)
 
     def _inc_reach(rel: str) -> bool:
-        return any(
-            p.match(rel)
-            for r in include_rules if r.anchored
-            for p in r.prefix_regexes
-        )
+        return _include_reaches(include_rules, rel)
 
-    def _mask_for(
-        groups: Sequence[Sequence[IgnoreRule]],
-        rel: str,
-        masked: frozenset[IgnoreRule],
-    ) -> frozenset[IgnoreRule]:
-        """Anchored exclusion rules matching the revived dir itself."""
-        hit = {
-            rule
-            for group in groups
-            for rule in group
-            if rule.anchored and rule not in masked
-            and _rule_matches(rule, rel, True)
-        }
-        return masked | hit if hit else masked
+    _mask_for = _revival_mask
 
     def _walk(
         dirpath: Path,
@@ -461,8 +507,7 @@ def iter_markdown_files(
                     _walk(child, child_rel, git_rules,
                           suppressed=True, masked=masked)
             else:
-                # fnmatch mirrors the platform case rules rglob("*.md") used.
-                if not fnmatch(entry.name, "*.md"):
+                if not name_predicate(entry.name):
                     continue
                 if _inc_file(child_rel):
                     found.append(Path(entry.path))
@@ -476,6 +521,116 @@ def iter_markdown_files(
     return found
 
 
+def path_within(candidate: Path, root: Path) -> bool:
+    """True iff ``candidate.resolve()`` is ``root`` or lives beneath it.
+
+    The containment guard that pairs with :func:`is_path_visible` /
+    :func:`iter_bundle_files` (which yield symlinked FILES): a symlinked
+    asset or reserved file pointing outside the bundle root is refused at
+    serve/copy time even though the scan can see it (P2-54). Resolves the
+    symlink once; non-existent paths resolve to their lexical location and
+    are checked the same way.
+    """
+    try:
+        resolved = candidate.resolve()
+        root_resolved = root.resolve()
+    except (OSError, RuntimeError):
+        return False
+    try:
+        resolved.relative_to(root_resolved)
+        return True
+    except ValueError:
+        return False
+
+
+def is_path_visible(
+    root: str | Path,
+    rel_posix: str,
+    *,
+    exclude: Sequence[str] = (),
+    include: Sequence[str] = (),
+    respect_gitignore: bool = True,
+) -> bool:
+    """Would the §5 scan reach this one path? An O(path-depth) oracle.
+
+    Mirrors :func:`iter_bundle_files` decision-for-decision without walking
+    the whole tree: ancestor directories are checked top-down with the same
+    pruning/revival logic (built-in defaults, ``.gitignore``, ``bundle.exclude``,
+    include revival + masking, the structural nested-repo rule, symlinked
+    directories never followed), then ``rel_posix`` itself is checked as a
+    file. The live server uses this to decide whether a bundle-local asset
+    may be served; anything the concept scan would prune (session state,
+    ``.git``, ``node_modules``, gitignored paths) stays unreachable.
+
+    Purely lexical plus rule files on disk: the caller owns existence and
+    containment checks (a symlinked FILE pointing outside the root passes
+    here, exactly as the scanner yields it — pair with a resolve-based
+    containment guard).
+    """
+    root = Path(root)
+    rel_posix = rel_posix.strip("/")
+    segments = rel_posix.split("/") if rel_posix else []
+    if not segments or any(
+        s in ("", ".", "..") or "\x00" in s or "\\" in s for s in segments
+    ):
+        return False
+    default_rules = compile_rules(DEFAULT_EXCLUDES)
+    config_rules = compile_rules(exclude)
+    include_rules = compile_include_rules(include)
+    git_rules: tuple[IgnoreRule, ...] = ()
+    dirpath = root
+    rel = ""
+    masked: frozenset[IgnoreRule] = frozenset()
+    suppressed = False
+    for seg in segments[:-1]:
+        if respect_gitignore:
+            git_rules = git_rules + _read_gitignore_rules(dirpath, rel)
+        groups = (default_rules, git_rules, config_rules)
+        child_rel = f"{rel}/{seg}" if rel else seg
+        child = dirpath / seg
+        # The walker never descends symlinked directories
+        # (``is_dir(follow_symlinks=False)``), so neither does the oracle.
+        try:
+            if child.is_symlink():
+                return False
+        except OSError:
+            return False
+        if _include_revives(include_rules, child_rel):
+            masked = _revival_mask(groups, child_rel, masked)
+            suppressed = False
+        elif suppressed:
+            if not (
+                _include_matches_dir(include_rules, child_rel)
+                or _include_reaches(include_rules, child_rel)
+            ):
+                return False
+        else:
+            ignored = is_ignored(groups, child_rel, True, masked=masked)
+            if not ignored:
+                try:
+                    ignored = (child / ".git").exists()
+                except OSError:
+                    return False
+            if ignored:
+                if (
+                    _include_matches_dir(include_rules, child_rel)
+                    or _include_reaches(include_rules, child_rel)
+                ):
+                    suppressed = True
+                else:
+                    return False
+        dirpath = child
+        rel = child_rel
+    if respect_gitignore:
+        git_rules = git_rules + _read_gitignore_rules(dirpath, rel)
+    groups = (default_rules, git_rules, config_rules)
+    if _include_matches_file(include_rules, rel_posix):
+        return True
+    if suppressed:
+        return False
+    return not is_ignored(groups, rel_posix, False, masked=masked)
+
+
 __all__ = [
     "DEFAULT_EXCLUDES",
     "GITIGNORE_FILENAME",
@@ -486,5 +641,8 @@ __all__ = [
     "compile_rule",
     "compile_rules",
     "is_ignored",
+    "is_path_visible",
+    "iter_bundle_files",
     "iter_markdown_files",
+    "path_within",
 ]

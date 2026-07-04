@@ -21,6 +21,8 @@ Routes:
     /__data/graph.json      graph JSON (for external tools / harness embed)
     /__data/content.json    content index JSON
     /__static/<file>        static asset (CSS / JS)
+    /<path>.<media ext>     bundle-local media file (png/jpg/webp/gif/svg/
+                            mp4/webm/pdf …) — §5-visible + contained only
 """
 from __future__ import annotations
 
@@ -51,6 +53,7 @@ from .render import (
     _content_index_json,
 )
 from .viewer.assets import (
+    BUNDLE_MEDIA_EXTENSIONS,
     list_builtin_static,
     load_config,
     load_static,
@@ -84,6 +87,23 @@ MAX_SEARCH_QUERY_CHARS: int = 4096
 # guard for rendered markdown lives in parse.py / markdown.py).
 DEFAULT_MAX_SSE_CLIENTS: int = 32
 MAX_EVENT_BODY_BYTES: int = 1 * 1024 * 1024  # 1 MiB cap on studio POST bodies.
+
+# CSP for bundle-served media (extensions in
+# ``viewer.assets.BUNDLE_MEDIA_EXTENSIONS`` — the shared serve/build
+# allowlist). Bundle files are USER CONTENT: a bundle SVG
+# can carry <script>, and navigating to it directly would otherwise execute
+# in the studio origin — where the per-session token is embedded in every
+# HTML page. ``sandbox`` gives direct navigation a unique opaque origin with
+# scripting disabled; <img>/<video> embedding is unaffected by the response
+# CSP. img/media/style allowances keep the browsers' built-in direct-view
+# pages (which wrap the file in a tiny document) rendering.
+_BUNDLE_ASSET_CSP: str = (
+    "default-src 'none'; "
+    "img-src 'self' data:; "
+    "media-src 'self'; "
+    "style-src 'unsafe-inline'; "
+    "sandbox"
+)
 
 # ---------------------------------------------------------------------------
 # Plugin hook (entry-point loader in current spec §15; see okf_loom.viewer.plugins)
@@ -1031,6 +1051,11 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             return self._handle_root()
         if path.endswith("/index.md"):
             return self._handle_dir_index(path[:-len("/index.md")])
+        # Bundle-local media: any path with an allowlisted media extension
+        # is served from the bundle tree (visibility + containment checks
+        # live in the handler). Everything else stays a concept path.
+        if posixpath.splitext(path)[1].lower() in BUNDLE_MEDIA_EXTENSIONS:
+            return self._handle_bundle_asset(path)
         # Concept page.
         return self._handle_concept(path)
 
@@ -1468,6 +1493,100 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             return self._send_bytes(200, body, content_type=ctype)
         return self._send_text(404, f"Unknown static asset: {name}", content_type="text/plain")
 
+    def _handle_bundle_asset(self, rel: str) -> None:
+        """Serve a bundle-local media file (screenshots, diagrams, video, PDF).
+
+        Only ``BUNDLE_MEDIA_EXTENSIONS`` paths route here, and a file is
+        served only when ALL of these hold:
+
+        * the path is clean relative segments — no ``..``/``.``/NUL/backslash
+          (rejected lexically; never resolved);
+        * the §5 scan would reach it (:func:`okf_loom.ignore.is_path_visible`
+          — so ``.okf-loom`` session state, ``.git``, ``node_modules`` and
+          gitignored paths stay unreachable, and ``bundle.include`` revives
+          work the same as for concepts);
+        * its resolved location stays inside the bundle root (``_path_within``
+          symlink defence, P2-54);
+        * it fits the response size cap (``MAX_RAW_RESPONSE_BYTES`` backstop).
+
+        Responses carry the sandboxed ``_BUNDLE_ASSET_CSP`` (bundle media is
+        user content — see the constant) and a weak mtime+size ETag so
+        image-heavy pages revalidate with 304s instead of re-downloading
+        every screenshot on each visit (Cache-Control stays no-cache).
+
+        A path that names no existing file falls through to concept routing
+        (``shot.png.md`` is a legal concept file rendering at ``/shot.png``);
+        an existing file that fails visibility/containment is refused with
+        404, never fallen through.
+        """
+        rel = rel.lstrip("/")
+        segments = rel.split("/")
+        if any(s in ("", ".", "..") or "\x00" in s or "\\" in s for s in segments):
+            return self._send_text(
+                404, "Not found", content_type="text/plain; charset=utf-8"
+            )
+        bundle = self.bundle
+        target = bundle.root / rel
+        try:
+            if not target.is_file():
+                raise OSError(rel)
+            st = target.stat()
+        except OSError:
+            # No such FILE → fall through to concept routing: a concept id
+            # may legally contain a media-looking suffix (``shot.png.md``
+            # renders at ``/shot.png``). When both exist, the file wins —
+            # an <img src> needs bytes, not an HTML page.
+            return self._handle_concept(rel)
+        if not _path_within(target, bundle.root):
+            return self._send_text(
+                404, "Not found", content_type="text/plain; charset=utf-8"
+            )
+        # Same exclusion semantics as Bundle.load / the watcher (spec §5):
+        # defaults + .gitignore + bundle.exclude, include add-backs on top.
+        # Config is re-read per request (cheap small file) so a lock-down
+        # edit takes effect without a restart, mirroring the watcher.
+        from .config import OkfConfig, OkfConfigError
+        try:
+            bundle_cfg = OkfConfig.load(bundle.root).bundle
+        except OkfConfigError:
+            from .config import BundleConfig
+            bundle_cfg = BundleConfig()
+        from .ignore import is_path_visible
+        if not is_path_visible(
+            bundle.root, rel,
+            exclude=bundle_cfg.exclude,
+            include=bundle_cfg.include,
+            respect_gitignore=bundle_cfg.respect_gitignore,
+        ):
+            return self._send_text(
+                404, "Not found", content_type="text/plain; charset=utf-8"
+            )
+        if st.st_size > MAX_RAW_RESPONSE_BYTES:
+            return self._send_text(
+                413,
+                f"Request entity too large: bundle file exceeds "
+                f"{MAX_RAW_RESPONSE_BYTES} bytes.",
+                content_type="text/plain; charset=utf-8",
+            )
+        ctype = _content_type_for(rel)
+        etag = f'W/"{st.st_mtime_ns:x}-{st.st_size:x}"'
+        if self.headers.get("If-None-Match") == etag:
+            return self._send_bytes(
+                304, b"", content_type=ctype,
+                csp=_BUNDLE_ASSET_CSP, extra_headers={"ETag": etag},
+            )
+        try:
+            body = target.read_bytes()
+        except OSError:
+            return self._send_text(
+                404, f"No such bundle file: {rel}",
+                content_type="text/plain; charset=utf-8",
+            )
+        self._send_bytes(
+            200, body, content_type=ctype,
+            csp=_BUNDLE_ASSET_CSP, extra_headers={"ETag": etag},
+        )
+
     # --- Response writers -------------------------------------------------
     def _studio_bootstrap(self) -> str | None:
         """Inline ``<script>``/``<link>`` bootstrap for the live studio (§7/§13).
@@ -1516,7 +1635,8 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         self._send_bytes(code, body.encode("utf-8"), content_type=content_type, close=close)
 
     def _send_bytes(self, code: int, body: bytes, *, content_type: str,
-                    close: bool = False) -> None:
+                    close: bool = False, csp: str | None = None,
+                    extra_headers: dict[str, str] | None = None) -> None:
         if close:
             # Signal both the server loop (stop reading after this response)
             # and the client (reconnect cleanly) that this connection closes.
@@ -1529,10 +1649,12 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         if close:
             self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-cache")
-        # Security response headers (defence in depth). The CSP restricts
-        # script sources to 'self' and the pinned CDN; everything else
-        # (inline event handlers, remote img/style, etc.) is blocked or
-        # restricted. Adjust via bundle overrides if needed.
+        # Security response headers (defence in depth). The default CSP
+        # restricts script sources to 'self' and the pinned CDN; everything
+        # else (inline event handlers, remote img/style, etc.) is blocked or
+        # restricted. ``csp`` overrides it per response — used by the bundle
+        # media handler to sandbox user content. Adjust via bundle overrides
+        # if needed.
         #
         # ``style-src`` and ``connect-src`` also allow
         # https://cdn.jsdelivr.net because highlight.js loads its theme
@@ -1546,16 +1668,21 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         # there silently wins.
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "img-src 'self' data: https://cdn.jsdelivr.net; "
-            "connect-src 'self' https://cdn.jsdelivr.net; "
-            "font-src 'self' https://cdn.jsdelivr.net; "
-            "object-src 'none'; "
-            "base-uri 'self'; "
-            "form-action 'self'",
+            csp or (
+                "default-src 'self'; "
+                "script-src 'self' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "img-src 'self' data: https://cdn.jsdelivr.net; "
+                "connect-src 'self' https://cdn.jsdelivr.net; "
+                "font-src 'self' https://cdn.jsdelivr.net; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'"
+            ),
         )
+        if extra_headers:
+            for header_name, header_value in extra_headers.items():
+                self.send_header(header_name, header_value)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -1580,40 +1707,50 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         super().log_message(format, *args)
 
 
+# Extension → Content-Type. Every response also carries
+# ``X-Content-Type-Options: nosniff``, so a type missing here does not
+# degrade to browser sniffing — it ships as ``application/octet-stream``
+# (download, never render). That makes this table the effective allowlist
+# of what the viewer can DISPLAY, for built-in static, override-dir, and
+# bundle media files alike.
+_EXT_CONTENT_TYPES: dict[str, str] = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".ico": "image/x-icon",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".pdf": "application/pdf",
+}
+
+
 def _content_type_for(name: str) -> str:
-    if name.endswith(".css"):
-        return "text/css; charset=utf-8"
-    if name.endswith(".js"):
-        return "application/javascript; charset=utf-8"
-    if name.endswith(".json"):
-        return "application/json; charset=utf-8"
-    if name.endswith(".svg"):
-        return "image/svg+xml"
-    if name.endswith(".html"):
-        return "text/html; charset=utf-8"
-    return "application/octet-stream"
+    ext = posixpath.splitext(name.lower())[1]
+    return _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
 
 
 def _path_within(candidate: Path, root: Path) -> bool:
     """True iff ``candidate.resolve()`` is ``root`` or lives beneath it.
 
-    Symlink defense (P2-54): used for static-override files and (via the
-    handler) for reserved index/log files so a symlinked ``index.md`` /
-    ``log.md`` / override asset pointing outside the bundle root is refused
-    at serve time even if :meth:`Bundle.load` followed the link at load
-    time. Resolves the symlink once; non-existent paths resolve to their
-    lexical location and are checked the same way.
+    Symlink defense (P2-54): used for static-override files, bundle media,
+    and (via the handler) for reserved index/log files so a symlinked
+    ``index.md`` / ``log.md`` / override asset pointing outside the bundle
+    root is refused at serve time even if :meth:`Bundle.load` followed the
+    link at load time. Canonical implementation lives in
+    :func:`okf_loom.ignore.path_within` (shared with the static build's
+    media copy).
     """
-    try:
-        resolved = candidate.resolve()
-        root_resolved = root.resolve()
-    except (OSError, RuntimeError):
-        return False
-    try:
-        resolved.relative_to(root_resolved)
-        return True
-    except ValueError:
-        return False
+    from .ignore import path_within
+    return path_within(candidate, root)
 
 
 # ---------------------------------------------------------------------------

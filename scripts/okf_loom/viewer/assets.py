@@ -49,6 +49,21 @@ _BUILTIN_STATIC = _THIS_DIR / "static"
 _OKF_VIEWER_SUBDIR = Path(".okf-loom") / "viewer"
 
 # ---------------------------------------------------------------------------
+# Bundle-local media the viewer displays (image-rich bundles): the live
+# server serves exactly these extensions from the bundle tree, and the
+# static/spa build copies exactly these into the site output. Nothing else
+# ever routes to the media path — config/secrets (.yaml, .token,
+# extensionless files) are structurally unservable regardless of the §5
+# visibility checks. Keep in sync with ``server._EXT_CONTENT_TYPES`` (a
+# type missing there ships as application/octet-stream under nosniff —
+# download, never render).
+# ---------------------------------------------------------------------------
+BUNDLE_MEDIA_EXTENSIONS: frozenset[str] = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico",
+    ".svg", ".mp4", ".webm", ".pdf",
+})
+
+# ---------------------------------------------------------------------------
 # Operator consent (P1-40): the bundle's allow_active_code is necessary but
 # not sufficient — the operator must also opt in via env or CLI flag.
 # ---------------------------------------------------------------------------

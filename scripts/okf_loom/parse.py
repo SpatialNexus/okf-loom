@@ -163,6 +163,23 @@ _LINK_RE = re.compile(
     re.VERBOSE,
 )
 
+# A markdown image: ``![alt](target)`` optionally with a quoted title. Same
+# permissive shape as ``_LINK_RE`` minus its ``(?<!!)`` guard — images are
+# deliberately NOT graph edges, but their targets still name files, so the
+# validator checks them separately (asset.missing).
+_IMAGE_LINK_RE = re.compile(
+    r"""
+    !\[
+        (?P<alt>[^\]]*)
+    \]
+    \(
+        (?P<target>[^)\s]+)
+        (?:\s+"[^"]*")?
+    \)
+    """,
+    re.VERBOSE,
+)
+
 # A wikilink (SPEC §10): ``[[target]]`` or ``[[target|Label]]``. This is body
 # syntax (not a frontmatter key). The target is a concept id written
 # slash-separated without the ``.md`` suffix (e.g. ``tables/users``). We
@@ -486,6 +503,24 @@ def extract_links(
                     concept_id=cid,
                 )
             )
+    return out
+
+
+def extract_image_targets(body: str) -> list[tuple[str, int]]:
+    """All markdown image targets in a body: ``[(target_raw, line), ...]``.
+
+    Images are not links (no graph edges — the ``(?<!!)`` guard in
+    ``_LINK_RE``), but their targets still name files the viewer must be
+    able to serve; the validator uses this for asset-existence warnings.
+    Fenced code blocks and inline code spans are skipped exactly like link
+    extraction, and line numbers are 1-based body lines.
+    """
+    cleaned = _strip_code_blocks(body)
+    cleaned = _INLINE_CODE_RE.sub("`", cleaned)
+    out: list[tuple[str, int]] = []
+    for m in _IMAGE_LINK_RE.finditer(cleaned):
+        line = cleaned.count("\n", 0, m.start()) + 1
+        out.append((m.group("target"), line))
     return out
 
 

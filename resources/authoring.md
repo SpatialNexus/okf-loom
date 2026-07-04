@@ -78,6 +78,24 @@ Use conventional headings when they fit:
 Other headings are welcome: `# Overview`, `# Joins`, `# Runbook`,
 `# Limitations`, `# Decisions`, and so on.
 
+## Images and media
+
+Store screenshots/diagrams inside the bundle (an `assets/` dir next to the
+concepts that use them) and reference them like any markdown image:
+
+```markdown
+![Login flow](/research/xero/assets/login-flow.png)
+```
+
+The studio serves bundle-local media directly (images, `.mp4`/`.webm`,
+`.pdf`), and static builds copy the same files, so both render what editors
+and GitHub render. Three deliberate limits: files in gitignored/pruned
+directories won't serve (same §5 visibility as concepts — `bundle.include`
+revives), remote hot-linked images are CSP-blocked, and `data:` URIs are
+sanitized away — keep media as bundle-local files. `validate` flags an
+image whose target file is missing (`asset.missing`) or outside the bundle
+root (`asset.out_of_bundle`).
+
 ## Index and log files
 
 - `index.md` lists a directory's contents. Only the root `index.md` may have

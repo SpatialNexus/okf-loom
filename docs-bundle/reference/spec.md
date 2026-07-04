@@ -427,12 +427,21 @@ Key routes:
 | `GET /__events` | SSE stream of live frames. |
 | `GET /__comments` | Canonical comment state from `directives.jsonl`. |
 | `GET /__diff` | Token-protected diff between saved revisions. |
+| `GET /<path>.<media ext>` | Bundle-local media file (image/video/PDF allowlist). |
 | `POST /__comment` | User comment or threaded reply. |
 | `POST /__comment-update` | User-facing lifecycle/archive transition. |
 | `POST /__presence` | Agent presence update. |
 | `POST /__apply` | Whitelisted update operation. |
 | `POST /__undo` | Single or group undo. |
 | `POST /__preview` | Render capped in-flight Markdown. |
+
+Bundle-local media serving is contract-bound: only an allowlisted media
+extension routes to the file handler; the file must be reachable by the §5
+scan (the same exclude/include/gitignore semantics as concept discovery)
+and its resolved path must stay inside the bundle root. Responses are
+sandboxed (bundle media is user content) and carry an ETag for
+revalidation. Static builds copy the same §5-visible media set so exports
+render identically to the live studio.
 
 Event rows are JSON objects with server-stamped `id`, `ts`, `seq`, and `rev` when persisted.
 Common frame types include `ready`, `changed`, `created`, `removed`, `graph`, `presence`, `comment`, `comment_link`, `activity`, `ping`, and `resync`.

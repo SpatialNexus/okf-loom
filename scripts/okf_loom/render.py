@@ -939,6 +939,58 @@ def _emit_site(
     )
     _atomic_write_text(root / "__search.html", search_html)
 
+    # Bundle-local media: copy every §5-visible media file into the site
+    # tree at its bundle-relative path, so image/video/PDF references keep
+    # working in exported sites exactly as the live server serves them.
+    _copy_bundle_media(bundle, root)
+
+
+def _copy_bundle_media(bundle: Bundle, root: Path) -> int:
+    """Copy §5-visible bundle media into the site output; returns the count.
+
+    Same visibility semantics as the live server's media route
+    (``iter_bundle_files`` over ``BUNDLE_MEDIA_EXTENSIONS`` with the
+    bundle's exclude/include/gitignore config) and the same containment
+    guard (a symlinked file pointing outside the bundle root is skipped,
+    P2-54). Files under a top-level ``__``-prefixed directory are skipped —
+    ``__static``/``__data`` are the site's own namespaces.
+    """
+    import posixpath as _pp
+    from .config import OkfConfig, OkfConfigError
+    from .ignore import iter_bundle_files, path_within
+    from .viewer.assets import BUNDLE_MEDIA_EXTENSIONS
+    try:
+        bundle_cfg = OkfConfig.load(bundle.root).bundle
+    except OkfConfigError:
+        from .config import BundleConfig
+        bundle_cfg = BundleConfig()
+    media = iter_bundle_files(
+        bundle.root,
+        name_predicate=lambda n: _pp.splitext(n.lower())[1] in BUNDLE_MEDIA_EXTENSIONS,
+        exclude=bundle_cfg.exclude,
+        include=bundle_cfg.include,
+        respect_gitignore=bundle_cfg.respect_gitignore,
+    )
+    copied = 0
+    for src in media:
+        rel = src.relative_to(bundle.root)
+        if rel.parts and rel.parts[0].startswith("__"):
+            continue
+        if not path_within(src, bundle.root):
+            continue
+        dest = root.joinpath(*rel.parts)
+        try:
+            data = src.read_bytes()
+        except OSError as e:
+            import sys
+            print(f"warning: skipping unreadable media file {src}: {e}",
+                  file=sys.stderr)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_bytes(dest, data)
+        copied += 1
+    return copied
+
 
 def _ancestor_dirs(cid: ConceptId) -> list[Path]:
     out: list[Path] = []
@@ -1100,6 +1152,28 @@ def _render_link_map(bundle: Bundle, concept: Concept, mode: str) -> dict[str, s
     return out
 
 
+# <img> tags come from our own renderer (_img_tag) with a double-quoted
+# src, so this match is reliable. ``(?!/)`` skips protocol-relative ``//``
+# (already neutralised by _safe_url, but keep the guard local too).
+_IMG_ABS_SRC_RE = re.compile(r'(<img\b[^>]*\bsrc=")/(?!/)([^"]+)(")')
+
+
+def _relativize_asset_srcs(html: str, root_prefix: str) -> str:
+    """Rewrite absolute bundle-relative ``<img src="/...">`` to root-relative.
+
+    Static builds are browsed from ``file://`` or under arbitrary path
+    prefixes (GitHub Pages project sites), so an absolute src — the
+    recommended authoring form — must become relative to the page's
+    directory, mirroring what :func:`url_for_concept` does for links.
+    serve/spa keep absolute srcs (both are rooted at ``/``). Relative srcs
+    (``./assets/x.png``) already resolve correctly against the page path
+    and pass through untouched.
+    """
+    return _IMG_ABS_SRC_RE.sub(
+        lambda m: m.group(1) + root_prefix + m.group(2) + m.group(3), html
+    )
+
+
 def _static_md_href(href: str, root_prefix: str) -> str | None:
     """Map an internal ``/a/b.md`` href to its static-build page URL.
 
@@ -1183,6 +1257,10 @@ def _render_concept_page(
     body_html = markdown_to_html(concept.body)
     link_map = _render_link_map(bundle, concept, mode)
     body_html = rewrite_internal_links(body_html, link_map)
+    if mode == "static":
+        # Absolute image srcs must become page-relative in static builds
+        # (the copied media sits at its bundle-relative path in the output).
+        body_html = _relativize_asset_srcs(body_html, root_prefix)
     # P1-39: when frontmatter ``citations:`` is present (rendered by the
     # governed-keys block below), suppress the body's ``# Citations``
     # heading + its content so the two citation lists don't render twice.
@@ -1817,6 +1895,9 @@ def _render_index_page(
             intro = rewrite_internal_links(
                 intro, _index_body_link_map(bundle, intro_md, mode)
             )
+            if mode == "static":
+                # Root index sits at the bundle root: "./" is its root prefix.
+                intro = _relativize_asset_srcs(intro, "./")
 
     # Hero stat chips (root index only): concepts / types / links, plus a
     # prominent graph entry point. Fail-soft on graph errors.

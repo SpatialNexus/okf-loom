@@ -6,9 +6,12 @@ Default OKF v0.1 conformance is intentionally small:
 2. every concept frontmatter has non-empty `type`;
 3. reserved `index.md` and `log.md` files follow their structural rules.
 
-Everything else is warning/info by default: broken links, missing recommended
-keys, stale indexes, non-normalized tags, unknown capabilities, and wikilink
-conversion suggestions.
+Everything else is warning/info by default: broken links, missing image
+targets (`asset.missing` — also promoted by `--fail-on-broken-links`;
+images that exist but live outside the bundle root get an
+`asset.out_of_bundle` info, since the studio and static builds cannot
+display them), missing recommended keys, stale indexes, non-normalized
+tags, unknown capabilities, and wikilink conversion suggestions.
 
 ## Commands
 

@@ -108,6 +108,12 @@ The dashboard index shows bundle-level stats and per-area entry points;
 [`docs-bundle/demo/showcase.md`](docs-bundle/demo/showcase.md) is one page
 that exercises every renderer if you want to see the whole palette at once.
 
+Bundle-local media renders inline too: keep screenshots, diagrams, video,
+or PDFs in the bundle (e.g. an `assets/` dir) and `![shot](/path/shot.png)`
+displays in the studio and in every build target — served under the same
+visibility rules as concepts, sandboxed as user content, with `validate`
+flagging any image whose file is missing.
+
 ### Six graph lenses, each answering one question
 
 The graph is not a hairball generator. Each lens reshapes layout, colour,

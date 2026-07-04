@@ -38,6 +38,7 @@ y/N ack. See [cli.md § serve](cli.md#serve).
 | GET | `/__comments` | Canonical comment state from `directives.jsonl`. |
 | GET | `/__diff` | Line diff between two revs of one concept. |
 | GET | `/__static/<file>` | Static assets (JS/CSS; bundle overrides first when active-code is on). |
+| GET | `/<path>.<media ext>` | Bundle-local media file (screenshots, diagrams, video, PDF). |
 | POST | `/__comment` | User's comment / threaded reply → `directives.jsonl`. |
 | POST | `/__comment-update` | User-facing state/archive transition. |
 | POST | `/__presence` | Agent presence (idle/watching/thinking/editing). |
@@ -246,6 +247,37 @@ active-code gate is open (bundle declares
 `viewer.allow_active_code: true` AND operator consent via
 `--allow-active-code` / `OKF_LOOM_ALLOW_ACTIVE_CODE`). Path traversal is
 rejected (`..` and separators after normalisation; NUL bytes).
+
+## `/<path>.<media ext>`
+
+Bundle-local media file, so `![shot](/research/assets/shot.png)`
+renders inline in the studio. Only paths whose extension is in the
+media allowlist route here — everything else stays a concept path.
+A media-suffixed path that names no existing file falls through to
+concept routing (`shot.png.md` is a legal concept rendering at
+`/shot.png`); when both exist, the file wins.
+
+| Kind | Extensions |
+|---|---|
+| Images | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.avif` `.bmp` `.ico` `.svg` |
+| Video | `.mp4` `.webm` |
+| Documents | `.pdf` |
+
+A file is served only when **all** of these hold, otherwise `404`:
+
+| Guard | Refuses |
+|---|---|
+| Clean segments | `..` / `.` / NUL / backslash anywhere in the path. |
+| §5 visibility | Anything the bundle scan prunes: `.okf-loom` session state, `.git`, `node_modules`, gitignored paths. `bundle.include` revives media the same as concepts. |
+| Containment | A symlinked file resolving outside the bundle root. |
+| Size cap | Files over `MAX_RAW_RESPONSE_BYTES` return `413`. |
+
+Responses carry a **sandboxed CSP** (bundle media is user content: a
+bundle SVG must not run script in the studio origin when navigated
+to directly; `<img>`/`<video>` embedding is unaffected) and a weak
+mtime+size `ETag` — image-heavy pages revalidate with `304`s instead
+of re-downloading every screenshot. Static builds copy the same
+§5-visible media set into the output, so exports render identically.
 
 # POST routes
 
