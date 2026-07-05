@@ -1263,6 +1263,31 @@
     return String(s).replace(/[^a-zA-Z0-9_-]/g, (ch) => "\\" + ch);
   }
 
+  // Editorial Workbench Round 2: open the Comments overlay and scroll+pulse
+  // the card for a given comment id. Mirrors jumpToActivity (Changes panel,
+  // ~line 3507). Requires cards to carry data-comment-id (tagged in
+  // commentCard below) so the pin's click target can be found post-render.
+  function jumpToCommentCard(commentId) {
+    openPanel("comments");
+    const body = panelBodyEl();
+    if (!body) return false;
+    // The card renders synchronously inside openPanel's p.render() call, but
+    // poll briefly anyway (defensive, mirrors jumpToActivity's setTimeout
+    // lookup) in case a future render path makes it async.
+    let tries = 0;
+    (function find() {
+      const card = body.querySelector('.okf-comment[data-comment-id="' + cssEscape(commentId) + '"]');
+      if (!card) { if (tries++ < 20) setTimeout(find, 25); return; }
+      card.scrollIntoView({ block: "center", behavior: REDUCED_MOTION ? "auto" : "smooth" });
+      if (!REDUCED_MOTION) {
+        card.classList.remove("okf-pulse");
+        void card.offsetWidth;
+        card.classList.add("okf-pulse");
+      }
+    })();
+    return true;
+  }
+
   // --- composer ---------------------------------------------------------
   function composerNode() {
     const wrap = el("div", { class: "okf-composer" });
@@ -1438,8 +1463,8 @@
       });
       if (!isResolved) marker.textContent = "•";
       marker.addEventListener("click", () => {
-        const jumped = jumpToCommentMark(c.id);
-        if (!jumped) openPanel("comments"); else openPanel("comments");
+        jumpToCommentMark(c.id);   // scroll+pulse the prose mark
+        jumpToCommentCard(c.id);   // open the overlay + scroll+pulse the card
       });
       rail.appendChild(marker);
     });
@@ -1922,7 +1947,9 @@
     var card = el("div", {
       class: cls,
       id: "comment-" + (c.id || ""),
-      dataset: { state: c.state || "open", level: String(level) },
+      // commentId: data-comment-id — the functional pin (jumpToCommentCard)
+      // matches on this to scroll+pulse the card a mark/marker points at.
+      dataset: { state: c.state || "open", level: String(level), commentId: c.id || "" },
     });
 
     // Header row: chevron (root only) + state chip + anchor + meta.
@@ -4331,15 +4358,21 @@
     });
   }
 
-  // Editorial Workbench §3.3: clicking a commented span (the inline mark)
-  // opens the pop-over on the Comments tab — the thread content lives only in
-  // the pop-over, so the reading page stays a reading page. Delegated once so
-  // it survives mark re-creation on live patches.
+  // Editorial Workbench §3.3 (Round 2: functional pin): clicking a commented
+  // span (the inline mark) jumps to the mark itself AND opens the Comments
+  // overlay scrolled+pulsed to that comment's card — the thread content
+  // lives only in the overlay, so the reading page stays a reading page.
+  // Delegated once so it survives mark re-creation on live patches.
   function wireCommentMarkClicks() {
     document.addEventListener("click", function (e) {
       const t = e.target;
       const mark = t && t.closest && t.closest(".okf-comment-mark");
-      if (mark) { e.preventDefault(); openPanel("comments"); }
+      if (!mark) return;
+      e.preventDefault();
+      const id = mark.getAttribute("data-comment-id");
+      jumpToCommentMark(id);         // scroll+pulse the prose mark
+      if (id) jumpToCommentCard(id); // open the overlay + scroll+pulse the card
+      else openPanel("comments");
     });
   }
 

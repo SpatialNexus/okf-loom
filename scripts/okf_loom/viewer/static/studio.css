@@ -452,15 +452,18 @@
   width: 24px;
   pointer-events: none;
 }
+/* Editorial Workbench Round 2: active-state tokens strengthen the resting
+ * dot into an obvious clickable affordance (colours only — dimensions,
+ * aria-label, data-state and the --stub hit-area below are unchanged). */
 .okf-comment-marker {
   position: absolute;
   pointer-events: auto;
   width: 24px;
   height: 24px;
   border-radius: var(--okf-radius-pill);
-  border: 1px solid var(--okf-border-strong);
-  background: var(--okf-bg-elev);
-  color: var(--okf-accent);
+  border: var(--okf-border-w) solid var(--okf-active-border);
+  background: var(--okf-active-fill);
+  color: var(--okf-active-fg);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -512,17 +515,18 @@
 /* iter1 CRI-002: the <mark> wrapping the commented text. Persistent
  * across block patches (studio.js re-applies marks after applyDoc).
  * Carries a data-comment-state so resolved marks style muted. */
+/* Editorial Workbench Round 2: active-state tokens give the pin a clear
+ * affordance (Swiss = solid accent pill; Technical = tinted with accent
+ * text) instead of the old thin accent underline. */
 .okf-comment-mark {
-  background: var(--okf-accent-bg);
-  color: inherit;
+  background: var(--okf-active-fill);
+  color: var(--okf-active-fg);
+  border-bottom: 2px solid var(--okf-active-border);
   border-radius: var(--okf-radius-sm);
   padding: 0 2px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  /* Editorial Workbench §3.3: the commented span is a pin — click opens the
-   * pop-over thread. */
-  cursor: pointer;
-  box-shadow: 0 1px 0 var(--okf-accent);
+  cursor: pointer;   /* Editorial Workbench §3.3: the span is a pin. */
 }
 .okf-comment-mark[data-comment-state="resolved"] {
   background: var(--okf-ok-bg);
@@ -537,7 +541,7 @@
   text-decoration: underline dotted var(--okf-fg-muted);
   text-underline-offset: 2px;
 }
-.okf-comment-mark.okf-pulse, .okf-comment-marker.okf-pulse {
+.okf-comment-mark.okf-pulse, .okf-comment-marker.okf-pulse, .okf-comment.okf-pulse {
   animation: okf-pulse-highlight 1.4s ease-out 1;
 }
 

@@ -497,6 +497,58 @@ def test_overlay_closes_on_scrim_and_esc(server_url: str, page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 - functional comment pin (click jumps + opens thread at the card)
+# ---------------------------------------------------------------------------
+
+
+def test_comment_pin_opens_thread_at_card(server_url: str, page) -> None:
+    """Clicking an inline pin jumps to the prose mark AND opens the Comments
+    overlay scrolled+pulsed to that comment's card (Round 2 §3.3: the pin is
+    functional, not just decorative).
+
+    Seeds a comment anchored to a real text snippet then drives applyDoc so
+    the mark (+ margin marker) render — same recipe as
+    test_comment_mark_reapplied_after_patch and
+    test_comment_marker_target_size_and_label — then clicks the rendered
+    mark and asserts the overlay opens with a matching data-comment-id card.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    setup = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const firstP = body.querySelector('p');
+            if (!firstP || !firstP.firstChild) return { error: 'no para' };
+            const snippet = firstP.firstChild.nodeValue.slice(0, 24);
+            window.okfLoomStudio.state.comments.unshift({
+                id: 'pin-test-1', concept: 'tables/orders',
+                anchor: { kind: 'text', ref: snippet, block_id: '', concept: 'tables/orders' },
+                body: 'pin test', state: 'open', resolved_activity: [],
+                ts: new Date().toISOString(),
+            });
+            // Force mark (+ margin marker) re-application via applyDoc with
+            // the SAME html so the anchor resolves against unchanged text.
+            const html = body.innerHTML;
+            window.okfLoomStudio.applyDoc(
+                { html, title: '', description: '', raw: '', rev: 2001 },
+                { pulse: false }
+            );
+            return { ok: true, snippet };
+        }"""
+    )
+    assert "error" not in setup, setup
+    cid = "pin-test-1"
+    mark = page.locator(f'.okf-page__body mark.okf-comment-mark[data-comment-id="{cid}"]')
+    expect(mark).to_be_visible(timeout=4000)
+    mark.click()
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    card = page.wait_for_selector(
+        f'.okf-panel__body .okf-comment[data-comment-id="{cid}"]', timeout=5000
+    )
+    assert card is not None
+
+
+# ---------------------------------------------------------------------------
 # B5 - focus trap in palette + panel (CRI-016)
 # ---------------------------------------------------------------------------
 
