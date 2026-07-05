@@ -1,8 +1,8 @@
 /* OKF wiki viewer - client-side enhancements for the served/built pages.
  *
  * Three concerns:
- *   1. Theme cycle button — light/dark/pastel/sepia/midnight (persist to
- *      localStorage['okf-theme']).
+ *   1. Theme cycle button — four Editorial-Workbench themes
+ *      (technical/swiss × light/dark; persist to localStorage['okf-theme']).
  *   2. Search-as-you-type on the topbar search box (debounced; hits /__search
  *      and renders results inline OR navigates on Enter). Disabled in static
  *      builds (no /__search backend) - a notice replaces live results (P2-65).
@@ -24,21 +24,32 @@
   // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
   // graph.js / studio.js and render.py:_theme_button_html — each context
   // loads without the others (single-file viewer, static build, studio).
-  var THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
-  var THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+  var THEMES = ["technical-light", "technical-dark", "swiss-light", "swiss-dark"];
+  var THEME_GLYPHS = { "technical-light": "☀", "technical-dark": "☾", "swiss-light": "◑", "swiss-dark": "◐" };
+  // Map a returning user's retired theme choice to the nearest new theme.
+  var LEGACY_THEMES = {
+    light: "technical-light", dark: "technical-dark",
+    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
+  };
+  // Resolve "auto" (or an unknown value) to a real theme by OS colour scheme.
+  function resolveAuto() {
+    var dark = window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return dark ? "technical-dark" : "technical-light";
+  }
 
   function currentTheme() {
-    return document.documentElement.getAttribute("data-theme") || "light";
+    return document.documentElement.getAttribute("data-theme") || "technical-light";
   }
-  function applyTheme(t) {
-    if (THEMES.indexOf(t) < 0) t = "light";
+  function applyTheme(t, persist) {
+    if (THEMES.indexOf(t) < 0) t = "technical-light";
     document.documentElement.setAttribute("data-theme", t);
-    try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {}
+    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
     if (themeBtn) {
       themeBtn.textContent = THEME_GLYPHS[t];
       themeBtn.setAttribute("title", "Theme: " + t + " — click to cycle");
       themeBtn.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      // The button cycles five themes now; it is no longer a two-state
+      // The button cycles four themes now; it is no longer a two-state
       // toggle, so aria-pressed would be dishonest.
       themeBtn.removeAttribute("aria-pressed");
     }
@@ -46,12 +57,13 @@
   // Honour saved preference on load (overrides server-side default).
   try {
     var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];  // migrate
     if (saved && THEMES.indexOf(saved) >= 0) {
       applyTheme(saved);
     } else {
-      // No saved preference: respect the OS preference on first visit.
-      var mq = window.matchMedia("(prefers-color-scheme: dark)");
-      if (mq && mq.matches) applyTheme("dark");
+      // No saved preference: follow the OS preference WITHOUT persisting, so
+      // an unpinned user keeps auto-following if they change OS scheme later.
+      applyTheme(resolveAuto(), false);
     }
   } catch (e) {}
   if (themeBtn) {
