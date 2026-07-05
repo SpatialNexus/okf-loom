@@ -262,6 +262,107 @@ def test_unlinked_mentions_skips_alias_marked_not_discoverable(
     assert rep.suppressed == []
 
 
+def test_unlinked_mentions_suppresses_h1_only_match(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\n# Beta\n\nNo body mention.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    detail = rep.suppressed[0].detail
+    assert detail["location_counts"] == {"h1": 1}
+    assert detail["occurrence_locations"] == [{"line": 1, "location": "h1"}]
+    assert "h1_only" in detail["confidence_reasons"]
+
+
+def test_unlinked_mentions_suppresses_frontmatter_only_match(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\n"
+        "type: Note\n"
+        "title: Beta Review\n"
+        "description: Planning note.\n"
+        "---\n"
+        "No body mention.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    detail = rep.suppressed[0].detail
+    assert detail["location_counts"] == {"frontmatter": 1}
+    assert detail["occurrence_locations"] == [
+        {"line": 0, "location": "frontmatter"}
+    ]
+    assert "frontmatter_only" in detail["confidence_reasons"]
+
+
+def test_unlinked_mentions_keeps_heading_match_with_body_prose(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\n"
+        "## Beta\n\n"
+        "Beta is also discussed in prose here.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert len(rep.suggestions) == 1
+    detail = rep.suggestions[0].detail
+    assert detail["location_counts"] == {"heading": 1, "body": 1}
+    assert "also_mentioned_in_body" in detail["confidence_reasons"]
+
+
+def test_unlinked_mentions_suppresses_table_only_match(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\n"
+        "| Name |\n"
+        "| --- |\n"
+        "| Beta |\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    detail = rep.suppressed[0].detail
+    assert detail["location_counts"] == {"table": 1}
+    assert "table_only" in detail["confidence_reasons"]
+
+
 def test_unlinked_mentions_suppresses_generic_label_without_shared_context(
     tmp_path: Path,
 ) -> None:

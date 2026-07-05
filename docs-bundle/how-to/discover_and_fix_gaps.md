@@ -82,6 +82,11 @@ aliases:
 Those aliases remain available to search and the viewer, but `discover` will
 not emit unlinked-mention suggestions for them.
 
+For unlinked mentions, check `detail.location_counts` before applying. A match
+seen in body prose is stronger than a match seen only in `frontmatter`, `h1`,
+`heading`, or `table`; heading-only and table-only suggestions usually need
+review rather than automatic linking.
+
 # Step 4: Apply fixes directly via the mutators
 
 For a handful of suggestions, the authoring verbs are the fastest path.

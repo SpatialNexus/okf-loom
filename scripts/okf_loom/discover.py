@@ -222,6 +222,12 @@ class _MentionCandidate:
     sources: frozenset[str]
 
 
+@dataclass(frozen=True)
+class _MentionOccurrence:
+    line: int
+    location: str
+
+
 # ---------------------------------------------------------------------------
 # Public entrypoint
 # ---------------------------------------------------------------------------
@@ -368,6 +374,35 @@ def _scannable_body(body: str) -> str:
     return cleaned
 
 
+def _mention_location(body_lines: list[str], line_no: int) -> str:
+    if line_no < 1 or line_no > len(body_lines):
+        return "body"
+    line = body_lines[line_no - 1].strip()
+    if re.match(r"^#\s+\S", line):
+        return "h1"
+    if re.match(r"^#{2,6}\s+\S", line):
+        return "heading"
+    if line.startswith("|") and line.count("|") >= 2:
+        return "table"
+    return "body"
+
+
+def _scannable_frontmatter(concept: Concept) -> str:
+    parts: list[str] = []
+    for key in ("title", "description"):
+        value = concept.frontmatter.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    return "\n".join(parts)
+
+
+def _location_counts(occurrences: list[_MentionOccurrence]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for occurrence in occurrences:
+        counts[occurrence.location] = counts.get(occurrence.location, 0) + 1
+    return counts
+
+
 def _build_title_index(bundle: Bundle) -> dict[str, _MentionCandidate]:
     """Map a lowercased mention phrase to a single concept id.
 
@@ -428,7 +463,7 @@ def _parent_folder(cid: ConceptId) -> ConceptId:
 def _mention_confidence(
     phrase: str,
     candidate: _MentionCandidate,
-    occurrences: list[int],
+    occurrences: list[_MentionOccurrence],
     bundle: Bundle,
     source: Concept,
     document_frequency: int,
@@ -456,6 +491,30 @@ def _mention_confidence(
     if len(occurrences) >= 2:
         score += 0.05
         reasons.append("repeated")
+    location_counts = _location_counts(occurrences)
+    has_body_prose = location_counts.get("body", 0) > 0
+    if has_body_prose and len(location_counts) > 1:
+        score += 0.05
+        reasons.append("also_mentioned_in_body")
+    if not has_body_prose:
+        if set(location_counts) == {"frontmatter"}:
+            score -= 0.35
+            reasons.append("frontmatter_only")
+        elif location_counts.get("h1", 0) and len(location_counts) == 1:
+            score -= 0.35
+            reasons.append("h1_only")
+        elif (
+            location_counts.get("heading", 0)
+            and location_counts.get("table", 0) == 0
+        ):
+            score -= 0.25
+            reasons.append("heading_only")
+        elif location_counts.get("table", 0):
+            score -= 0.20
+            reasons.append("table_only")
+        else:
+            score -= 0.20
+            reasons.append("non_body_only")
     concept_count = max(1, len(bundle.concepts))
     doc_ratio = document_frequency / concept_count
     if document_frequency >= 10 or (concept_count >= 20 and doc_ratio >= 0.08):
@@ -556,14 +615,21 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
         src.id: _scannable_body(src.body)
         for src in sorted(bundle.concepts.values(), key=lambda c: c.id)
     }
+    frontmatter_scannables = {
+        src.id: _scannable_frontmatter(src)
+        for src in sorted(bundle.concepts.values(), key=lambda c: c.id)
+    }
     document_frequency: dict[str, int] = {}
     for phrase, pat in compiled.items():
         document_frequency[phrase] = sum(
-            1 for text in scannables.values() if pat.search(text)
+            1
+            for src_id, text in scannables.items()
+            if pat.search(text) or pat.search(frontmatter_scannables[src_id])
         )
     for src in sorted(bundle.concepts.values(), key=lambda c: c.id):
         scannable = scannables[src.id]
-        if not scannable.strip():
+        frontmatter_scannable = frontmatter_scannables[src.id]
+        if not scannable.strip() and not frontmatter_scannable.strip():
             continue
         already_linked = {
             link.target
@@ -578,10 +644,20 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
             if target_cid in already_linked:
                 continue  # source already links to target
             pat = compiled[phrase]
-            occurrences = [
-                scannable.count("\n", 0, m.start()) + 1
-                for m in pat.finditer(scannable)
-            ]
+            body_lines = src.body.splitlines()
+            occurrences = []
+            for m in pat.finditer(frontmatter_scannable):
+                occurrences.append(
+                    _MentionOccurrence(line=0, location="frontmatter")
+                )
+            for m in pat.finditer(scannable):
+                line_no = scannable.count("\n", 0, m.start()) + 1
+                occurrences.append(
+                    _MentionOccurrence(
+                        line=line_no,
+                        location=_mention_location(body_lines, line_no),
+                    )
+                )
             if not occurrences:
                 continue
             target = bundle.concepts.get(target_cid)
@@ -625,10 +701,15 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
                         "confidence_reasons": reasons,
                         "suppression_reasons": suppression_reasons,
                         "document_frequency": document_frequency.get(phrase, 0),
+                        "location_counts": _location_counts(occurrences),
                         "suggested_target_concept_id": concept_id_to_str(
                             target_cid
                         ),
-                        "occurrences": occurrences,
+                        "occurrences": [o.line for o in occurrences],
+                        "occurrence_locations": [
+                            {"line": o.line, "location": o.location}
+                            for o in occurrences
+                        ],
                     },
                 )
             )

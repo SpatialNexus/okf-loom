@@ -170,7 +170,10 @@ Suggestions carry a rule, severity, message, target concept, and an
 `relations:` metadata (`already_structurally_related`) and lowers confidence
 for generic labels such as `Architecture`, `README`, or `Implementation Plan`
 unless source and target share strong context such as `graph_cluster` or
-folder.
+folder. Mention details include `location_counts` and `occurrence_locations`
+with locations `frontmatter`, `h1`, `heading`, `table`, and `body`; matches
+seen only in frontmatter, headings, or tables are lower confidence than body
+prose.
 
 The agent applies fixes directly via the mutators; the reviewable-plan
 workflow (`discover` → `plan` → `update`) is still available.

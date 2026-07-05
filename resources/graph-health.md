@@ -73,3 +73,9 @@ When a broad alias is useful for search but bad for automatic linking, keep it
 as an object-form alias with `discoverable: false`, for example
 `aliases: [{label: Architecture, discoverable: false}]`. Search and the
 viewer still use the label; `discover` does not.
+
+For unlinked mentions, inspect `detail.location_counts`. Body prose is the
+strongest signal. Matches that appear only in `frontmatter`, `h1`, `heading`,
+or `table` locations are intentionally low confidence because they often echo
+section titles, page titles, or imported table labels rather than expressing a
+useful outgoing link.
