@@ -1858,6 +1858,59 @@ def test_focus_off_in_split_drops_to_rendered(server_url: str, page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 — Footer button toolbar (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_footer_has_focus_button_and_bordered_actions(server_url: str, page) -> None:
+    """The footer reorganises into actions-left / ambient-right + a divider
+    (Task 4), with a new Focus button wired to toggleFocus (Task 3's state
+    machine already implements the split coupling — the button does not
+    reimplement it). Comments/Changes must not be duplicated in the footer —
+    they live in the rail (Task 1)."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    fbtn = page.wait_for_selector(".okf-studio-bar--status .okf-focus-btn", timeout=10000)
+    # Focus button toggles data-okf-focus.
+    assert page.evaluate("document.documentElement.hasAttribute('data-okf-focus')") is False
+    fbtn.click()
+    page.wait_for_function("document.documentElement.hasAttribute('data-okf-focus')", timeout=5000)
+    assert page.get_attribute(".okf-focus-btn", "aria-pressed") == "true"
+    # Comments/Changes are NOT duplicated in the footer (they live in the rail).
+    n = page.eval_on_selector_all(
+        ".okf-studio-bar--status .okf-studiobtn",
+        "els => els.filter(e => /Comments|Changes/.test(e.textContent)).length")
+    assert n == 0, "Comments/Changes must not be duplicated in the footer"
+    # Structural reorg: actions cluster left (Watching/Commands/view-switch/
+    # Focus), ambient clusters right (presence/◆N concepts/●Live), divided.
+    layout = page.evaluate(
+        """() => {
+            const bar = document.querySelector('.okf-studio-bar--status');
+            const left = bar.querySelector('.okf-studio-bar__group:not(.okf-studio-bar__group--right)');
+            const right = bar.querySelector('.okf-studio-bar__group--right');
+            return {
+                hasDivider: !!bar.querySelector('.okf-studio-bar__divider'),
+                watchInLeft: !!(left && left.querySelector('.okf-watch-toggle')),
+                paletteInLeft: !!(left && left.querySelector('.okf-palettebtn')),
+                viewSwitchInLeft: !!(left && left.querySelector('.okf-viewswitch')),
+                focusInLeft: !!(left && left.querySelector('.okf-focus-btn')),
+                presenceInRight: !!(right && right.querySelector('.okf-presence')),
+                connInRight: !!(right && right.querySelector('.okf-conn')),
+            };
+        }"""
+    )
+    assert layout["hasDivider"], "footer missing .okf-studio-bar__divider"
+    assert (
+        layout["watchInLeft"] and layout["paletteInLeft"]
+        and layout["viewSwitchInLeft"] and layout["focusInLeft"]
+    ), f"actions must cluster in the left group: {layout}"
+    assert layout["presenceInRight"] and layout["connInRight"], (
+        f"ambient state must cluster in the right group: {layout}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # iter2 G9 — change-list virtualization (only the visible window in the DOM)
 # iter2 G10 — 1000-row cap messaging shown UP FRONT
 # ---------------------------------------------------------------------------

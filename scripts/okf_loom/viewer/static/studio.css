@@ -47,32 +47,47 @@
 .okf-studio-bar__group--right { flex-wrap: nowrap; }
 .okf-studio-bar[hidden] { display: none; }
 
-/* Editorial Workbench: the studio bar is a bottom status strip. Ambient
- * state (presence/watching/connection/validation) on the left; on-demand
- * actions (Comments/Changes/Commands) on the right. Sticky to the viewport
- * bottom so it stays visible as the reading column scrolls. */
+/* Editorial Workbench Round 2: the footer is a bordered-button TOOLBAR, not a
+ * quiet status strip. Actions (Watching/Commands/view-switch/Focus) cluster
+ * left and read as real bordered buttons — the base .okf-studiobtn rule
+ * already supplies the border + elevated bg, so there is no quieting
+ * override here anymore. Ambient state (presence/◆N concepts/●Live) clusters
+ * right, mono + quiet, separated from the actions by a thin divider. Sticky
+ * to the viewport bottom so it stays visible as the reading column scrolls. */
 .okf-studio-bar--status {
   position: sticky;
   bottom: 0;
   z-index: 9;
-  min-height: var(--okf-status-h);
+  min-height: 40px;                 /* was --okf-status-h (30px): a real toolbar */
   padding: 0 var(--okf-space-4);
   gap: var(--okf-space-3);
-  background: var(--okf-bg-elev);
+  background: var(--okf-bg-inset);  /* recover the original bar feel */
   border-top: var(--okf-border-w) solid var(--okf-border);
   border-bottom: none;
+  /* The bar is now 3 children (left group / divider / right group). The base
+   * .okf-studio-bar rule's `justify-content: space-between` would float the
+   * divider in the dead centre with the groups pinned to the edges — pack
+   * left instead, then push the right group out with its own auto margin
+   * (below) so actions+divider hug together on the left. */
+  justify-content: flex-start;
+}
+.okf-studio-bar--status .okf-studio-bar__group--right {
+  margin-left: auto;
+}
+/* Actions read as bordered .okf-studiobtn (the base rule already provides the
+ * border + elev bg); ambient bits stay quiet & mono at the right edge. */
+.okf-studio-bar__divider {
+  width: var(--okf-border-w);
+  align-self: stretch;
+  margin: var(--okf-space-2) var(--okf-space-1);
+  background: var(--okf-border);
+}
+.okf-studio-bar--status .okf-statseg,
+.okf-studio-bar--status .okf-conn,
+.okf-studio-bar--status .okf-presence {
   font-family: var(--okf-font-mono);
   font-size: var(--okf-text-xs);
 }
-/* In the status strip the on-demand actions read as quiet text buttons, not
- * raised chips — the strip stays calm. */
-.okf-studio-bar--status .okf-studiobtn {
-  padding: 3px 9px;
-  border-color: var(--okf-border);
-  background: var(--okf-bg-inset);
-  font-size: var(--okf-text-xs);
-}
-.okf-studio-bar--status .okf-studiobtn:hover { background: var(--okf-border); }
 /* Ambient dash stat (e.g. "◆ 30 concepts"). */
 .okf-statseg {
   display: inline-flex;

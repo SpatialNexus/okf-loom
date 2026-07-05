@@ -274,8 +274,11 @@
   // ====================================================================
   // 3. Studio bar
   // ====================================================================
-  // The studio controls live in a bottom status strip (Editorial Workbench
-  // layout): ambient state on the left, on-demand actions on the right.
+  // Round 2: the studio controls live in a bottom bordered-button TOOLBAR
+  // (Editorial Workbench footer) — on-demand actions (Watching / Commands /
+  // view-switch / Focus) cluster on the left and read as real bordered
+  // buttons; ambient state (presence / ◆N concepts / ●Live) clusters on the
+  // right, separated by a thin divider (studio.css).
   const bar = el("div", { class: "okf-studio-bar okf-studio-bar--status", role: "region", "aria-label": "Studio status" });
   const leftGroup = el("div", { class: "okf-studio-bar__group" });
   const rightGroup = el("div", { class: "okf-studio-bar__group okf-studio-bar__group--right" });
@@ -288,7 +291,7 @@
   const presenceChip = el("span", { class: "okf-presence", "data-state": "idle", role: "status",
     "aria-live": "polite", "aria-label": "Agent presence: idle" },
     [presenceDot, presenceLabel]);
-  leftGroup.appendChild(presenceChip);
+  // Appended to rightGroup (ambient) in the assembly below.
 
   // iter2 G11 (§3 watch question): an "Agent watching" switch in the studio
   // bar. The user can toggle whether the agent proactively watches + enriches
@@ -328,17 +331,16 @@
       toast("Could not update agent watching state.", { tone: "error" });
     });
   });
-  leftGroup.appendChild(watchingToggle);
+  // Appended to leftGroup (actions) in the assembly below.
 
   // Bundle-size stat (ambient dash): the Diátaxis nav lists every concept, so
-  // its link count is the bundle size. Present on concept pages only.
+  // its link count is the bundle size. Present on concept pages only. Named
+  // (not appended here) so the assembly below can place it in rightGroup.
   const conceptCount = document.querySelectorAll(".okf-nav__link").length;
-  if (conceptCount > 0) {
-    leftGroup.appendChild(el("span", { class: "okf-statseg", title: conceptCount + " concepts in this bundle" }, [
-      el("span", { class: "okf-statseg__mark", "aria-hidden": "true", text: "◆" }),
-      document.createTextNode(" " + conceptCount + " concepts"),
-    ]));
-  }
+  const conceptStatseg = el("span", { class: "okf-statseg", title: conceptCount + " concepts in this bundle" }, [
+    el("span", { class: "okf-statseg__mark", "aria-hidden": "true", text: "◆" }),
+    document.createTextNode(" " + conceptCount + " concepts"),
+  ]);
 
   // Connection indicator (driven by live.js hub). iter1 CRI-015: aria-live
   // so "Reconnecting…" / "Live" / "Offline" state changes are announced to
@@ -378,12 +380,30 @@
      el("kbd", { class: "okf-kbd", "aria-hidden": "true", text: paletteHint })]);
   paletteBtn.addEventListener("click", openPalette);
 
-  // Assemble bar (view switch only on concept pages). Comments/Changes now
-  // live in the rail; the dock toggle is retired. Footer keeps only the
-  // wired actions + ambient (reorganised in Task 4).
-  rightGroup.appendChild(paletteBtn);
+  // Round 2: Focus toggle (Workbench <-> Focus reading mode). Assigns the
+  // module-scope `focusBtn` (declared further below, alongside setFocus/
+  // toggleFocus) so setFocus can sync its aria-pressed; wired straight to
+  // the existing toggleFocus (Task 3 already implements the split coupling
+  // — this button does not reimplement any of that state machine).
+  focusBtn = el("button", { type: "button", class: "okf-studiobtn okf-focus-btn",
+    "aria-pressed": "false", "aria-label": "Toggle focus mode (wide, no chrome)",
+    title: "Focus: collapse nav + rail for a wide reading/split view" },
+    [document.createTextNode("Focus")]);
+  focusBtn.addEventListener("click", toggleFocus);
+
+  // Assemble bar. Comments/Changes now live in the rail; the dock toggle is
+  // retired. Round 2: actions left, ambient right, divider between.
+  // LEFT (actions): Watching · Commands · [view-switch] · Focus
+  leftGroup.appendChild(watchingToggle);
+  leftGroup.appendChild(paletteBtn);
+  // view-switch + Focus appended in mountBar (concept pages only), so DOM
+  // order still reads L->R: Watching, Commands, Rendered/Source/Split, Focus.
+  // RIGHT (ambient): presence · ◆ N concepts · ● Live
+  rightGroup.appendChild(presenceChip);
+  if (conceptCount > 0) rightGroup.appendChild(conceptStatseg);
   rightGroup.appendChild(connChip);
   bar.appendChild(leftGroup);
+  bar.appendChild(el("span", { class: "okf-studio-bar__divider", "aria-hidden": "true" }));
   bar.appendChild(rightGroup);
 
   function mountBar() {
@@ -392,6 +412,7 @@
     document.body.appendChild(bar);
     if (isConceptPage()) {
       leftGroup.appendChild(viewSwitch);
+      leftGroup.appendChild(focusBtn);
     }
   }
 
@@ -581,9 +602,13 @@
   // net-new attribute on <html> (data-okf-focus) that collapses nav + rail +
   // frame and uncaps the reading column for Source/Split (Rendered stays at the
   // ~76ch measure, re-applied in CSS). Distinct from the graph's okf-focus-root.
-  // focusBtn is built by the footer toolbar (Task 4); here it stays null and
-  // setFocus null-guards it. Not persisted in Phase 1.
-  var focusBtn = null;
+  // focusBtn: a bare `var` (no initializer) — the hoisted declaration lets
+  // setFocus (below) reference it, but it is CONSTRUCTED earlier, in the
+  // footer toolbar section (Task 4), which runs before this line executes.
+  // A `= null` initializer here would re-run at this point in the top-to-
+  // bottom boot sequence and clobber that earlier assignment, so it is
+  // deliberately omitted; setFocus still null-guards it defensively.
+  var focusBtn;
   var focusFromSplit = false;
   function setFocus(on) {
     if (on) document.documentElement.setAttribute("data-okf-focus", "");
@@ -3358,12 +3383,14 @@
   function register(kind, impl) {
     if (kind === "panel" && impl && impl.id) {
       panels[impl.id] = Object.assign({ __builtin: false }, impl);
-      // Add a bar toggle for non-builtin panels.
+      // Add a bar toggle for non-builtin panels. Round 2: paletteBtn (Commands)
+      // now lives in leftGroup (actions), not rightGroup — insert alongside it
+      // there (opening a panel is an action, same cluster as Commands).
       if (!impl.__builtin && !impl._btn) {
         const btn = el("button", { type: "button", class: "okf-iconbtn", "aria-expanded": "false", "aria-controls": "okf-panel", text: impl.label });
         btn.addEventListener("click", () => togglePanel(impl.id));
         impl._btn = btn;
-        rightGroup.insertBefore(btn, paletteBtn);
+        leftGroup.insertBefore(btn, paletteBtn);
       }
       if (state.openPanel === impl.id) openPanel(impl.id);
       return impl;
