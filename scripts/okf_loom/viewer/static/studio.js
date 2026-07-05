@@ -591,10 +591,20 @@
     if (focusBtn) focusBtn.setAttribute("aria-pressed", on ? "true" : "false");
   }
   function isFocus() { return document.documentElement.hasAttribute("data-okf-focus"); }
+  // Invariant: view==="split" ⟺ Focus on. Split needs the wide (uncapped)
+  // layout, so turning Focus OFF while in split must also leave split —
+  // otherwise the .okf-page__main cap returns and re-traps the panes (the exact
+  // bug Task 3 fixes). Clearing focusFromSplit first makes setView("rendered")'s
+  // own auto-exit branch a no-op (no double toggle / recursion).
   function toggleFocus() {
-    var on = !isFocus();
-    focusFromSplit = false;      // manual toggle detaches from split auto-mode
-    setFocus(on);
+    if (isFocus()) {                                     // turning OFF
+      focusFromSplit = false;
+      if (state.view === "split") setView("rendered");   // drop to Rendered
+      setFocus(false);
+    } else {                                             // turning ON
+      focusFromSplit = false;                            // manual toggle detaches from split auto-mode
+      setFocus(true);
+    }
   }
 
   function ensureSourceLoaded() {
@@ -4454,6 +4464,7 @@
     closePanel,
     openPalette,
     setView,
+    toggleFocus,
     get state() { return state; },
     get panels() { return panels; },
     ctx,

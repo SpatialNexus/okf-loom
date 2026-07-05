@@ -1833,6 +1833,30 @@ def test_split_divider_resizes_visually(server_url: str, page) -> None:
     )
 
 
+def test_focus_off_in_split_drops_to_rendered(server_url: str, page) -> None:
+    """Round 2 invariant: view=="split" <=> Focus on. Toggling Focus OFF while in
+    split must drop the view to Rendered, so split is never left re-trapped by
+    the .okf-page__main cap (the exact bug Task 3 fixes). Task 4 wires a footer
+    Focus button into this state machine, so the invariant must hold now."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders?view=split", wait_until="load")
+    _wait_for_studio(page)
+    # Split auto-enters Focus.
+    page.wait_for_function(
+        "document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+    # Manually toggle Focus OFF (as Task 4's footer button will) while in split.
+    page.evaluate("window.okfLoomStudio.toggleFocus()")
+    page.wait_for_function(
+        "!document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+    # Focus is off AND the view dropped to Rendered (not left in a capped split).
+    view = page.eval_on_selector(".okf-view", "el => el.dataset.okfView")
+    assert view == "rendered", (
+        f"toggling Focus off in split must drop to Rendered, got {view!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # iter2 G9 — change-list virtualization (only the visible window in the DOM)
 # iter2 G10 — 1000-row cap messaging shown UP FRONT

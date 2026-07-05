@@ -1609,10 +1609,13 @@ sup.okf-footnote-ref { line-height: 0; }
 :root[data-okf-focus] .okf-page__main {
   max-width: none;                          /* drop the split trap */
 }
-/* Rendered view re-centers at the measure even in Focus. The view wrap always
- * exists on concept pages (ensureViewWrap runs at boot), so target it. */
+/* Rendered view re-centers at the ~76ch prose measure even in Focus. The view
+ * wrap always exists on concept pages (ensureViewWrap runs at boot), so target
+ * it. NB: cap on the *prose-maxw* alone (not the +2*space-6 form used by
+ * .okf-page__main): .okf-view has no internal padding, so the bare measure keeps
+ * the text column at ~76ch — matching Workbench — rather than ~83ch. */
 :root[data-okf-focus] .okf-view[data-okf-view="rendered"] {
-  max-width: calc(var(--okf-prose-maxw) + 2 * var(--okf-space-6));
+  max-width: var(--okf-prose-maxw);
   margin-inline: auto;
 }
 /* Flat concept header (Editorial Workbench §3.3): the type identity now lives
