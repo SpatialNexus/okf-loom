@@ -50,6 +50,9 @@ assert yaml.safe_load("type: Reference\ntags: [cli, reference]\n") == {
     "type": "Reference",
     "tags": ["cli", "reference"],
 }
+assert yaml.safe_load('title: "*accepted*"\n') == {"title": "*accepted*"}
+assert yaml.safe_load("title: '*accepted*'\n") == {"title": "*accepted*"}
+assert yaml.safe_load('tags: ["*accepted*"]\n') == {"tags": ["*accepted*"]}
 '''
     env = os.environ.copy()
     env["OKF_LOOM_FORCE_BUILTIN_YAML"] = "1"

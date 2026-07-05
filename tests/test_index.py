@@ -244,8 +244,8 @@ def test_index_lists_concepts_grouped_by_type(tmp_path: Path) -> None:
     body = (sub / "index.md").read_text(encoding="utf-8")
     assert "# Table" in body
     assert "# View" in body
-    assert "[Alpha](a.md)" in body
-    assert "[Beta](b.md)" in body
+    assert "[Alpha](/sub/a.md)" in body
+    assert "[Beta](/sub/b.md)" in body
 
 
 def test_root_index_lists_subdirectories(tmp_path: Path) -> None:
@@ -259,7 +259,7 @@ def test_root_index_lists_subdirectories(tmp_path: Path) -> None:
     regenerate_indexes(b)
     body = (tmp_path / "index.md").read_text(encoding="utf-8")
     assert "# Subdirectories" in body
-    assert "sub" in body
+    assert "[sub](/sub/index.md)" in body
 
 
 def test_no_concepts_no_write(tmp_path: Path) -> None:

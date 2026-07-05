@@ -1,5 +1,5 @@
 <!-- okf:generated:index begin -->
 # Reference
 
-* [Currency Codes](currencies.md) - ISO 4217 currency codes used across all monetary columns in the bundle.
+* [Currency Codes](/references/currencies.md) - ISO 4217 currency codes used across all monetary columns in the bundle.
 <!-- okf:generated:index end -->

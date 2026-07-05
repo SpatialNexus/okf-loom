@@ -282,7 +282,7 @@ def _dir_entries(bundle: Bundle, directory: Path) -> list[dict]:
                 {
                     "type": concept.type or "Other",
                     "title": concept.title or child.stem,
-                    "link": child.name,
+                    "link": "/" + child.relative_to(bundle.root).as_posix(),
                     "description": concept.description or "",
                 }
             )
@@ -293,7 +293,7 @@ def _dir_entries(bundle: Bundle, directory: Path) -> list[dict]:
                 {
                     "type": "Subdirectories",
                     "title": child.name,
-                    "link": f"{child.name}/{_INDEX_FILE}",
+                    "link": "/" + (child.relative_to(bundle.root) / _INDEX_FILE).as_posix(),
                     "description": _subdir_description(bundle, child),
                 }
             )
