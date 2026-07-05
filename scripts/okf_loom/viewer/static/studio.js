@@ -398,6 +398,31 @@
     }
   }
 
+  // Nav-collapse (Editorial Workbench §3.2): a toggle in the top bar collapses
+  // the concept-page sidebar to 0 for a full-width read. Persisted so the
+  // choice survives navigation. Only mounted on pages that have the sidebar.
+  const NAV_COLLAPSE_KEY = "okf-nav-collapsed";
+  function mountNavToggle() {
+    if (!isConceptPage()) return;
+    const topbar = $(".okf-topbar");
+    if (!topbar) return;
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(NAV_COLLAPSE_KEY) === "1"; } catch (e) {}
+    document.body.classList.toggle("okf-nav-collapsed", collapsed);
+    const btn = el("button", {
+      type: "button", class: "okf-navtoggle",
+      "aria-label": "Toggle navigation", "aria-pressed": collapsed ? "true" : "false",
+      title: "Collapse navigation for a full-width read", text: "☰",
+    });
+    btn.addEventListener("click", function () {
+      collapsed = !collapsed;
+      document.body.classList.toggle("okf-nav-collapsed", collapsed);
+      btn.setAttribute("aria-pressed", collapsed ? "true" : "false");
+      try { localStorage.setItem(NAV_COLLAPSE_KEY, collapsed ? "1" : "0"); } catch (e) {}
+    });
+    topbar.insertBefore(btn, topbar.firstChild);
+  }
+
   // ====================================================================
   // 4. View modes (§8) + applyDoc(doc)
   // ====================================================================
@@ -4213,8 +4238,22 @@
     });
   }
 
+  // Editorial Workbench §3.3: clicking a commented span (the inline mark)
+  // opens the pop-over on the Comments tab — the thread content lives only in
+  // the pop-over, so the reading page stays a reading page. Delegated once so
+  // it survives mark re-creation on live patches.
+  function wireCommentMarkClicks() {
+    document.addEventListener("click", function (e) {
+      const t = e.target;
+      const mark = t && t.closest && t.closest(".okf-comment-mark");
+      if (mark) { e.preventDefault(); openPanel("comments"); }
+    });
+  }
+
   function boot() {
     mountBar();
+    mountNavToggle();
+    wireCommentMarkClicks();
     wirePaletteKeys();
     if (isConceptPage()) {
       ensureViewWrap();

@@ -506,11 +506,14 @@
 .okf-comment-mark {
   background: var(--okf-accent-bg);
   color: inherit;
-  border-radius: 3px;
+  border-radius: var(--okf-radius-sm);
   padding: 0 2px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  cursor: help;
+  /* Editorial Workbench §3.3: the commented span is a pin — click opens the
+   * pop-over thread. */
+  cursor: pointer;
+  box-shadow: 0 1px 0 var(--okf-accent);
 }
 .okf-comment-mark[data-comment-state="resolved"] {
   background: var(--okf-ok-bg);

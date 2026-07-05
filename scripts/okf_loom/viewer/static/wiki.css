@@ -505,6 +505,34 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
   z-index: 10;
   flex-shrink: 0;
 }
+/* Nav-collapse toggle (Editorial Workbench §3.2), injected into the top bar
+ * by studio.js on concept pages. */
+.okf-navtoggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  padding: 0;
+  font-size: var(--okf-text-base);
+  color: var(--okf-fg-muted);
+  background: none;
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  cursor: pointer;
+}
+.okf-navtoggle:hover { color: var(--okf-fg); background: var(--okf-bg-inset); }
+/* Collapsed: the concept sidebar is removed and the article takes the whole
+ * width. Single-column grid (not a 0-width first track) so the hidden sidebar
+ * doesn't leave the article stranded in a zero-width cell. */
+.okf-nav-collapsed .okf-page { grid-template-columns: minmax(0, 1fr); }
+.okf-nav-collapsed .okf-page__sidebar { display: none; }
+/* SPEC §3.3: "full width" means the reading column is undivided — NOT that
+ * lines run the whole viewport. Centre the reading content and keep the
+ * flowing prose at a comfortable measure. */
+.okf-nav-collapsed .okf-page__main { max-width: 940px; margin-inline: auto; }
+.okf-nav-collapsed .okf-page__body { max-width: var(--okf-prose-maxw); }
 .okf-topbar__brand { display: flex; align-items: baseline; gap: var(--okf-space-2); min-width: 0; }
 .okf-topbar__brand strong { font-size: var(--okf-text-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .okf-brand-link { color: inherit; }
