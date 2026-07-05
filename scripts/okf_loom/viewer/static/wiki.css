@@ -1,9 +1,15 @@
 /* OKF wiki viewer - shared stylesheet.
  *
- * Five colour themes via CSS custom properties: :root carries the light
- * tokens; [data-theme="dark"|"pastel"|"sepia"|"midnight"] override them.
+ * Four colour themes via CSS custom properties, on ONE theme-agnostic
+ * skeleton (the "Editorial Workbench"): [data-theme="technical-light"|
+ * "technical-dark"|"swiss-light"|"swiss-dark"] each declare the FULL token
+ * set. :root carries structural tokens (spacing/type/layout) plus a
+ * technical-light fallback so a themeless page still renders coherently.
  * Every theme overrides the SAME token set (test_render.py enforces this)
- * so no theme inherits a light-only colour that breaks contrast.
+ * so no theme inherits a value that breaks contrast. The aesthetic
+ * difference is carried by tokens — most of all the active-state primitive
+ * (--okf-active-fill/-fg/-border): Technical = subtle tinted active states,
+ * Swiss = solid boxed accent fills. KEEP graph.js GRAPH_COLORS in sync.
  * Responsive: sidebar+main on wide screens, stacked
  * on narrow. Used by both the live server and the built static site.
  *
@@ -110,181 +116,221 @@
   --okf-prose-maxw: 76ch;      /* body text measure */
   --okf-page-maxw: 1560px;     /* concept page shell (sidebar + article) */
   --okf-topbar-h: 52px;
-  /* Display face for headings/hero: system serif stack. Body stays sans;
-   * the serif display gives the wiki its "atlas" identity without a
-   * webfont download. */
-  --okf-font-display: "Iowan Old Style", "Palatino Linotype", Palatino,
-    "Source Serif Pro", Georgia, "Noto Serif CJK SC", serif;
+  --okf-status-h: 30px;      /* bottom status strip */
+  /* --- Redesign fallback (technical-light family). These override the
+     legacy radius/font values above so a themeless page renders as
+     technical-light; each [data-theme] block redeclares them per family. */
+  --okf-radius: 6px;
+  --okf-radius-sm: 5px;
+  --okf-radius-pill: 4px;
+  --okf-border-w: 1px;
+  --okf-font-display: Inter, system-ui, "Segoe UI", Roboto, sans-serif;
+  --okf-font-body: Inter, system-ui, "Segoe UI", Roboto,
+    "Noto Sans CJK SC", sans-serif;
+  --okf-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo,
+    Consolas, monospace;
+  --okf-tag-transform: uppercase;
+  --okf-tag-weight: 600;
+  --okf-tag-spacing: 0.07em;
+  --okf-title-weight: 700;
+  --okf-title-spacing: -0.01em;
+  --okf-active-fill: var(--okf-accent-bg);
+  --okf-active-fg: var(--okf-accent);
+  --okf-active-border: transparent;
+  --okf-pop-shadow: -18px 0 46px rgba(15, 23, 42, 0.18);
+  --okf-page-bg: #e6eaef;
 }
-[data-theme="dark"] {
-  --okf-bg: #0b1220;
-  --okf-bg-elev: #111a2e;
-  --okf-bg-inset: #0d1626;
-  --okf-fg: #e2e8f0;
-  --okf-fg-muted: #94a3b8;
-  --okf-border: #1e293b;
-  --okf-border-strong: #334155;
-  /* P2-8 (iter-1): light teal accent for the dark theme (was blue-400
-   * #60a5fa). Contrast ratios (WCAG 2.2):
-   *   --okf-accent #3ec9c9 on --okf-bg     (#0b1220) ≈ 8.44:1 (AAA)
-   *   --okf-accent #3ec9c9 on --okf-bg-elev (#111a2e) ≈ 7.6:1 (AAA)
-   *   --okf-accent-on #0b1220 on #3ec9c9              ≈ 8.44:1 (AAA) */
-  --okf-accent: #3ec9c9;
-  --okf-accent-hover: #5fd4d4;
-  --okf-accent-on: #0b1220;           /* 8.44:1 on #3ec9c9 (AAA) */
-  /* P1-11: 18% teal overlay composites against the dark surfaces.
-   * Computed contrast vs the #3ec9c9 accent text on the composited tint:
-   *   on --okf-bg     (#0b1220) → ≈ 6.9:1
-   *   on --okf-bg-elev (#111a2e) → ≈ 6.3:1
-   * Both pass AA (4.5:1) comfortably. */
-  --okf-accent-bg: rgba(62, 201, 201, 0.18);
-  /* P2-5 (iter-2): graph-canvas selection colour (dark). Mirrors the light
-   * token; graph.js reads this via its GRAPH_COLORS block.
-   *   --okf-select #3ec9c9 on --okf-bg-elev (#111a2e, canvas) ≈ 7.6:1 (AAA) */
-  --okf-select: #3ec9c9;
-  --okf-code-bg: #0d1626;
-  --okf-code-fg: #e2e8f0;
-  --okf-pre-bg: #020617;
+/* ============================ THEMES (4) ============================
+ * One skeleton, four token blocks. Values lifted from
+ * design/new-layout/mockups/{technical,swiss}-v1.html; the code/status/
+ * select tokens the mockups don't define are derived from each theme's
+ * accent + surfaces. KEEP graph.js GRAPH_COLORS in sync per theme.
+ *
+ * Technical (dev-tool): Inter UI, radius 6px, subtle borders, teal accent,
+ *   SUBTLE tinted active states (active-fill = accent-bg, active-fg = accent).
+ * Swiss (utilitarian grid): Helvetica display, radius 0, hairline grid
+ *   (border-strong = fg), SOLID boxed accent fills for active states
+ *   (active-fill = accent, active-fg = accent-on). */
+
+[data-theme="technical-light"] {
+  --okf-bg: #f6f8fa;
+  --okf-bg-elev: #ffffff;
+  --okf-bg-inset: #eef1f4;
+  --okf-fg: #0f172a;
+  --okf-fg-muted: #57606a;
+  --okf-border: #d0d7de;
+  --okf-border-strong: #c0c7d0;
+  --okf-accent: #0c7373;
+  --okf-accent-hover: #0a5e5e;
+  --okf-accent-on: #ffffff;
+  --okf-accent-bg: #d7ecec;
+  --okf-select: #0c7373;
+  --okf-code-bg: #eef1f4;
+  --okf-code-fg: #0f172a;
+  --okf-pre-bg: #0f172a;
   --okf-pre-fg: #e2e8f0;
-  --okf-broken: #f87171;              /* P2-73: AA on dark bg-inset */
-  /* iter1 CRI-011: dark-theme state tokens. Higher lightness for contrast
-   * on dark surfaces; bg tints are low-lightness overlays that composite
-   * against the dark elev/inset surfaces. Approx. WCAG ratios:
-   *   --okf-ok   oklch(0.74 0.12 165) on #111a2e ≈ 7.0:1 (AAA)
-   *   --okf-warn oklch(0.80 0.13 70)  on #111a2e ≈ 7.6:1 (AAA)
-   *   --okf-info oklch(0.74 0.10 235) on #111a2e ≈ 6.4:1 (AA)
-   *   --okf-error oklch(0.72 0.16 27) on #111a2e ≈ 6.0:1 (AA) */
+  --okf-broken: #b91c1c;
+  --okf-ok: oklch(0.52 0.10 165);
+  --okf-ok-bg: oklch(0.96 0.03 165);
+  --okf-warn: oklch(0.55 0.12 70);
+  --okf-warn-bg: oklch(0.96 0.04 70);
+  --okf-info: oklch(0.46 0.09 235);
+  --okf-info-bg: oklch(0.96 0.03 235);
+  --okf-error: oklch(0.50 0.17 27);
+  --okf-error-bg: oklch(0.96 0.03 27);
+  --okf-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --okf-radius: 6px;
+  --okf-radius-sm: 5px;
+  --okf-radius-pill: 4px;
+  --okf-border-w: 1px;
+  --okf-font-display: Inter, system-ui, "Segoe UI", Roboto, sans-serif;
+  --okf-font-body: Inter, system-ui, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif;
+  --okf-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --okf-tag-transform: uppercase;
+  --okf-tag-weight: 600;
+  --okf-tag-spacing: 0.07em;
+  --okf-title-weight: 700;
+  --okf-title-spacing: -0.01em;
+  --okf-active-fill: var(--okf-accent-bg);
+  --okf-active-fg: var(--okf-accent);
+  --okf-active-border: transparent;
+  --okf-pop-shadow: -18px 0 46px rgba(15, 23, 42, 0.18);
+  --okf-page-bg: #e6eaef;
+}
+[data-theme="technical-dark"] {
+  --okf-bg: #0f1319;
+  --okf-bg-elev: #161b22;
+  --okf-bg-inset: #0b0e13;
+  --okf-fg: #e6edf3;
+  --okf-fg-muted: #8b949e;
+  --okf-border: #2a313c;
+  --okf-border-strong: #3b444f;
+  --okf-accent: #2dd4bf;
+  --okf-accent-hover: #26b3a1;
+  --okf-accent-on: #04211f;
+  --okf-accent-bg: #123634;
+  --okf-select: #2dd4bf;
+  --okf-code-bg: #0b0e13;
+  --okf-code-fg: #e6edf3;
+  --okf-pre-bg: #0b0e13;
+  --okf-pre-fg: #e6edf3;
+  --okf-broken: #f87171;
   --okf-ok: oklch(0.74 0.12 165);
-  --okf-ok-bg: oklch(0.28 0.05 165);
-  --okf-warn: oklch(0.80 0.13 70);
-  --okf-warn-bg: oklch(0.30 0.06 70);
-  --okf-info: oklch(0.74 0.10 235);
-  --okf-info-bg: oklch(0.28 0.05 235);
-  --okf-error: oklch(0.72 0.16 27);
-  --okf-error-bg: oklch(0.30 0.06 27);
-  --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
+  --okf-ok-bg: oklch(0.30 0.05 165);
+  --okf-warn: oklch(0.78 0.13 70);
+  --okf-warn-bg: oklch(0.32 0.06 70);
+  --okf-info: oklch(0.72 0.11 235);
+  --okf-info-bg: oklch(0.30 0.05 235);
+  --okf-error: oklch(0.68 0.17 27);
+  --okf-error-bg: oklch(0.32 0.08 27);
+  --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --okf-radius: 6px;
+  --okf-radius-sm: 5px;
+  --okf-radius-pill: 4px;
+  --okf-border-w: 1px;
+  --okf-font-display: Inter, system-ui, "Segoe UI", Roboto, sans-serif;
+  --okf-font-body: Inter, system-ui, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif;
+  --okf-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --okf-tag-transform: uppercase;
+  --okf-tag-weight: 600;
+  --okf-tag-spacing: 0.07em;
+  --okf-title-weight: 700;
+  --okf-title-spacing: -0.01em;
+  --okf-active-fill: var(--okf-accent-bg);
+  --okf-active-fg: var(--okf-accent);
+  --okf-active-border: transparent;
+  --okf-pop-shadow: -18px 0 46px rgba(0, 0, 0, 0.5);
+  --okf-page-bg: #05070a;
 }
-/* Pastel: the "middle ground" theme — soft lilac surfaces sit between the
- * bright light theme and the dark ones. The accent moves to a dusty violet
- * so the whole palette stays in one gentle hue family; the brand teal
- * remains the light/dark identity. Contrast ratios (WCAG 2.2):
- *   --okf-fg #403a58 on --okf-bg #eee9f6            ≈ 8.97:1 (AAA)
- *   --okf-fg-muted #5f5880 on --okf-bg-inset        ≈ 4.94:1 (AA)
- *   --okf-accent #6d4fae on --okf-bg                ≈ 5.21:1 (AA)
- *   --okf-accent #6d4fae on --okf-bg-elev #f7f4fb   ≈ 5.71:1 (AA)
- *   --okf-accent-on #ffffff on #6d4fae              ≈ 6.21:1 (AA)
- *   --okf-accent-bg #e2d7f3 (text #6d4fae)          ≈ 4.51:1 (AA)
- *   --okf-broken #a92f56 on --okf-bg-inset          ≈ 4.89:1 (AA) */
-[data-theme="pastel"] {
-  --okf-bg: #eee9f6;
-  --okf-bg-elev: #f7f4fb;
-  --okf-bg-inset: #e4dcf0;
-  --okf-fg: #403a58;
-  --okf-fg-muted: #5f5880;
-  --okf-border: #d9d0e8;
-  --okf-border-strong: #bbaed6;
-  --okf-accent: #6d4fae;
-  --okf-accent-hover: #5b3f96;
+[data-theme="swiss-light"] {
+  --okf-bg: #ffffff;
+  --okf-bg-elev: #ffffff;
+  --okf-bg-inset: #f2f3f5;
+  --okf-fg: #111418;
+  --okf-fg-muted: #5b636e;
+  --okf-border: #dfe2e6;
+  --okf-border-strong: #111418;
+  --okf-accent: #0c7373;
+  --okf-accent-hover: #0a5e5e;
   --okf-accent-on: #ffffff;
-  --okf-accent-bg: #e2d7f3;
-  --okf-select: #6d4fae;
-  --okf-code-bg: #e4dcf0;
-  --okf-code-fg: #403a58;
-  --okf-pre-bg: #2e2946;
-  --okf-pre-fg: #e9e4f5;
-  --okf-broken: #a92f56;
-  /* State tokens: light-theme hues, lightness dropped a step because the
-   * lilac surfaces are darker than white. Approx. vs --okf-bg-elev:
-   *   ok ≈ 5.4:1  warn ≈ 5.2:1  info ≈ 7.0:1  error ≈ 6.9:1 (all AA) */
-  --okf-ok: oklch(0.49 0.10 165);
-  --okf-ok-bg: oklch(0.94 0.03 165);
-  --okf-warn: oklch(0.52 0.12 70);
-  --okf-warn-bg: oklch(0.94 0.04 70);
-  --okf-info: oklch(0.44 0.09 235);
-  --okf-info-bg: oklch(0.94 0.03 235);
-  --okf-error: oklch(0.47 0.16 27);
-  --okf-error-bg: oklch(0.94 0.03 27);
-  --okf-shadow: 0 1px 2px rgba(64, 58, 88, 0.06), 0 1px 3px rgba(64, 58, 88, 0.08);
+  --okf-accent-bg: #dbeeee;
+  --okf-select: #0c7373;
+  --okf-code-bg: #f2f3f5;
+  --okf-code-fg: #111418;
+  --okf-pre-bg: #111418;
+  --okf-pre-fg: #f2f3f5;
+  --okf-broken: #b91c1c;
+  --okf-ok: oklch(0.52 0.10 165);
+  --okf-ok-bg: oklch(0.96 0.03 165);
+  --okf-warn: oklch(0.55 0.12 70);
+  --okf-warn-bg: oklch(0.96 0.04 70);
+  --okf-info: oklch(0.46 0.09 235);
+  --okf-info-bg: oklch(0.96 0.03 235);
+  --okf-error: oklch(0.50 0.17 27);
+  --okf-error-bg: oklch(0.96 0.03 27);
+  --okf-shadow: none;
+  --okf-radius: 0;
+  --okf-radius-sm: 0;
+  --okf-radius-pill: 0;
+  --okf-border-w: 1px;
+  --okf-font-display: "Helvetica Neue", Arial, "Liberation Sans", system-ui, sans-serif;
+  --okf-font-body: "Helvetica Neue", Arial, "Liberation Sans", system-ui, sans-serif;
+  --okf-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --okf-tag-transform: uppercase;
+  --okf-tag-weight: 700;
+  --okf-tag-spacing: 0.09em;
+  --okf-title-weight: 800;
+  --okf-title-spacing: -0.02em;
+  --okf-active-fill: var(--okf-accent);
+  --okf-active-fg: var(--okf-accent-on);
+  --okf-active-border: var(--okf-accent);
+  --okf-pop-shadow: -14px 0 40px rgba(17, 20, 24, 0.22);
+  --okf-page-bg: #e6eaef;
 }
-/* Sepia: warm paper reading theme — cream surfaces, espresso text, sienna
- * accent. Contrast ratios (WCAG 2.2):
- *   --okf-fg #3d3020 on --okf-bg #f3ead8            ≈ 10.70:1 (AAA)
- *   --okf-fg-muted #635038 on --okf-bg-inset        ≈ 5.83:1 (AA)
- *   --okf-accent #8a4a15 on --okf-bg                ≈ 5.72:1 (AA)
- *   --okf-accent #8a4a15 on --okf-bg-elev #faf4e6   ≈ 6.24:1 (AA)
- *   --okf-accent-on #ffffff on #8a4a15              ≈ 6.84:1 (AA)
- *   --okf-accent-bg #ecd9be (text #8a4a15)          ≈ 4.96:1 (AA)
- *   --okf-broken #a03422 on --okf-bg-inset          ≈ 5.30:1 (AA) */
-[data-theme="sepia"] {
-  --okf-bg: #f3ead8;
-  --okf-bg-elev: #faf4e6;
-  --okf-bg-inset: #ecdfc6;
-  --okf-fg: #3d3020;
-  --okf-fg-muted: #635038;
-  --okf-border: #e2d5b8;
-  --okf-border-strong: #c6b28a;
-  --okf-accent: #8a4a15;
-  --okf-accent-hover: #733a0b;
-  --okf-accent-on: #ffffff;
-  --okf-accent-bg: #ecd9be;
-  --okf-select: #8a4a15;
-  --okf-code-bg: #ecdfc6;
-  --okf-code-fg: #3d3020;
-  --okf-pre-bg: #32281a;
-  --okf-pre-fg: #ede4d1;
-  --okf-broken: #a03422;
-  /* State tokens: same one-step-darker treatment as pastel; the cream
-   * surfaces are slightly darker than white. Approx. vs --okf-bg-elev:
-   *   ok ≈ 5.4:1  warn ≈ 5.4:1  info ≈ 7.0:1  error ≈ 6.8:1 (all AA) */
-  --okf-ok: oklch(0.49 0.10 165);
-  --okf-ok-bg: oklch(0.94 0.04 165);
-  --okf-warn: oklch(0.51 0.11 70);
-  --okf-warn-bg: oklch(0.94 0.05 70);
-  --okf-info: oklch(0.44 0.09 235);
-  --okf-info-bg: oklch(0.94 0.03 235);
-  --okf-error: oklch(0.47 0.16 27);
-  --okf-error-bg: oklch(0.94 0.04 27);
-  --okf-shadow: 0 1px 2px rgba(61, 48, 32, 0.06), 0 1px 3px rgba(61, 48, 32, 0.08);
-}
-/* Midnight: deeper than dark — near-black, OLED-friendly surfaces with a
- * brighter take on the brand teal. Contrast ratios (WCAG 2.2):
- *   --okf-fg #dbe2f4 on --okf-bg #050810            ≈ 15.45:1 (AAA)
- *   --okf-fg-muted #8e97b8 on --okf-bg-inset        ≈ 6.76:1 (AA)
- *   --okf-accent #52d8d8 on --okf-bg                ≈ 11.61:1 (AAA)
- *   --okf-accent #52d8d8 on --okf-bg-elev #0b1020   ≈ 10.97:1 (AAA)
- *   --okf-accent-on #050810 on #52d8d8              ≈ 11.61:1 (AAA)
- *   --okf-accent-bg 16% teal overlay (text #52d8d8) ≈ 7.99:1 (AAA)
- *   --okf-broken #fb8f8f on --okf-bg-inset          ≈ 8.77:1 (AAA) */
-[data-theme="midnight"] {
-  --okf-bg: #050810;
-  --okf-bg-elev: #0b1020;
-  --okf-bg-inset: #070c18;
-  --okf-fg: #dbe2f4;
-  --okf-fg-muted: #8e97b8;
-  --okf-border: #161d33;
-  --okf-border-strong: #2a3352;
-  --okf-accent: #52d8d8;
-  --okf-accent-hover: #79e3e3;
-  --okf-accent-on: #050810;
-  --okf-accent-bg: rgba(82, 216, 216, 0.16);
-  --okf-select: #52d8d8;
-  --okf-code-bg: #070c18;
-  --okf-code-fg: #dbe2f4;
-  --okf-pre-bg: #010409;
-  --okf-pre-fg: #dbe2f4;
-  --okf-broken: #fb8f8f;
-  /* State tokens: dark-theme hues lifted a step for the near-black
-   * surfaces. Approx. vs --okf-bg-elev:
-   *   ok ≈ 9.3:1  warn ≈ 10.6:1  info ≈ 9.0:1  error ≈ 7.6:1 (all AAA/AA) */
-  --okf-ok: oklch(0.76 0.12 165);
-  --okf-ok-bg: oklch(0.26 0.05 165);
-  --okf-warn: oklch(0.82 0.13 70);
-  --okf-warn-bg: oklch(0.28 0.06 70);
-  --okf-info: oklch(0.76 0.10 235);
-  --okf-info-bg: oklch(0.26 0.05 235);
-  --okf-error: oklch(0.74 0.16 27);
-  --okf-error-bg: oklch(0.28 0.06 27);
-  --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.6);
+[data-theme="swiss-dark"] {
+  --okf-bg: #121417;
+  --okf-bg-elev: #181b1f;
+  --okf-bg-inset: #0c0e10;
+  --okf-fg: #f0f2f4;
+  --okf-fg-muted: #9aa1a9;
+  --okf-border: #2b2f34;
+  --okf-border-strong: #f0f2f4;
+  --okf-accent: #2dd4bf;
+  --okf-accent-hover: #26b3a1;
+  --okf-accent-on: #04211f;
+  --okf-accent-bg: rgba(45, 212, 191, 0.16);
+  --okf-select: #2dd4bf;
+  --okf-code-bg: #0c0e10;
+  --okf-code-fg: #f0f2f4;
+  --okf-pre-bg: #0c0e10;
+  --okf-pre-fg: #f0f2f4;
+  --okf-broken: #f87171;
+  --okf-ok: oklch(0.74 0.12 165);
+  --okf-ok-bg: oklch(0.30 0.05 165);
+  --okf-warn: oklch(0.78 0.13 70);
+  --okf-warn-bg: oklch(0.32 0.06 70);
+  --okf-info: oklch(0.72 0.11 235);
+  --okf-info-bg: oklch(0.30 0.05 235);
+  --okf-error: oklch(0.68 0.17 27);
+  --okf-error-bg: oklch(0.32 0.08 27);
+  --okf-shadow: none;
+  --okf-radius: 0;
+  --okf-radius-sm: 0;
+  --okf-radius-pill: 0;
+  --okf-border-w: 1px;
+  --okf-font-display: "Helvetica Neue", Arial, "Liberation Sans", system-ui, sans-serif;
+  --okf-font-body: "Helvetica Neue", Arial, "Liberation Sans", system-ui, sans-serif;
+  --okf-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --okf-tag-transform: uppercase;
+  --okf-tag-weight: 700;
+  --okf-tag-spacing: 0.09em;
+  --okf-title-weight: 800;
+  --okf-title-spacing: -0.02em;
+  --okf-active-fill: var(--okf-accent);
+  --okf-active-fg: var(--okf-accent-on);
+  --okf-active-border: var(--okf-accent);
+  --okf-pop-shadow: -14px 0 40px rgba(0, 0, 0, 0.5);
+  --okf-page-bg: #050607;
 }
 
 /* ---- Reset / base ------------------------------------------------------ */
