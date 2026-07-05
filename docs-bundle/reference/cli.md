@@ -148,12 +148,14 @@ Full mode-by-mode detail lives in [search_modes.md](/reference/search_modes.md).
 
 ```bash
 scripts/okf-loom discover <bundle> [--rules RULES] [--out OUT]
-            [--scope SCOPE] [--neighbors] [--format {text,json,md,dot}]
+            [--scope SCOPE] [--neighbors] [--min-confidence N]
+            [--include-low-confidence] [--format {text,json,md,dot}]
 ```
 
 Emit a structured report of gaps the managing agent may fix.
 Suggestions carry a rule, severity, message, target concept, and an
-`action` verb phrase.
+`action` verb phrase. JSON output includes suppressed suggestions and
+`suppressed_reason_counts` so filtered data remains inspectable.
 
 | Flag | Effect |
 |---|---|
@@ -161,6 +163,14 @@ Suggestions carry a rule, severity, message, target concept, and an
 | `--out plan.json` | Write the JSON report to this path. |
 | `--scope ID,ID` | Restrict rules to named concept ids (current spec §7). |
 | `--neighbors` | Expand `--scope` to 1-hop graph neighbours (in + out edges). |
+| `--min-confidence N` | Minimum confidence for unlinked-mention suggestions (default `0.5`). |
+| `--include-low-confidence` | Keep low-confidence suggestions in the main list for broad audits. |
+
+`unlinked_mentions` suppresses suggestions already covered by structured
+`relations:` metadata (`already_structurally_related`) and lowers confidence
+for generic labels such as `Architecture`, `README`, or `Implementation Plan`
+unless source and target share strong context such as `graph_cluster` or
+folder.
 
 The agent applies fixes directly via the mutators; the reviewable-plan
 workflow (`discover` → `plan` → `update`) is still available.

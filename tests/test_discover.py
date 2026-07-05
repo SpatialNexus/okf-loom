@@ -191,6 +191,121 @@ def test_unlinked_mentions_suppresses_high_frequency_project_labels(
     assert "high_document_frequency" in first.detail["confidence_reasons"]
 
 
+def test_unlinked_mentions_suppresses_existing_structural_relation(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "alpha.md").write_text(
+        "---\n"
+        "type: T\n"
+        "title: Alpha\n"
+        "relations:\n"
+        "  - type: references\n"
+        "    target: /beta.md\n"
+        "---\n"
+        "Beta is already represented by structured metadata.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: T\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    suppressed = rep.suppressed[0]
+    assert suppressed.action == "no action"
+    assert suppressed.detail["suppression_reasons"] == [
+        "already_structurally_related"
+    ]
+    assert (
+        rep.as_dict()["suppressed_reason_counts"]["already_structurally_related"]
+        == 1
+    )
+
+    noisy = discover_suggestions(
+        b, rules=["unlinked_mentions"], include_low_confidence=True,
+    )
+    assert noisy.suggestions == []
+    assert len(noisy.suppressed) == 1
+
+
+def test_unlinked_mentions_suppresses_generic_label_without_shared_context(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "project_a").mkdir()
+    (tmp_path / "project_b").mkdir()
+    (tmp_path / "project_a" / "note.md").write_text(
+        "---\n"
+        "type: Note\n"
+        "title: Project A Note\n"
+        "graph_cluster: project-a\n"
+        "---\n"
+        "Review the Architecture before changing the deployment path.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "project_b" / "architecture.md").write_text(
+        "---\n"
+        "type: Design\n"
+        "title: Architecture\n"
+        "graph_cluster: project-b\n"
+        "---\n"
+        "Architecture body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    reasons = rep.suppressed[0].detail["confidence_reasons"]
+    assert "generic_duplicate_label" in reasons
+    assert "generic_duplicate_label_weak_context" in reasons
+    assert "cross_context_generic_label" in reasons
+    assert "low_confidence" in rep.suppressed[0].detail["suppression_reasons"]
+
+
+def test_unlinked_mentions_keeps_generic_label_with_shared_context(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    project = tmp_path / "project_a"
+    project.mkdir()
+    (project / "note.md").write_text(
+        "---\n"
+        "type: Note\n"
+        "title: Project A Note\n"
+        "graph_cluster: project-a\n"
+        "---\n"
+        "Review the Architecture before changing the deployment path.\n",
+        encoding="utf-8",
+    )
+    (project / "architecture.md").write_text(
+        "---\n"
+        "type: Design\n"
+        "title: Architecture\n"
+        "graph_cluster: project-a\n"
+        "---\n"
+        "Architecture body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert len(rep.suggestions) == 1
+    reasons = rep.suggestions[0].detail["confidence_reasons"]
+    assert "generic_duplicate_label" in reasons
+    assert "generic_duplicate_label_same_context" in reasons
+    assert "same_graph_cluster" in reasons
+    assert "same_parent_folder" in reasons
+
+
 def test_unlinked_mentions_tolerates_missing_target_type(tmp_path: Path) -> None:
     (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
     (tmp_path / "note.md").write_text(

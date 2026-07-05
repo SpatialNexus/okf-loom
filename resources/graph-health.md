@@ -60,3 +60,11 @@ matched phrase is a common label such as `Users`, `Clients`, `Wiki`, or `Index`,
 a common first name such as `David`, or a project/status label that appears
 across many imported pages. High-frequency labels usually need source-aware
 curation, not automatic linking.
+
+If JSON output contains suppressed suggestions, inspect
+`detail.suppression_reasons` before deciding whether to override the default.
+`already_structurally_related` means the source already has a `relations:`
+edge to the target, so adding a body link is usually redundant. Generic labels
+such as `Architecture`, `README`, or `Implementation Plan` are intentionally
+low confidence unless source and target share context through `graph_cluster`
+or folder placement.
