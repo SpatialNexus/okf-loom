@@ -65,6 +65,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+from .aliases import alias_labels
 from .model import Bundle, Concept, ContentIndex
 from .parse import strip_markdown_for_search
 from .paths import ConceptId, concept_id_from_str, concept_id_to_str
@@ -257,6 +258,7 @@ class SearchBackend(Protocol):
 DEFAULT_FIELD_WEIGHTS: dict[str, float] = {
     "title": 5.0,
     "headings": 3.0,
+    "aliases": 3.0,
     "description": 2.0,
     "body": 1.0,
     "tags": 1.0,
@@ -310,6 +312,7 @@ class LexicalBackend:
         return {
             "title": concept.title or "",
             "headings": " ".join(h.text for h in concept.headings),
+            "aliases": " ".join(alias_labels(concept.frontmatter.get("aliases"))),
             "description": concept.description or "",
             "body": strip_markdown_for_search(concept.body or ""),
             "tags": " ".join(concept.tags),
@@ -531,9 +534,7 @@ class SemanticLiteBackend:
                     if isinstance(ent_aliases, list):
                         parts.extend(a for a in ent_aliases if isinstance(a, str))
         # Top-level aliases (if aliases capability active)
-        aliases = concept.frontmatter.get("aliases")
-        if aliases and isinstance(aliases, list):
-            parts.extend(a for a in aliases if isinstance(a, str))
+        parts.extend(alias_labels(concept.frontmatter.get("aliases")))
         return " ".join(parts)
 
     # -- indexing ------------------------------------------------------------
@@ -1021,9 +1022,9 @@ def _entity_match_fields(concept: Concept) -> dict[str, str]:
         if labels:
             fields["entities"] = " ".join(labels)
     # Top-level aliases
-    aliases = concept.frontmatter.get("aliases")
-    if aliases and isinstance(aliases, list):
-        fields["aliases"] = " ".join(a for a in aliases if isinstance(a, str))
+    aliases = alias_labels(concept.frontmatter.get("aliases"))
+    if aliases:
+        fields["aliases"] = " ".join(aliases)
     return fields
 
 

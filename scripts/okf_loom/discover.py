@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from .aliases import discoverable_alias_labels
 from .model import Bundle, Concept
 from .parse import _INLINE_CODE_RE, _LINK_RE, _strip_code_blocks
 from .paths import (
@@ -383,11 +384,8 @@ def _build_title_index(bundle: Bundle) -> dict[str, _MentionCandidate]:
         last_seg = (c.id[-1] if c.id else "").strip().lower()
         if last_seg:
             phrases.setdefault(last_seg, set()).add("id_segment")
-        aliases = c.frontmatter.get("aliases")
-        if isinstance(aliases, list):
-            for alias in aliases:
-                if isinstance(alias, str) and alias.strip():
-                    phrases.setdefault(alias.strip().lower(), set()).add("alias")
+        for alias in discoverable_alias_labels(c.frontmatter.get("aliases")):
+            phrases.setdefault(alias.lower(), set()).add("alias")
         for p, sources in phrases.items():
             if len(p) < 3 or not re.search(r"[a-z0-9]", p):
                 continue

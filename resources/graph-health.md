@@ -68,3 +68,8 @@ edge to the target, so adding a body link is usually redundant. Generic labels
 such as `Architecture`, `README`, or `Implementation Plan` are intentionally
 low confidence unless source and target share context through `graph_cluster`
 or folder placement.
+
+When a broad alias is useful for search but bad for automatic linking, keep it
+as an object-form alias with `discoverable: false`, for example
+`aliases: [{label: Architecture, discoverable: false}]`. Search and the
+viewer still use the label; `discover` does not.

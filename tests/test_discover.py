@@ -233,6 +233,35 @@ def test_unlinked_mentions_suppresses_existing_structural_relation(
     assert len(noisy.suppressed) == 1
 
 
+def test_unlinked_mentions_skips_alias_marked_not_discoverable(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\nArchitecture is broad here.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "design.md").write_text(
+        "---\n"
+        "type: Design\n"
+        "title: Design System\n"
+        "aliases:\n"
+        "  - label: Architecture\n"
+        "    discoverable: false\n"
+        "---\n"
+        "Design body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(
+        b, rules=["unlinked_mentions"], include_low_confidence=True,
+    )
+
+    assert rep.suggestions == []
+    assert rep.suppressed == []
+
+
 def test_unlinked_mentions_suppresses_generic_label_without_shared_context(
     tmp_path: Path,
 ) -> None:

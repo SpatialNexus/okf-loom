@@ -70,6 +70,18 @@ merge or cross-link.
 `missing_indexes` is mechanical — it always makes sense to add an
 `index.md` when a directory has more than a few concepts.
 
+For aliases that are useful search terms but too broad for automatic linking,
+prefer object-form aliases with `discoverable: false`:
+
+```yaml
+aliases:
+  - label: Architecture
+    discoverable: false
+```
+
+Those aliases remain available to search and the viewer, but `discover` will
+not emit unlinked-mention suggestions for them.
+
 # Step 4: Apply fixes directly via the mutators
 
 For a handful of suggestions, the authoring verbs are the fastest path.

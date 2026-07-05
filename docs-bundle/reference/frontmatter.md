@@ -70,6 +70,30 @@ their presence (auto-activation):
 | `provenance` | `okf.cap.provenance` |
 | `citations` | `okf.cap.citations` |
 
+## `aliases`
+
+Use `aliases:` for alternate names that should be searchable and visible in
+the viewer. The legacy shorthand is a list of strings:
+
+```yaml
+aliases:
+  - Purchase Orders
+  - Sales Orders
+```
+
+When an alias is useful for search but too broad for automatic unlinked-mention
+discovery, use object form and set `discoverable: false`:
+
+```yaml
+aliases:
+  - label: Architecture
+    discoverable: false
+```
+
+The alias remains indexed by search and shown by the viewer, but
+`scripts/okf-loom discover` will not suggest links from incidental mentions of
+that alias. String aliases are discoverable by default.
+
 Example combining recommended + custom keys:
 
 ```yaml

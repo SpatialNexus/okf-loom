@@ -86,3 +86,20 @@ def test_graph_data_exposes_allowlisted_grouping_metadata(tmp_path) -> None:
     assert node["source_system"] == "local"
     assert node["metadata"]["graph_cluster"] == "ops/deploy"
     assert "secret_owner" not in node["metadata"]
+
+
+def test_graph_data_exposes_alias_object_labels(tmp_path) -> None:
+    (tmp_path / "a.md").write_text(
+        "---\n"
+        "type: Design\n"
+        "title: Design System\n"
+        "aliases:\n"
+        "  - label: Architecture\n"
+        "    discoverable: false\n"
+        "---\nbody\n",
+        encoding="utf-8",
+    )
+    data = build_graph_data(Bundle.load(tmp_path))
+    node = data["nodes"][0]["data"]
+
+    assert node["aliases"] == ["Architecture"]
