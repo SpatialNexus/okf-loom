@@ -3122,8 +3122,20 @@
   const panelTitle = el("h2", { class: "okf-panel__title" });
   const panelClose = el("button", { type: "button", class: "okf-panel__close", "aria-label": "Close panel", text: "Esc" });
   panelHeader.appendChild(panelTitle); panelHeader.appendChild(panelClose);
+  // Editorial Workbench: one pop-over with tabs (Comments/Changes/Outline/
+  // Metadata) instead of separately-opened panels. Clicking a tab swaps the
+  // rendered panel; the active tab is underlined with --okf-accent.
+  const panelTabs = el("div", { class: "okf-panel__tabs", role: "tablist", "aria-label": "Panel sections" });
+  const PANEL_TABS = [["comments", "Comments"], ["changes", "Changes"], ["outline", "Outline"], ["metadata", "Metadata"]];
+  const panelTabBtns = {};
+  PANEL_TABS.forEach(function (t) {
+    const b = el("button", { type: "button", class: "okf-panel__tab", role: "tab", "aria-selected": "false", text: t[1] });
+    b.addEventListener("click", function () { openPanel(t[0]); });
+    panelTabs.appendChild(b);
+    panelTabBtns[t[0]] = b;
+  });
   const panelBody = el("div", { class: "okf-panel__body", id: "okf-panel-body" });
-  panelShell.appendChild(panelHeader); panelShell.appendChild(panelBody);
+  panelShell.appendChild(panelHeader); panelShell.appendChild(panelTabs); panelShell.appendChild(panelBody);
   document.body.appendChild(panelOverlay); document.body.appendChild(panelShell);
   panelOverlay.addEventListener("click", closePanel);
   panelClose.addEventListener("click", closePanel);
@@ -3151,6 +3163,10 @@
     [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
     const tb = ({ comments: commentsBtn, changes: changesBtn })[id];
     if (tb) tb.setAttribute("aria-expanded", "true");
+    // Reflect the active tab in the pop-over tab bar.
+    Object.keys(panelTabBtns).forEach(function (k) {
+      panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
+    });
     // Save the trigger so closePanel can restore focus (CRI-016).
     if (!panelLastFocus) panelLastFocus = document.activeElement;
     // Render.
@@ -3247,6 +3263,53 @@
     __builtin: true,
   };
   panels.changes = { id: "changes", label: "Changes", render: (c) => { c.innerHTML = ""; renderChangeList(); }, __builtin: true };
+
+  // Outline: this page's heading structure, as jump links. Reads the rendered
+  // prose so it tracks live edits.
+  panels.outline = {
+    id: "outline", label: "Outline", __builtin: true,
+    render: function (c) {
+      c.innerHTML = "";
+      const heads = $$(".okf-prose h2, .okf-prose h3");
+      if (!heads.length) {
+        c.appendChild(el("p", { class: "okf-panel__empty", text: "No sections on this page." }));
+        return;
+      }
+      const nav = el("nav", { class: "okf-outline", "aria-label": "Page outline" });
+      heads.forEach(function (h, i) {
+        if (!h.id) { try { h.id = "okf-h-" + i; } catch (e) {} }
+        const label = (h.textContent || "").replace(/[¶#]\s*$/, "").trim();
+        const a = el("a", { class: "okf-outline__item okf-outline__item--" + h.tagName.toLowerCase(),
+          href: "#" + h.id, text: label });
+        a.addEventListener("click", function () { setTimeout(closePanel, 0); });
+        nav.appendChild(a);
+      });
+      c.appendChild(nav);
+    },
+  };
+
+  // Metadata: the concept's frontmatter. Clones the in-page "All fields"
+  // details table when present; otherwise summarises type + tags.
+  panels.metadata = {
+    id: "metadata", label: "Metadata", __builtin: true,
+    render: function (c) {
+      c.innerHTML = "";
+      const fm = $(".okf-frontmatter");
+      if (fm) {
+        const clone = fm.cloneNode(true);
+        clone.setAttribute("open", "");
+        const sum = clone.querySelector("summary");
+        if (sum) sum.remove();
+        c.appendChild(clone);
+        return;
+      }
+      const type = $(".okf-type-chip");
+      const tags = $(".okf-page__meta");
+      if (type) c.appendChild(el("div", { class: "okf-panel__section", text: "Type: " + (type.textContent || "").trim() }));
+      if (tags) c.appendChild(el("div", { class: "okf-panel__section", text: (tags.textContent || "").trim() }));
+      if (!type && !tags) c.appendChild(el("p", { class: "okf-panel__empty", text: "No metadata for this view." }));
+    },
+  };
 
   // ---- Built-in extension panel demonstrating register(): "Agent activity" ----
   // iter2 G13 (CRI2-012): enriched with UNIQUE content the presence chip +

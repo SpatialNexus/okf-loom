@@ -1132,8 +1132,8 @@
   height: 100vh;
   width: min(440px, 100vw);
   background: var(--okf-bg-elev);
-  border-left: 1px solid var(--okf-border-strong);
-  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.18);
+  border-left: var(--okf-border-w) solid var(--okf-border-strong);
+  box-shadow: var(--okf-pop-shadow);
   z-index: 71;
   display: flex;
   flex-direction: column;
@@ -1149,7 +1149,50 @@
   border-bottom: 1px solid var(--okf-border);
   flex-shrink: 0;
 }
-.okf-panel__title { font-size: var(--okf-text-base); font-weight: 600; margin: 0; }
+.okf-panel__title { font-size: var(--okf-text-base); font-weight: 600; margin: 0; font-family: var(--okf-font-display); }
+/* Pop-over tab bar (Comments/Changes/Outline/Metadata). Active tab is an
+ * underline in --okf-accent — a non-filled indicator, so per SPEC §5 it uses
+ * --okf-accent for text, never --okf-active-fg. */
+.okf-panel__tabs {
+  display: flex;
+  gap: var(--okf-space-1);
+  padding: 0 var(--okf-space-4);
+  border-bottom: var(--okf-border-w) solid var(--okf-border);
+  flex-shrink: 0;
+}
+.okf-panel__tab {
+  flex: 1;
+  font: inherit;
+  font-size: var(--okf-text-xs);
+  font-weight: 600;
+  padding: var(--okf-space-2) var(--okf-space-1);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--okf-fg-muted);
+  cursor: pointer;
+}
+.okf-panel__tab:hover { color: var(--okf-fg); }
+.okf-panel__tab[aria-selected="true"] {
+  color: var(--okf-accent);
+  border-bottom-color: var(--okf-accent);
+}
+.okf-panel__empty { color: var(--okf-fg-muted); font-size: var(--okf-text-sm); }
+/* Outline tab: jump links to this page's headings. */
+.okf-outline { display: flex; flex-direction: column; gap: 2px; }
+.okf-outline__item {
+  display: block;
+  padding: 5px var(--okf-space-2);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+  text-decoration: none;
+  border-radius: var(--okf-radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.okf-outline__item:hover { color: var(--okf-fg); background: var(--okf-bg-inset); }
+.okf-outline__item--h3 { padding-left: var(--okf-space-4); font-size: var(--okf-text-xs); }
 .okf-panel__body {
   flex: 1 1 auto;
   overflow-y: auto;
