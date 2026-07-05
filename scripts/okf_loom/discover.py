@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .model import Bundle
+from .model import Bundle, Concept
 from .parse import _INLINE_CODE_RE, _LINK_RE, _strip_code_blocks
 from .paths import (
     ConceptId,
@@ -52,6 +52,7 @@ _NOISY_MENTION_PHRASES = {
     "note",
     "notes",
     "page",
+    "people",
     "project",
     "projects",
     "reference",
@@ -60,6 +61,58 @@ _NOISY_MENTION_PHRASES = {
     "users",
     "wiki",
     "wiki page",
+}
+
+_NOISY_STATUS_PHRASES = {
+    "accepted",
+    "active",
+    "closed",
+    "complete",
+    "completed",
+    "done",
+    "inactive",
+    "new",
+    "open",
+    "pending",
+    "rejected",
+    "resolved",
+}
+
+_COMMON_PERSON_NAMES = {
+    "aaron",
+    "adam",
+    "alex",
+    "andrew",
+    "anthony",
+    "ben",
+    "brian",
+    "chris",
+    "christopher",
+    "dan",
+    "daniel",
+    "david",
+    "emily",
+    "eric",
+    "george",
+    "james",
+    "jason",
+    "john",
+    "joseph",
+    "kevin",
+    "laura",
+    "lisa",
+    "mark",
+    "matt",
+    "matthew",
+    "michael",
+    "paul",
+    "peter",
+    "robert",
+    "sarah",
+    "steve",
+    "steven",
+    "tom",
+    "william",
 }
 
 
@@ -305,6 +358,8 @@ def _mention_confidence(
     candidate: _MentionCandidate,
     occurrences: list[int],
     bundle: Bundle,
+    source: Concept,
+    document_frequency: int,
 ) -> tuple[float, list[str]]:
     score = 0.35
     reasons: list[str] = []
@@ -329,8 +384,22 @@ def _mention_confidence(
     if len(occurrences) >= 2:
         score += 0.05
         reasons.append("repeated")
+    concept_count = max(1, len(bundle.concepts))
+    doc_ratio = document_frequency / concept_count
+    if document_frequency >= 10 or (concept_count >= 20 and doc_ratio >= 0.08):
+        score -= 0.35
+        reasons.append("high_document_frequency")
+    elif document_frequency >= 4 and (concept_count >= 20 and doc_ratio >= 0.05):
+        score -= 0.15
+        reasons.append("moderate_document_frequency")
+    if phrase in _COMMON_PERSON_NAMES:
+        score -= 0.40
+        reasons.append("common_person_name")
+    if phrase in _NOISY_STATUS_PHRASES:
+        score -= 0.40
+        reasons.append("status_label")
     target = bundle.concepts.get(candidate.concept_id)
-    target_type = (target.type if target else "").strip().lower()
+    target_type = str((target.type if target else "") or "").strip().lower()
     if target_type in {"document", "wiki page", "index", "page"}:
         score -= 0.15
         reasons.append("generic_target_type")
@@ -340,6 +409,29 @@ def _mention_confidence(
     if phrase in _NOISY_MENTION_PHRASES:
         score -= 0.45
         reasons.append("common_label")
+    # Source-aware nudge: matching source/cluster metadata slightly strengthens
+    # a suggestion; cross-source suggestions need stronger textual evidence.
+    source_system = str(source.frontmatter.get("source_system") or "").strip()
+    source_cluster = str(source.frontmatter.get("graph_cluster") or "").strip()
+    target_system = ""
+    target_cluster = ""
+    if target is not None:
+        target_system = str(target.frontmatter.get("source_system") or "").strip()
+        target_cluster = str(target.frontmatter.get("graph_cluster") or "").strip()
+    if source_system and target_system:
+        if source_system == target_system:
+            score += 0.04
+            reasons.append("same_source_system")
+        else:
+            score -= 0.05
+            reasons.append("different_source_system")
+    if source_cluster and target_cluster:
+        if source_cluster == target_cluster:
+            score += 0.08
+            reasons.append("same_graph_cluster")
+        else:
+            score -= 0.05
+            reasons.append("different_graph_cluster")
     score = max(0.0, min(1.0, score))
     return round(score, 3), reasons
 
@@ -354,8 +446,17 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
         p: re.compile(rf"\b{re.escape(p)}\b", re.IGNORECASE)
         for p in title_index
     }
+    scannables = {
+        src.id: _scannable_body(src.body)
+        for src in sorted(bundle.concepts.values(), key=lambda c: c.id)
+    }
+    document_frequency: dict[str, int] = {}
+    for phrase, pat in compiled.items():
+        document_frequency[phrase] = sum(
+            1 for text in scannables.values() if pat.search(text)
+        )
     for src in sorted(bundle.concepts.values(), key=lambda c: c.id):
-        scannable = _scannable_body(src.body)
+        scannable = scannables[src.id]
         if not scannable.strip():
             continue
         already_linked = {
@@ -379,7 +480,12 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
             target = bundle.concepts.get(target_cid)
             target_title = target.title if target else phrase
             confidence, reasons = _mention_confidence(
-                phrase, candidate, occurrences, bundle,
+                phrase,
+                candidate,
+                occurrences,
+                bundle,
+                src,
+                document_frequency.get(phrase, 0),
             )
             out.append(
                 Suggestion(
@@ -397,6 +503,7 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
                         "phrase": phrase,
                         "confidence": confidence,
                         "confidence_reasons": reasons,
+                        "document_frequency": document_frequency.get(phrase, 0),
                         "suggested_target_concept_id": concept_id_to_str(
                             target_cid
                         ),

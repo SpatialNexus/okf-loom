@@ -56,4 +56,7 @@ scripts/okf-loom discover <bundle> --include-low-confidence
 ```
 
 when doing a broad import audit. Do not blindly apply mention suggestions whose
-matched phrase is a common label such as `Users`, `Clients`, `Wiki`, or `Index`.
+matched phrase is a common label such as `Users`, `Clients`, `Wiki`, or `Index`,
+a common first name such as `David`, or a project/status label that appears
+across many imported pages. High-frequency labels usually need source-aware
+curation, not automatic linking.

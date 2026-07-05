@@ -138,6 +138,77 @@ def test_unlinked_mentions_suppresses_common_low_confidence_labels(
     assert noisy.suggestions[0].target_concept_id == ("users",)
 
 
+def test_unlinked_mentions_suppresses_common_person_names(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\nDavid approved this item.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "david.md").write_text(
+        "---\ntype: Person\ntitle: David\n---\nPerson record.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    assert "common_person_name" in rep.suppressed[0].detail["confidence_reasons"]
+
+
+def test_unlinked_mentions_suppresses_high_frequency_project_labels(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    for i in range(12):
+        (tmp_path / f"notes_{i}.md").write_text(
+            "---\n"
+            f"type: Note\ntitle: Note {i}\n"
+            "source_system: import\n"
+            "graph_cluster: import/wiki\n"
+            "---\n"
+            "Ebotech appears as a project label in many imported notes.\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "ebotech.md").write_text(
+        "---\n"
+        "type: Project\n"
+        "title: Ebotech\n"
+        "source_system: import\n"
+        "graph_cluster: import/projects\n"
+        "---\nProject body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 12
+    first = rep.suppressed[0]
+    assert first.detail["document_frequency"] >= 10
+    assert "high_document_frequency" in first.detail["confidence_reasons"]
+
+
+def test_unlinked_mentions_tolerates_missing_target_type(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\nThe Legacy Page needs review.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "legacy.md").write_text(
+        "---\ntitle: Legacy Page\n---\nImported body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+
+    assert len(rep.suggestions) == 1
+    assert rep.suggestions[0].target_concept_id == ("legacy",)
+
+
 # --- missing_indexes --------------------------------------------------------
 
 

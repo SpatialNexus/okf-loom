@@ -260,6 +260,26 @@ def test_graph_json(tiny_good_bundle: Path) -> None:
     assert len(data["nodes"]) == 4
 
 
+def test_graph_json_includes_grouping_metadata(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text(
+        "---\n"
+        "type: Runbook\n"
+        "title: Deploy\n"
+        "graph_cluster: ops/deploy\n"
+        "source_system: local\n"
+        "---\nbody\n",
+        encoding="utf-8",
+    )
+    rc, out, _ = _capture(["graph", str(tmp_path), "--format", "json"])
+
+    assert rc == 0
+    data = json.loads(out)
+    node = data["nodes"][0]
+    assert node["graph_cluster"] == "ops/deploy"
+    assert node["source_system"] == "local"
+    assert node["metadata"]["graph_cluster"] == "ops/deploy"
+
+
 def test_graph_quality_json(tiny_good_bundle: Path) -> None:
     rc, out, _ = _capture([
         "graph-quality", str(tiny_good_bundle), "--format", "json",

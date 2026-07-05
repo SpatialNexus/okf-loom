@@ -118,7 +118,8 @@ scripts/okf-loom graph <bundle> [--format {text,json,md,dot}]
 
 Print the link graph. Wikilinks (`[[…]]`) are emitted as edges with
 `form="wikilink"`. `dot` output renders with Graphviz; `json` is the
-machine-readable shape consumed by the viewer.
+machine-readable shape consumed by the viewer. JSON nodes include allowlisted
+grouping metadata such as `graph_cluster` and `source_system` when present.
 
 # graph-quality
 
