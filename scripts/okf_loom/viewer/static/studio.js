@@ -4220,12 +4220,21 @@
     // top, NOT as a draggable panel, so it always leads the column.
     if (existingNav) sidebar.appendChild(existingNav);
 
-    // Build the dynamic panels in saved order, below the nav. "sections" is
-    // retired (Outline tab covers it) — skip it in any legacy saved order.
+    // Related renders FLAT (a nav-group label + the neighbour list), not a
+    // draggable card — one continuous left rail. Build it directly.
+    if (existingGraph) {
+      var related = el("section", { class: "okf-related", "aria-label": "Related" });
+      related.appendChild(el("p", { class: "okf-nav__group", text: "Related" }));
+      related.appendChild(existingGraph);   // move the node; wiki.js re-renders it flat
+      sidebar.appendChild(related);
+    }
+
+    // Build any remaining dynamic panels in saved order, below Related.
+    // "sections" (→ Outline tab), "intents" (→ Comments tab), and "related"
+    // (flat above, handled directly) are retired from the draggable-card
+    // path; skip them in any legacy saved order.
     sbState.order.forEach(function (panelId) {
-      // "sections" (→ Outline tab) and "intents" (→ Comments tab) are retired
-      // from the left column; skip them in any legacy saved order.
-      if (panelId === "sections" || panelId === "intents") return;
+      if (panelId === "sections" || panelId === "intents" || panelId === "related") return;
       var panel = buildPanel(panelId, sbState, existingGraph);
       if (panel) sidebar.appendChild(panel);
     });

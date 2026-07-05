@@ -1911,6 +1911,57 @@ def test_footer_has_focus_button_and_bordered_actions(server_url: str, page) -> 
 
 
 # ---------------------------------------------------------------------------
+# Round 2 — Related flattened into the nav rail (Task 5)
+# ---------------------------------------------------------------------------
+
+
+def test_related_section_is_flat_not_a_sidebar_panel_card(server_url: str, page) -> None:
+    """Round 2 Task 5: Related drops its card chrome and reads as flat nav
+    rows. After studio boot, the sidebar must hold the Diátaxis nav (still
+    labeled/classed exactly as before — Task 5 does not touch it) followed
+    by a flat `.okf-related` section (an `.okf-nav__group`-style "Related"
+    label + the neighbour list) — NOT a draggable `.okf-sidebar-panel` card."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-related", timeout=10000)
+    result = page.evaluate(
+        """() => {
+            const sidebar = document.querySelector('.okf-page__sidebar');
+            const related = sidebar.querySelector('.okf-related');
+            const graph = related && related.querySelector('.okf-local-graph');
+            const innerTitle = graph && graph.querySelector('.okf-local-graph__title');
+            return {
+                sidebarAriaLabel: sidebar.getAttribute('aria-label'),
+                navPresent: !!sidebar.querySelector('.okf-nav'),
+                hasSidebarPanelCard: !!sidebar.querySelector('.okf-sidebar-panel'),
+                relatedTag: related ? related.tagName : null,
+                relatedGroupLabel: related
+                    ? (related.querySelector('.okf-nav__group') || {}).textContent
+                    : null,
+                graphInsideRelated: !!graph,
+                innerTitleHidden: innerTitle
+                    ? getComputedStyle(innerTitle).display === 'none'
+                    : null,
+            };
+        }"""
+    )
+    # Task 5 must NOT touch the server-rendered Diátaxis nav's hard contract.
+    assert result["sidebarAriaLabel"] == "Navigation"
+    assert result["navPresent"] is True
+    # Related is flat: no .okf-sidebar-panel card anywhere in the sidebar.
+    assert result["hasSidebarPanelCard"] is False, (
+        "Related must not be wrapped in a .okf-sidebar-panel card"
+    )
+    assert result["relatedTag"] == "SECTION"
+    assert result["relatedGroupLabel"] == "Related"
+    assert result["graphInsideRelated"] is True
+    # The widget's own title is suppressed inside .okf-related so the label
+    # isn't doubled (the section's .okf-nav__group already says "Related").
+    assert result["innerTitleHidden"] is True
+
+
+# ---------------------------------------------------------------------------
 # iter2 G9 — change-list virtualization (only the visible window in the DOM)
 # iter2 G10 — 1000-row cap messaging shown UP FRONT
 # ---------------------------------------------------------------------------

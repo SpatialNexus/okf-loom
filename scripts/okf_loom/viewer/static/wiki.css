@@ -1516,24 +1516,24 @@ sup.okf-footnote-ref { line-height: 0; }
 }
 .okf-sidebar-intent:hover::before { border-color: var(--okf-accent); }
 /* P2-62: local graph widget is now a labelled pill list, not unlabeled
- * SVG dots. Each pill shows a colour swatch + truncated neighbour title. */
+ * SVG dots. Each pill shows a colour swatch + truncated neighbour title.
+ * Round 2 Task 5: flattened — no card border/bg/padding; the widget sits
+ * flush in the left nav rail, matching .okf-nav__group / .okf-nav__link. */
 .okf-local-graph {
-  background: var(--okf-bg-elev);
-  border: 1px solid var(--okf-border);
-  border-radius: var(--okf-radius);
-  padding: var(--okf-space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--okf-space-1);
+  gap: 1px;
   max-height: 320px;
   overflow-y: auto;
+  /* Round 2: flat — no card border/bg/padding; sits flush in the left rail. */
 }
 .okf-local-graph__title {
-  font-size: var(--okf-text-xs);
+  margin: var(--okf-space-4) var(--okf-space-1) var(--okf-space-1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--okf-fg-muted);
-  margin: 0 0 var(--okf-space-1);
 }
 /* When the local-graph widget lives inside a studio sidebar
    panel, the panel header is the user-facing label. We do TWO things:
@@ -1555,12 +1555,13 @@ sup.okf-footnote-ref { line-height: 0; }
   display: flex;
   align-items: center;
   gap: var(--okf-space-2);
-  padding: var(--okf-space-1) var(--okf-space-2);
+  padding: 6px 9px;
+  margin: 1px 0;
+  border: var(--okf-border-w) solid transparent;
   border-radius: var(--okf-radius-sm);
   text-decoration: none;
-  color: var(--okf-fg);
+  color: var(--okf-fg-muted);
   font-size: var(--okf-text-sm);
-  border: 1px solid transparent;
   cursor: pointer;
   background: transparent;
   text-align: left;
@@ -1569,10 +1570,15 @@ sup.okf-footnote-ref { line-height: 0; }
 }
 .okf-local-graph__node:hover {
   background: var(--okf-bg-inset);
-  text-decoration: none;
-  border-color: var(--okf-border);
   color: var(--okf-fg);
+  border-color: transparent;
 }
+/* Inside the flat .okf-related section, the section's own "Related"
+ * .okf-nav__group label already names the widget — hide the widget's
+ * internal title to avoid a doubled label. Standalone/read-only mode
+ * (widget is a direct .okf-page__sidebar child, not inside .okf-related)
+ * keeps its own title so the section is still labelled without JS. */
+.okf-related .okf-local-graph__title { display: none; }
 .okf-local-graph__swatch {
   display: inline-block;
   width: 10px;
