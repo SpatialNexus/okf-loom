@@ -66,3 +66,23 @@ def test_graph_data_node_ids_match_concept_ids() -> None:
         f"node ids != concept ids: missing={sorted(concept_ids - node_ids)} "
         f"extra={sorted(node_ids - concept_ids)}"
     )
+
+
+def test_graph_data_exposes_allowlisted_grouping_metadata(tmp_path) -> None:
+    (tmp_path / "a.md").write_text(
+        "---\n"
+        "type: Runbook\n"
+        "title: Deploy\n"
+        "graph_cluster: ops/deploy\n"
+        "source_system: local\n"
+        "secret_owner: do-not-ship\n"
+        "---\nbody\n",
+        encoding="utf-8",
+    )
+    data = build_graph_data(Bundle.load(tmp_path))
+    node = data["nodes"][0]["data"]
+
+    assert node["graph_cluster"] == "ops/deploy"
+    assert node["source_system"] == "local"
+    assert node["metadata"]["graph_cluster"] == "ops/deploy"
+    assert "secret_owner" not in node["metadata"]

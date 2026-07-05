@@ -440,6 +440,15 @@
     // Lookup tables.
     var nodeIndex = {};
     bundle.nodes.forEach(function (n) { nodeIndex[n.data.id] = n.data; });
+    function metaValue(d, key) {
+      if (!d) return "";
+      if (d[key]) return String(d[key]);
+      if (d.metadata && d.metadata[key]) return String(d.metadata[key]);
+      return "";
+    }
+    function hasMetaValue(key) {
+      return Object.keys(nodeIndex).some(function (id) { return !!metaValue(nodeIndex[id], key); });
+    }
 
     // Backlinks map (target → [source,...]). Computed if absent.
     var backlinks = bundle.backlinks || {};
@@ -703,7 +712,10 @@
     var GROUP_LABELS = {
       community: "theme",
       none: "nothing", type: "type", tag: "tag", relation: "relation type",
-      folder: "folder", neighborhood: "neighbourhood"
+      folder: "folder", neighborhood: "neighbourhood",
+      graph_cluster: "graph cluster", source_system: "source system",
+      project: "project", section: "section", import_batch: "import batch",
+      redmine_project: "Redmine project"
     };
     var MIN_THRESH = [0, 0.25, 0.5, 0.72];
     var MIN_LABELS = ["Show all", "Weak and up", "Medium and up", "Strong only"];
@@ -759,6 +771,12 @@
       Object.keys(nodeIndex).forEach(function (id) { var f = folderOf(id); if (!seen[f]) { seen[f] = true; n++; } });
       return n > 1;
     })();
+    var HAS_GRAPH_CLUSTER = hasMetaValue("graph_cluster");
+    var HAS_SOURCE_SYSTEM = hasMetaValue("source_system");
+    var HAS_PROJECT = hasMetaValue("project");
+    var HAS_SECTION = hasMetaValue("section");
+    var HAS_IMPORT_BATCH = hasMetaValue("import_batch");
+    var HAS_REDMINE_PROJECT = hasMetaValue("redmine_project");
 
     // Connected components (for "Group by neighbourhood"); static per graph.
     var components = (function () {
@@ -787,6 +805,12 @@
         case "relation": return nodeRelLabel[id] || "untyped";
         case "folder": return folderOf(id);
         case "neighborhood": return "cluster " + (components[id] != null ? components[id] : 0);
+        case "graph_cluster": return metaValue(d, "graph_cluster") || "unclustered";
+        case "source_system": return metaValue(d, "source_system") || "unknown source";
+        case "project": return metaValue(d, "project") || "unassigned project";
+        case "section": return metaValue(d, "section") || "unassigned section";
+        case "import_batch": return metaValue(d, "import_batch") || "unbatched";
+        case "redmine_project": return metaValue(d, "redmine_project") || "unassigned Redmine project";
         // Detected communities drive the layout's
         // pull-together forces so themes read as spatial regions.
         case "community": return "theme " + (communityOf[id] != null ? communityOf[id] : 0);
@@ -2217,6 +2241,8 @@
       setRange(ui.groupStrength, controlState.groupStrength, STR_LABELS);
       if (ui.relLabels) ui.relLabels.checked = controlState.showEdgeLabels;
       if (ui.themeColors) ui.themeColors.checked = controlState.colorMode === "community";
+      if (ui.groupBy) ui.groupBy.value = controlState.groupBy;
+      if (ui.groupColors) ui.groupColors.checked = controlState.colorMode === "type" && controlState.colorBy === "group";
       if (ui.depth) ui.depth.value = String(controlState.focusDepth);
       (ui.presets || []).forEach(function (r) { r.checked = (r.value === controlState.lens); });
       if (ui.question) {
@@ -2325,6 +2351,20 @@
       var vfs = el("fieldset", { class: "okf-signal__group" });
       vfs.appendChild(el("legend", {}, ["View"]));
       if (typeSel) vfs.appendChild(el("label", { class: "okf-signal__row" }, [el("span", { class: "okf-signal__row-label" }, ["Type filter"]), typeSel]));
+      var groupOpts = [["community", "Theme"], ["type", "Type"], ["tag", "First tag"], ["relation", "Relation type"], ["neighborhood", "Connected component"]];
+      if (HAS_FOLDERS) groupOpts.push(["folder", "Folder"]);
+      if (HAS_GRAPH_CLUSTER) groupOpts.push(["graph_cluster", "Graph cluster"]);
+      if (HAS_SOURCE_SYSTEM) groupOpts.push(["source_system", "Source system"]);
+      if (HAS_PROJECT) groupOpts.push(["project", "Project"]);
+      if (HAS_SECTION) groupOpts.push(["section", "Section"]);
+      if (HAS_IMPORT_BATCH) groupOpts.push(["import_batch", "Import batch"]);
+      if (HAS_REDMINE_PROJECT) groupOpts.push(["redmine_project", "Redmine project"]);
+      groupOpts.push(["none", "None"]);
+      ui.groupBy = selectRow(vfs, "Group by", groupOpts, controlState.groupBy, function (v) {
+        controlState.groupBy = v;
+        if (v === "community") computeCommunities();
+        markCustom(); applyGrouping(); applyVisualEncoding(); applyFilters(); updateLegend(); updateStatus(); scheduleLayout(false);
+      });
       ui.relLabels = checkRow(vfs, "Show relationship labels", controlState.showEdgeLabels, function (c) {
         controlState.showEdgeLabels = c; controlState.relationEdges = c;
         markCustom(); applyVisualEncoding(); applyEdgeLabels(); updateStatus();
@@ -2334,7 +2374,16 @@
       // it a toggle. Off = colour by type (the auto palette).
       ui.themeColors = checkRow(vfs, "Colour by theme", controlState.colorMode === "community", function (c) {
         controlState.colorMode = c ? "community" : "type";
+        if (c) controlState.colorBy = "type";
+        if (ui.groupColors) ui.groupColors.checked = false;
+        applyGrouping();
         applyVisualEncoding(); updateLegend(); updateStatus();
+      });
+      ui.groupColors = checkRow(vfs, "Colour by selected group", controlState.colorMode === "type" && controlState.colorBy === "group", function (c) {
+        controlState.colorMode = "type";
+        controlState.colorBy = c ? "group" : "type";
+        if (ui.themeColors) ui.themeColors.checked = false;
+        markCustom(); applyGrouping(); applyVisualEncoding(); updateLegend(); updateStatus();
       });
       body.appendChild(vfs);
 

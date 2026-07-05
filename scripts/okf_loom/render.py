@@ -355,6 +355,35 @@ def _graph_governed_keys(concept: Concept) -> dict[str, list]:
     }
 
 
+_GRAPH_GROUPING_KEYS = (
+    "graph_cluster",
+    "source_system",
+    "project",
+    "section",
+    "import_batch",
+    "redmine_project",
+)
+
+
+def _graph_grouping_metadata(concept: Concept) -> dict[str, str]:
+    """Return a small allowlist of graph grouping metadata.
+
+    Unknown frontmatter is legal and preserved, but graph JSON is a rendered
+    read surface. Do not expose arbitrary keys here; only ship generic grouping
+    fields that are useful across imported or mixed-source bundles.
+    """
+    out: dict[str, str] = {}
+    fm = concept.frontmatter
+    for key in _GRAPH_GROUPING_KEYS:
+        value = fm.get(key)
+        if isinstance(value, (list, dict)):
+            continue
+        text = str(value or "").strip()
+        if text:
+            out[key] = text[:160]
+    return out
+
+
 def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, Any]:
     """Serialise a Bundle into the JSON shape consumed by the viewer.
 
@@ -364,7 +393,8 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
           "nodes": [{data: {id, label, type, description, resource, tags,
                             color, size,
                             aliases, entities, provenance, citations,
-                            relations}}],
+                            relations,
+                            metadata, graph_cluster, source_system}}],
           "edges": [{data: {id, source, target}}],
           "external": [{source, target_raw, label}],
           "bodies": {id: markdown_body},
@@ -409,6 +439,7 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
         # panel can render them (mirrors the concept page). Read safely and
         # default to empty lists when absent — the client hides empties.
         governed = _graph_governed_keys(c)
+        grouping_meta = _graph_grouping_metadata(c)
         nodes.append({
             "data": {
                 "id": cid_str,
@@ -434,6 +465,9 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
                 "provenance": governed["provenance"],
                 "citations": governed["citations"],
                 "relations": governed["relations"],
+                "metadata": grouping_meta,
+                "graph_cluster": grouping_meta.get("graph_cluster", ""),
+                "source_system": grouping_meta.get("source_system", ""),
             }
         })
 
