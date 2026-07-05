@@ -126,13 +126,22 @@ evidence, not just pixels:
 
 ![Animated cycle through the Map, Themes, Flow, Bridges, and Recent graph lenses](docs/media/graph-lenses.gif)
 
-### Five colour themes
+### Four colour themes
 
-Light, dark, pastel, sepia, and midnight — all token-governed, all
-WCAG-AA-checked (the test suite enforces that every theme overrides the
-full token set, and the graph canvas follows along):
+Two aesthetics — **Technical** (dev-tool: Inter UI, teal accent, subtle
+tinted active states) and **Swiss** (utilitarian grid: Helvetica, radius 0,
+hairline borders, solid boxed accent fills) — each in **light and dark**, on
+one theme-agnostic layout skeleton. All token-governed, all WCAG-AA-checked
+(the test suite enforces that every theme overrides the full token set, and
+the graph canvas follows along):
 
-![Animated cycle through the light, dark, pastel, sepia, and midnight themes on the showcase page](docs/media/themes.gif)
+![Animated cycle through the technical-light, technical-dark, swiss-light, and swiss-dark themes on the showcase page](docs/media/themes.gif)
+
+> **Migration:** the earlier `light/dark/pastel/sepia/midnight` palette is
+> retired. A `theme:` pinned to an old value in `okf-loom.config.yaml` must
+> move to `auto` or one of the four new names; returning browsers auto-migrate
+> their saved theme (`dark→technical-dark`, `light→technical-light`, the warmer
+> palettes → `swiss-light`).
 
 ### Search that understands the bundle
 
