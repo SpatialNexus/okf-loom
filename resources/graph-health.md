@@ -79,3 +79,16 @@ strongest signal. Matches that appear only in `frontmatter`, `h1`, `heading`,
 or `table` locations are intentionally low confidence because they often echo
 section titles, page titles, or imported table labels rather than expressing a
 useful outgoing link.
+
+Use bundle config for editorial suppressions that are local to one bundle:
+
+```yaml
+discover:
+  suppress_phrases: [architecture, product spec]
+  suppress_pairs:
+    - source: /project-a/product-spec.md
+      target: /project-b/product-spec.md
+```
+
+Configured suppressions stay visible in JSON as `configured_phrase` or
+`configured_pair` reasons.

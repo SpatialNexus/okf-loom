@@ -400,6 +400,67 @@ def test_unlinked_mentions_suppresses_generic_label_without_shared_context(
     assert "low_confidence" in rep.suppressed[0].detail["suppression_reasons"]
 
 
+def test_unlinked_mentions_suppresses_configured_phrase(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "okf-loom.config.yaml").write_text(
+        "discover:\n"
+        "  suppress_phrases:\n"
+        "    - beta\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\nBeta is mentioned in prose.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(
+        b, rules=["unlinked_mentions"], include_low_confidence=True,
+    )
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    assert rep.suppressed[0].detail["suppression_reasons"] == [
+        "configured_phrase"
+    ]
+    assert rep.as_dict()["suppressed_reason_counts"]["configured_phrase"] == 1
+
+
+def test_unlinked_mentions_suppresses_configured_pair(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "okf-loom.config.yaml").write_text(
+        "discover:\n"
+        "  suppress_pairs:\n"
+        "    - source: /note.md\n"
+        "      target: /beta.md\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\nBeta is mentioned in prose.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nBeta body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(
+        b, rules=["unlinked_mentions"], include_low_confidence=True,
+    )
+
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    assert rep.suppressed[0].detail["suppression_reasons"] == [
+        "configured_pair"
+    ]
+    assert rep.as_dict()["suppressed_reason_counts"]["configured_pair"] == 1
+
+
 def test_unlinked_mentions_keeps_generic_label_with_shared_context(
     tmp_path: Path,
 ) -> None:

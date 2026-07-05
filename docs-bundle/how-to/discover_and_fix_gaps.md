@@ -87,6 +87,21 @@ seen in body prose is stronger than a match seen only in `frontmatter`, `h1`,
 `heading`, or `table`; heading-only and table-only suggestions usually need
 review rather than automatic linking.
 
+When a phrase or source→target pair is noisy only in this bundle, configure an
+editorial suppression instead of adding it to a universal stoplist:
+
+```yaml
+discover:
+  suppress_phrases:
+    - architecture
+  suppress_pairs:
+    - source: /project-a/product-spec.md
+      target: /project-b/product-spec.md
+```
+
+These items stay visible in JSON under `suppressed` with reasons such as
+`configured_phrase` or `configured_pair`.
+
 # Step 4: Apply fixes directly via the mutators
 
 For a handful of suggestions, the authoring verbs are the fastest path.

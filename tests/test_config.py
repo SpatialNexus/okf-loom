@@ -24,6 +24,7 @@ from okf_loom.cli import main
 from okf_loom.config import (
     CONFIG_FILENAME,
     DEFAULT_CONFIG_YAML,
+    DiscoverConfig,
     OkfConfig,
     OkfConfigError,
     SearchConfig,
@@ -56,10 +57,13 @@ def test_missing_config_returns_all_defaults(tmp_path: Path) -> None:
     assert isinstance(cfg, OkfConfig)
     assert isinstance(cfg.viewer, ViewerConfig)
     assert isinstance(cfg.search, SearchConfig)
+    assert isinstance(cfg.discover, DiscoverConfig)
     assert isinstance(cfg.validate, ValidateConfig)
     # Spec §11.1 default values.
     assert cfg.viewer.allow_active_code is False
     assert cfg.search.default_mode == "lexical"
+    assert cfg.discover.suppress_phrases == ()
+    assert cfg.discover.suppress_pairs == ()
     assert cfg.validate.default_profile == "spec"
     assert cfg.validate.fail_on_broken_links is False
 
@@ -89,6 +93,11 @@ viewer:
   allow_active_code: true
 search:
   default_mode: semantic
+discover:
+  suppress_phrases: [Architecture, "Product Spec"]
+  suppress_pairs:
+    - source: /project-a/product-spec.md
+      target: /project-b/product-spec.md
 validate:
   default_profile: producer
   fail_on_broken_links: true
@@ -98,6 +107,10 @@ validate:
     assert cfg.viewer.title == "My Knowledge Bundle"
     assert cfg.viewer.allow_active_code is True
     assert cfg.search.default_mode == "semantic"
+    assert cfg.discover.suppress_phrases == ("architecture", "product spec")
+    assert len(cfg.discover.suppress_pairs) == 1
+    assert cfg.discover.suppress_pairs[0].source == ("project-a", "product-spec")
+    assert cfg.discover.suppress_pairs[0].target == ("project-b", "product-spec")
     assert cfg.validate.default_profile == "producer"
     assert cfg.validate.fail_on_broken_links is True
 
@@ -533,6 +546,18 @@ def test_search_enum_tag_entity_relation_accepted(tmp_path: Path) -> None:
         _write_config(tmp_path, f"search:\n  default_mode: {mode}\n")
         cfg = OkfConfig.load(tmp_path)
         assert cfg.search.default_mode == mode
+
+
+def test_discover_suppress_pairs_rejects_bad_entries(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        "discover:\n"
+        "  suppress_pairs:\n"
+        "    - source: /valid.md\n"
+        "      target: '../bad.md'\n",
+    )
+    with pytest.raises(OkfConfigError, match="suppress_pairs"):
+        OkfConfig.load(tmp_path)
 
 
 # --- iter-10 P1-13a: validate.default_profile validation (§5) --------------

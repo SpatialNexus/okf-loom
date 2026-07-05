@@ -37,6 +37,7 @@ from .parse import (
     _NodeLimitedSafeLoader,
     _assert_materialized_under_limit,
 )
+from .paths import ConceptId, ConceptIdError, concept_id_from_str
 
 # Canonical filename (current spec §5: root placement for
 # discoverability). Flip this single constant to relocate the file.
@@ -124,6 +125,9 @@ _KNOWN_VIEWER_KEYS: frozenset[str] = frozenset({
 _KNOWN_SEARCH_KEYS: frozenset[str] = frozenset({
     "default_mode",
 })
+_KNOWN_DISCOVER_KEYS: frozenset[str] = frozenset({
+    "suppress_phrases", "suppress_pairs",
+})
 _KNOWN_VALIDATE_KEYS: frozenset[str] = frozenset({
     "default_profile", "fail_on_broken_links",
 })
@@ -133,7 +137,7 @@ _KNOWN_STUDIO_KEYS: frozenset[str] = frozenset({
     "allowed_hosts", "theme", "events_max_bytes", "events_keep",
 })
 _KNOWN_TOP_KEYS: frozenset[str] = frozenset({
-    "bundle", "viewer", "search", "validate", "studio",
+    "bundle", "viewer", "search", "discover", "validate", "studio",
 })
 
 # Path-bearing viewer keys that must pass the §4.5 containment check.
@@ -276,6 +280,38 @@ class SearchConfig:
         )
 
 
+@dataclass(frozen=True)
+class DiscoverSuppressPair:
+    """A configured source→target pair suppression for unlinked mentions."""
+
+    source: ConceptId
+    target: ConceptId
+
+
+@dataclass(frozen=True)
+class DiscoverConfig:
+    """Discovery noise controls (``discover:``).
+
+    These settings are editorial, bundle-specific suppressions. They do not
+    affect validation, graph construction, search, or the OKF data model.
+    """
+
+    suppress_phrases: tuple[str, ...] = ()
+    suppress_pairs: tuple[DiscoverSuppressPair, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "DiscoverConfig":
+        data = data or {}
+        return cls(
+            suppress_phrases=_coerce_phrase_list(
+                "discover.suppress_phrases", data.get("suppress_phrases")
+            ),
+            suppress_pairs=_coerce_suppress_pairs(
+                data.get("suppress_pairs")
+            ),
+        )
+
+
 _ALLOWED_STUDIO_THEMES: frozenset[str] = frozenset(
     {"auto", "light", "dark", "pastel", "sepia", "midnight"}
 )
@@ -411,6 +447,7 @@ class OkfConfig:
     bundle: BundleConfig = field(default_factory=BundleConfig)
     viewer: ViewerConfig = field(default_factory=ViewerConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    discover: DiscoverConfig = field(default_factory=DiscoverConfig)
     validate: ValidateConfig = field(default_factory=ValidateConfig)
     studio: StudioConfig = field(default_factory=StudioConfig)
     raw: dict[str, Any] = field(default_factory=dict)
@@ -463,6 +500,7 @@ class OkfConfig:
         bundle_raw = data.get("bundle") or {}
         viewer_raw = data.get("viewer") or {}
         search_raw = data.get("search") or {}
+        discover_raw = data.get("discover") or {}
         validate_raw = data.get("validate") or {}
         studio_raw = data.get("studio") or {}
 
@@ -498,6 +536,7 @@ class OkfConfig:
             ("bundle", bundle_raw, _KNOWN_BUNDLE_KEYS),
             ("viewer", viewer_raw, _KNOWN_VIEWER_KEYS),
             ("search", search_raw, _KNOWN_SEARCH_KEYS),
+            ("discover", discover_raw, _KNOWN_DISCOVER_KEYS),
             ("validate", validate_raw, _KNOWN_VALIDATE_KEYS),
             ("studio", studio_raw, _KNOWN_STUDIO_KEYS),
         ):
@@ -509,6 +548,7 @@ class OkfConfig:
             bundle=BundleConfig.from_dict(bundle_raw),
             viewer=ViewerConfig.from_dict(viewer_raw),
             search=SearchConfig.from_dict(search_raw),
+            discover=DiscoverConfig.from_dict(discover_raw),
             validate=ValidateConfig.from_dict(validate_raw),
             studio=StudioConfig.from_dict(studio_raw),
             raw=raw,
@@ -556,6 +596,49 @@ def _opt_str(value: Any) -> str | None:
         return None
     s = str(value).strip()
     return s or None
+
+
+def _coerce_phrase_list(name: str, value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    raw = _coerce_patterns(name, value)
+    phrases: list[str] = []
+    for phrase in raw:
+        normalized = " ".join(phrase.strip().lower().split())
+        if normalized:
+            phrases.append(normalized)
+    return tuple(phrases)
+
+
+def _coerce_suppress_pairs(value: Any) -> tuple[DiscoverSuppressPair, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise OkfConfigError(
+            "discover.suppress_pairs: expected a list of {source, target} mappings"
+        )
+    pairs: list[DiscoverSuppressPair] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise OkfConfigError(
+                "discover.suppress_pairs: entries must be mappings"
+            )
+        source_raw = item.get("source")
+        target_raw = item.get("target")
+        if not isinstance(source_raw, str) or not isinstance(target_raw, str):
+            raise OkfConfigError(
+                "discover.suppress_pairs: each entry needs string source and target"
+            )
+        try:
+            source = concept_id_from_str(source_raw)
+            target = concept_id_from_str(target_raw)
+        except (ConceptIdError, ValueError) as e:
+            raise OkfConfigError(
+                "discover.suppress_pairs: source and target must be concept ids "
+                "or bundle-absolute concept links"
+            ) from e
+        pairs.append(DiscoverSuppressPair(source=source, target=target))
+    return tuple(pairs)
 
 
 # String tokens accepted as boolean values (case-insensitive) by _coerce_bool.
@@ -638,6 +721,10 @@ viewer:
 
 search:
   default_mode: lexical             # lexical | semantic | hybrid | tag | entity | relation
+
+discover:
+  suppress_phrases: []              # editorial phrase suppressions for unlinked mentions
+  suppress_pairs: []                # [{source: /a.md, target: /b.md}] source→target suppressions
 
 validate:
   default_profile: spec             # spec | producer | loose

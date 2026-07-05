@@ -134,6 +134,8 @@ _COMMON_PERSON_NAMES = {
 
 _ALWAYS_SUPPRESS_REASONS = {
     "already_structurally_related",
+    "configured_phrase",
+    "configured_pair",
 }
 
 
@@ -336,6 +338,26 @@ def _suppression_reason_counts(suggestions: list[Suggestion]) -> dict[str, int]:
         for reason in _detail_list(s.detail, "suppression_reasons"):
             counts[reason] = counts.get(reason, 0) + 1
     return counts
+
+
+def _load_discover_config(bundle: Bundle) -> object:
+    from .config import DiscoverConfig, OkfConfig, OkfConfigError
+
+    try:
+        return OkfConfig.load(bundle.root).discover
+    except OkfConfigError:
+        return DiscoverConfig()
+
+
+def _configured_suppress_phrases(cfg: object) -> set[str]:
+    return set(getattr(cfg, "suppress_phrases", ()))
+
+
+def _configured_suppress_pairs(cfg: object) -> set[tuple[ConceptId, ConceptId]]:
+    return {
+        (pair.source, pair.target)
+        for pair in getattr(cfg, "suppress_pairs", ())
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +629,9 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
     title_index = _build_title_index(bundle)
     if not title_index:
         return out
+    discover_config = _load_discover_config(bundle)
+    configured_phrases = _configured_suppress_phrases(discover_config)
+    configured_pairs = _configured_suppress_pairs(discover_config)
     compiled = {
         p: re.compile(rf"\b{re.escape(p)}\b", re.IGNORECASE)
         for p in title_index
@@ -673,6 +698,10 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
             suppression_reasons: list[str] = []
             if target_cid in relation_targets:
                 suppression_reasons.append("already_structurally_related")
+            if phrase in configured_phrases:
+                suppression_reasons.append("configured_phrase")
+            if (src.id, target_cid) in configured_pairs:
+                suppression_reasons.append("configured_pair")
             if suppression_reasons:
                 message = (
                     f"{src.title!r} mentions {target_title!r} "

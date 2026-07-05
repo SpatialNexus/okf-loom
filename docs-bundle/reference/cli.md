@@ -174,6 +174,9 @@ folder. Mention details include `location_counts` and `occurrence_locations`
 with locations `frontmatter`, `h1`, `heading`, `table`, and `body`; matches
 seen only in frontmatter, headings, or tables are lower confidence than body
 prose.
+Bundle-specific editorial suppressions live in `okf-loom.config.yaml` under
+`discover.suppress_phrases` and `discover.suppress_pairs`; configured
+suppression reasons are emitted as `configured_phrase` and `configured_pair`.
 
 The agent applies fixes directly via the mutators; the reviewable-plan
 workflow (`discover` → `plan` → `update`) is still available.
