@@ -26,12 +26,15 @@ for the serve-time collaboration loop.
 
 ```bash
 scripts/okf-loom discover docs-bundle --out /tmp/okf-suggestions.json
+scripts/okf-loom graph-quality docs-bundle --format json
 scripts/okf-loom plan docs-bundle --out /tmp/okf-plan.json
 scripts/okf-loom update docs-bundle --plan /tmp/okf-plan.json --dry-run
 scripts/okf-loom repair docs-bundle --indexes --dry-run
 ```
 
 Use `--scope ID,ID --neighbors` for fast per-change enrichment.
+Use `graph-quality` after imports or large curation passes to distinguish
+valid-but-thin OKF from a bundle that will read well in graph view.
 
 ## Viewer/build
 

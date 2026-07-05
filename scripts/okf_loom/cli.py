@@ -356,6 +356,18 @@ def cmd_graph(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_graph_quality(args: argparse.Namespace) -> int:
+    from .graph_quality import analyze_graph_quality, format_text
+
+    bundle = _load_bundle(args.bundle)
+    report = analyze_graph_quality(bundle)
+    if args.format == "json":
+        _print_json(report.as_dict())
+    else:
+        print(format_text(report), end="")
+    return 0
+
+
 def _emit_dot(graph_data: dict) -> None:
     print("digraph okf {")
     print('  rankdir=LR;')
@@ -540,16 +552,26 @@ def cmd_discover(args: argparse.Namespace) -> int:
             expanded.add(concept_id_to_str(cid))
             expanded |= {concept_id_to_str(n) for n in graph.neighbours(cid, max_depth=1)}
         scope = sorted(expanded) if expanded else scope
-    report = discover_suggestions(bundle, rules=rules, scope=scope)
+    report = discover_suggestions(
+        bundle,
+        rules=rules,
+        scope=scope,
+        min_confidence=getattr(args, "min_confidence", 0.5),
+        include_low_confidence=getattr(args, "include_low_confidence", False),
+    )
     if args.format == "json":
         _print_json(report.as_dict())
     else:
-        print(f"# {len(report.suggestions)} suggestions across {len(report.by_rule())} rules")
+        suppressed = getattr(report, "suppressed", [])
+        extra = f" ({len(suppressed)} low-confidence suppressed)" if suppressed else ""
+        print(f"# {len(report.suggestions)} suggestions across {len(report.by_rule())} rules{extra}")
         for s in report.suggestions:
             print(
                 f"  [{s.severity:8}] {s.rule:30} {concept_id_to_str(s.concept_id) if s.concept_id else '-'}"
             )
             print(f"            {s.message}")
+            if s.rule == "unlinked_mentions" and "confidence" in s.detail:
+                print(f"            confidence: {s.detail['confidence']}")
             if s.action:
                 print(f"            -> {s.action}")
     if args.out:
@@ -1831,6 +1853,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_bundle(sp)
     sp.set_defaults(func=cmd_graph)
 
+    sp = sub.add_parser("graph-quality", help="Report advisory graph usefulness signals")
+    sp.add_argument("bundle", help="Path to an OKF bundle directory")
+    sp.add_argument("--format", choices=("text", "json"), default="text")
+    sp.set_defaults(func=cmd_graph_quality)
+
     sp = sub.add_parser("search", help="Search concepts (lexical/semantic/hybrid/tag/entity/relation)")
     add_bundle(sp, dest="bundle")
     sp.add_argument("query", nargs="?", default="", help="Search query (optional in relation mode)")
@@ -1859,6 +1886,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Expand --scope to direct graph neighbors (1 hop, in+out edges). "
              "The expansion happens here in the CLI; discover itself only "
              "filters to the resolved scope set.",
+    )
+    sp.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.5,
+        help="Minimum confidence for noisy heuristic suggestions such as unlinked_mentions (default 0.5)",
+    )
+    sp.add_argument(
+        "--include-low-confidence",
+        action="store_true",
+        help="Include low-confidence heuristic suggestions instead of listing them under suppressed",
     )
     sp.set_defaults(func=cmd_discover)
 

@@ -23,6 +23,7 @@ scripts/okf-loom validate docs-bundle --strict
 scripts/okf-loom --help
 scripts/okf-loom validate docs-bundle --strict
 scripts/okf-loom info docs-bundle
+scripts/okf-loom graph-quality docs-bundle
 scripts/okf-loom search docs-bundle "current spec" --mode lexical
 scripts/okf-loom serve docs-bundle --no-open
 scripts/okf-loom serve docs-bundle --no-open --tunnel   # + public https URL (needs cloudflared)
@@ -64,7 +65,7 @@ scripts/okf-loom replace-text --bundle docs-bundle --id reference/cli --old "old
 
 ## Full surface
 
-- `validate`, `info`, `graph`, `search`
+- `validate`, `info`, `graph`, `graph-quality`, `search`
 - `discover`, `plan`, `repair`, `update`
 - `write-concept`, `set-frontmatter`, `link-add`, `entity-add`,
   `update-section`, `replace-text`

@@ -110,6 +110,34 @@ def test_unlinked_mentions_skips_mentions_inside_code(tmp_path: Path) -> None:
     assert rep.suggestions == []
 
 
+def test_unlinked_mentions_suppresses_common_low_confidence_labels(
+    tmp_path: Path,
+) -> None:
+    """Common labels like Users are kept out of default discovery noise."""
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "alpha.md").write_text(
+        "---\ntype: T\ntitle: Alpha\n---\n"
+        "Users appear in many generic sentences without being a useful link.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "users.md").write_text(
+        "---\ntype: Table\ntitle: Users\n---\nUsers body.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+    assert rep.suggestions == []
+    assert len(rep.suppressed) == 1
+    assert rep.suppressed[0].detail["confidence"] < 0.5
+
+    noisy = discover_suggestions(
+        b, rules=["unlinked_mentions"], include_low_confidence=True,
+    )
+    assert len(noisy.suggestions) == 1
+    assert noisy.suggestions[0].target_concept_id == ("users",)
+
+
 # --- missing_indexes --------------------------------------------------------
 
 

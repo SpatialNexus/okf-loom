@@ -25,6 +25,7 @@ See [index.md](/reference/index.md) for the rest of the reference quadrant.
 | [`info`](#info) | Bundle summary: concept/type/tag/link counts, version, extensions. |
 | [`validate`](#validate) | SPEC §9 conformance + soft warnings; profiles, `--strict`, `--fail-on-broken-links`. |
 | [`graph`](#graph) | Print the link graph (text / JSON / DOT). |
+| [`graph-quality`](#graph-quality) | Advisory graph usefulness report; does not affect OKF conformance. |
 | [`search`](#search) | Six modes behind one `--mode` flag. |
 | [`discover`](#discover) | Find missing links/indexes/descriptions/relations/orphans. |
 | [`plan`](#plan) | Build a reviewable, executable action plan. |
@@ -61,7 +62,7 @@ See [index.md](/reference/index.md) for the rest of the reference quadrant.
 | Command shape | Commands |
 |---|---|
 | Positional `<bundle>` + `--format {text,json,md,dot}` | `info`, `validate`, `graph`, `search`, `discover`, `repair` |
-| Positional `<bundle>` + `--format {text,json}` | `plan`, `tunnel`, `comment-claim`, `comment-resolve`, `comment-reply`, `comment-list`, `presence`, `index`, `update` |
+| Positional `<bundle>` + `--format {text,json}` | `graph-quality`, `plan`, `tunnel`, `comment-claim`, `comment-resolve`, `comment-reply`, `comment-list`, `presence`, `index`, `update` |
 | Optional/no positional bundle + `--format {text,json}` | `capabilities` uses optional `--bundle`; `init` requires `--bundle` |
 | Positional or bundle option, no `--format` | `serve`, `watch`, `wait`, `token`, `render`, `build`, `log`, `upgrade` (`upgrade` accepts optional positional `<bundle>` or `--bundle`) |
 | Non-bundle source/destination, no `--format` | `bootstrap <dest>`, `import <src> <dest>` |
@@ -118,6 +119,17 @@ scripts/okf-loom graph <bundle> [--format {text,json,md,dot}]
 Print the link graph. Wikilinks (`[[…]]`) are emitted as edges with
 `form="wikilink"`. `dot` output renders with Graphviz; `json` is the
 machine-readable shape consumed by the viewer.
+
+# graph-quality
+
+```bash
+scripts/okf-loom graph-quality <bundle> [--format {text,json}]
+```
+
+Emit an advisory report about whether the bundle is likely to be useful as a
+graph. This is not `validate`: valid OKF stays valid. Findings include generic
+type overuse, duplicate or near-duplicate titles, sparse optional metadata,
+weak hierarchy signals, disconnected components, and orphan concepts.
 
 # search
 

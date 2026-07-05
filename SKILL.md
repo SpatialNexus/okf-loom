@@ -25,11 +25,12 @@ These are the standing expectations for any agent using this skill:
    each key earns its place).
 2. **Validate after writing.** Run `scripts/okf-loom validate <bundle>` after any
    batch of writes and fix findings; run `scripts/okf-loom discover <bundle>`
-   periodically to catch missing links/indexes/descriptions. If `index.md`
-   files are stale, `scripts/okf-loom index <bundle>` regenerates the generated
-   blocks (marker-safe — it only rewrites between `okf:generated` markers;
-   hand-authored index prose without markers will be REPLACED, so check
-   `git diff` after).
+   periodically to catch missing links/indexes/descriptions. For imports or
+   larger bundles, also run `scripts/okf-loom graph-quality <bundle>` as an
+   advisory graph-health report (not a conformance gate). If `index.md` files
+   are stale, `scripts/okf-loom index <bundle>` regenerates the generated blocks
+   (marker-safe — it only rewrites between `okf:generated` markers; hand-authored
+   index prose without markers will be REPLACED, so check `git diff` after).
 3. **Serve proactively.** The rendered wiki is the product, not a debug view.
    Whenever the user wants to *see*, *read*, *review*, or *comment on* docs —
    or you have just built/changed a bundle they'd plausibly want to look at —
@@ -90,6 +91,7 @@ Examples use the checked-in helper directly rather than a local shell wrapper or
 | Before your first write to any bundle | [`resources/gotchas.md`](resources/gotchas.md) |
 | Running any CLI verb / unsure of a flag | [`resources/command-reference.md`](resources/command-reference.md) |
 | Writing or editing concept files by hand | [`resources/format-basics.md`](resources/format-basics.md) then [`resources/authoring.md`](resources/authoring.md) |
+| Improving graph usefulness / after imports | [`resources/graph-health.md`](resources/graph-health.md) |
 | Deciding what "good" frontmatter looks like | [`docs-bundle/demo/showcase.md`](docs-bundle/demo/showcase.md) — the worked example |
 | A validate run fails or you need CI gating | [`resources/validation.md`](resources/validation.md) |
 | Search modes, discovery, plans, static builds | [`resources/advanced-operations.md`](resources/advanced-operations.md) |
@@ -129,6 +131,7 @@ scripts/okf-loom validate path/to/bundle --strict
 
 # Inspect / search.
 scripts/okf-loom info path/to/bundle
+scripts/okf-loom graph-quality path/to/bundle
 scripts/okf-loom search path/to/bundle "customer order" --mode hybrid
 
 # Serve the live collaborative studio (add --tunnel for a public link).

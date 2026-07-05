@@ -32,6 +32,37 @@ from .paths import (
 from .validate import CheckSpec, validate_bundle
 
 
+# Common labels that produce many false positive mention suggestions in
+# imported/wiki-like bundles. They are not hard-banned; they lower confidence
+# so callers can still request them with include_low_confidence.
+_NOISY_MENTION_PHRASES = {
+    "admin",
+    "ben",
+    "client",
+    "clients",
+    "current",
+    "data",
+    "document",
+    "documents",
+    "history",
+    "home",
+    "index",
+    "issue",
+    "issues",
+    "note",
+    "notes",
+    "page",
+    "project",
+    "projects",
+    "reference",
+    "references",
+    "user",
+    "users",
+    "wiki",
+    "wiki page",
+}
+
+
 # ---------------------------------------------------------------------------
 # Data shapes
 # ---------------------------------------------------------------------------
@@ -84,6 +115,7 @@ class DiscoveryReport:
 
     bundle_root: Path
     suggestions: list[Suggestion] = field(default_factory=list)
+    suppressed: list[Suggestion] = field(default_factory=list)
 
     def by_rule(self) -> dict[str, list[Suggestion]]:
         out: dict[str, list[Suggestion]] = {}
@@ -97,8 +129,20 @@ class DiscoveryReport:
             "bundle_root": str(self.bundle_root),
             "total": len(self.suggestions),
             "counts": {rule: len(items) for rule, items in by_rule.items()},
+            "suppressed_total": len(self.suppressed),
+            "suppressed_counts": {
+                rule: len(items)
+                for rule, items in _group_suggestions(self.suppressed).items()
+            },
             "suggestions": [s.as_dict() for s in self.suggestions],
+            "suppressed": [s.as_dict() for s in self.suppressed],
         }
+
+
+@dataclass(frozen=True)
+class _MentionCandidate:
+    concept_id: ConceptId
+    sources: frozenset[str]
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +155,8 @@ def discover_suggestions(
     *,
     rules: list[str] | None = None,
     scope: list[str] | set[str] | None = None,
+    min_confidence: float = 0.5,
+    include_low_confidence: bool = False,
 ) -> DiscoveryReport:
     """Run discovery rules against a loaded bundle.
 
@@ -125,6 +171,10 @@ def discover_suggestions(
             (``missing_indexes``) are dropped when scope is active because they
             carry no subject concept. ``scope=None`` keeps the full report
             (unchanged behaviour).
+        min_confidence: default confidence threshold for noisy heuristic rules.
+            Currently applies to ``unlinked_mentions`` only.
+        include_low_confidence: when True, keep low-confidence suggestions in
+            ``suggestions`` instead of moving them to ``suppressed``.
 
     Returns:
         A ``DiscoveryReport`` whose suggestions are grouped by rule.
@@ -136,6 +186,17 @@ def discover_suggestions(
     suggestions: list[Suggestion] = []
     for name in selected:
         suggestions.extend(_ALL_RULES[name](bundle))
+    suppressed: list[Suggestion] = []
+    if not include_low_confidence:
+        kept: list[Suggestion] = []
+        for s in suggestions:
+            if s.rule == "unlinked_mentions":
+                confidence = float(s.detail.get("confidence", 1.0))
+                if confidence < min_confidence:
+                    suppressed.append(s)
+                    continue
+            kept.append(s)
+        suggestions = kept
     # Current spec §7: scoped enrichment. When a scope set is given, keep only
     # suggestions whose subject concept_id is in scope. The neighbour
     # expansion (§11 ``--neighbors``) happens in plan.build_plan before this
@@ -155,7 +216,18 @@ def discover_suggestions(
             s for s in suggestions
             if s.concept_id is not None and s.concept_id in scope_ids
         ]
-    return DiscoveryReport(bundle_root=bundle.root, suggestions=suggestions)
+        suppressed = [
+            s for s in suppressed
+            if s.concept_id is not None and s.concept_id in scope_ids
+        ]
+    return DiscoveryReport(bundle_root=bundle.root, suggestions=suggestions, suppressed=suppressed)
+
+
+def _group_suggestions(suggestions: list[Suggestion]) -> dict[str, list[Suggestion]]:
+    out: dict[str, list[Suggestion]] = {}
+    for s in suggestions:
+        out.setdefault(s.rule, []).append(s)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -194,29 +266,82 @@ def _scannable_body(body: str) -> str:
     return cleaned
 
 
-def _build_title_index(bundle: Bundle) -> dict[str, ConceptId]:
+def _build_title_index(bundle: Bundle) -> dict[str, _MentionCandidate]:
     """Map a lowercased mention phrase to a single concept id.
 
     Only phrases that uniquely identify ONE concept are kept; ambiguous phrases
     (shared by multiple concepts) are dropped to avoid bad suggestions. Short
     (< 3 chars) or non-alphanumeric phrases are dropped as too noisy.
     """
-    phrase_to_cids: dict[str, set[ConceptId]] = {}
+    phrase_to_sources: dict[str, dict[ConceptId, set[str]]] = {}
     for c in bundle.concepts.values():
-        phrases = set()
+        phrases: dict[str, set[str]] = {}
         title = (c.title or "").strip().lower()
         if title:
-            phrases.add(title)
+            phrases.setdefault(title, set()).add("title")
         last_seg = (c.id[-1] if c.id else "").strip().lower()
         if last_seg:
-            phrases.add(last_seg)
-        for p in phrases:
+            phrases.setdefault(last_seg, set()).add("id_segment")
+        aliases = c.frontmatter.get("aliases")
+        if isinstance(aliases, list):
+            for alias in aliases:
+                if isinstance(alias, str) and alias.strip():
+                    phrases.setdefault(alias.strip().lower(), set()).add("alias")
+        for p, sources in phrases.items():
             if len(p) < 3 or not re.search(r"[a-z0-9]", p):
                 continue
-            phrase_to_cids.setdefault(p, set()).add(c.id)
-    return {
-        p: next(iter(s)) for p, s in phrase_to_cids.items() if len(s) == 1
-    }
+            phrase_to_sources.setdefault(p, {}).setdefault(c.id, set()).update(sources)
+    out: dict[str, _MentionCandidate] = {}
+    for phrase, by_cid in phrase_to_sources.items():
+        if len(by_cid) != 1:
+            continue
+        cid, sources = next(iter(by_cid.items()))
+        out[phrase] = _MentionCandidate(concept_id=cid, sources=frozenset(sources))
+    return out
+
+
+def _mention_confidence(
+    phrase: str,
+    candidate: _MentionCandidate,
+    occurrences: list[int],
+    bundle: Bundle,
+) -> tuple[float, list[str]]:
+    score = 0.35
+    reasons: list[str] = []
+    if "title" in candidate.sources:
+        score += 0.25
+        reasons.append("title_match")
+    if "alias" in candidate.sources:
+        score += 0.20
+        reasons.append("alias_match")
+    if candidate.sources == frozenset({"id_segment"}):
+        score += 0.05
+        reasons.append("id_segment_only")
+    if " " in phrase or "-" in phrase or "_" in phrase:
+        score += 0.15
+        reasons.append("multiword")
+    if len(phrase) >= 8:
+        score += 0.10
+        reasons.append("long_phrase")
+    if len(phrase) >= 16:
+        score += 0.05
+        reasons.append("very_long_phrase")
+    if len(occurrences) >= 2:
+        score += 0.05
+        reasons.append("repeated")
+    target = bundle.concepts.get(candidate.concept_id)
+    target_type = (target.type if target else "").strip().lower()
+    if target_type in {"document", "wiki page", "index", "page"}:
+        score -= 0.15
+        reasons.append("generic_target_type")
+    else:
+        score += 0.05
+        reasons.append("specific_target_type")
+    if phrase in _NOISY_MENTION_PHRASES:
+        score -= 0.45
+        reasons.append("common_label")
+    score = max(0.0, min(1.0, score))
+    return round(score, 3), reasons
 
 
 @_rule("unlinked_mentions")
@@ -238,7 +363,8 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
             for link in src.links(bundle_root=bundle.root)
             if link.target is not None
         }
-        for phrase, target_cid in title_index.items():
+        for phrase, candidate in title_index.items():
+            target_cid = candidate.concept_id
             if target_cid == src.id:
                 continue  # skip self-mentions
             if target_cid in already_linked:
@@ -252,6 +378,9 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
                 continue
             target = bundle.concepts.get(target_cid)
             target_title = target.title if target else phrase
+            confidence, reasons = _mention_confidence(
+                phrase, candidate, occurrences, bundle,
+            )
             out.append(
                 Suggestion(
                     rule="unlinked_mentions",
@@ -265,6 +394,9 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
                     action="add link",
                     detail={
                         "label": target_title,
+                        "phrase": phrase,
+                        "confidence": confidence,
+                        "confidence_reasons": reasons,
                         "suggested_target_concept_id": concept_id_to_str(
                             target_cid
                         ),

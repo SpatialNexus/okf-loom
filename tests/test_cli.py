@@ -260,6 +260,17 @@ def test_graph_json(tiny_good_bundle: Path) -> None:
     assert len(data["nodes"]) == 4
 
 
+def test_graph_quality_json(tiny_good_bundle: Path) -> None:
+    rc, out, _ = _capture([
+        "graph-quality", str(tiny_good_bundle), "--format", "json",
+    ])
+    assert rc == 0
+    data = json.loads(out)
+    assert "metrics" in data
+    assert "findings" in data
+    assert data["metrics"]["concept_count"] == 4
+
+
 def test_discover_json(tiny_good_bundle: Path) -> None:
     rc, out, _ = _capture([
         "discover", str(tiny_good_bundle), "--format", "json",
