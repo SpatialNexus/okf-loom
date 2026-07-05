@@ -58,7 +58,7 @@ _SETTLE_MS = 3_000
 STILL_VIEWPORT = {"width": 1440, "height": 900}
 GIF_VIEWPORT = {"width": 1280, "height": 800}
 GIF_FRAME_MS = 1_600
-THEMES = ("light", "dark", "pastel", "sepia", "midnight")
+THEMES = ("technical-light", "technical-dark", "swiss-light", "swiss-dark")
 LENSES = ("Map", "Themes", "Flow", "Bridges", "Recent")
 
 
