@@ -217,8 +217,8 @@
   // ====================================================================
   // Theme names + button glyphs. KEEP IN SYNC with the copies in wiki.js /
   // graph.js and render.py:_theme_button_html.
-  const THEMES = ["technical-light", "technical-dark", "swiss-light", "swiss-dark"];
-  const THEME_GLYPHS = { "technical-light": "☀", "technical-dark": "☾", "swiss-light": "◑", "swiss-dark": "◐" };
+  const THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
+  const THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
   // Map a returning user's retired theme choice to the nearest new theme.
   const LEGACY_THEMES = {
     light: "technical-light", dark: "technical-dark",
@@ -227,11 +227,11 @@
   function effectiveTheme(choice) {
     if (THEMES.indexOf(choice) >= 0) return choice;
     if (choice && LEGACY_THEMES[choice]) return LEGACY_THEMES[choice];
-    // auto (or unknown): follow OS preference within the technical family
-    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "technical-dark" : "technical-light";
+    // auto (or unknown): follow OS preference within the Swiss family
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "swiss-dark" : "swiss-light";
   }
   function applyThemeAttr(t, opts) {
-    if (THEMES.indexOf(t) < 0) t = "technical-light";
+    if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
     // Persist by default so a palette-chosen theme survives navigation
     // (wiki.js reads localStorage['okf-theme'] on every page). Boot and
@@ -251,7 +251,7 @@
   }
   function currentThemeChoice() {
     const t = document.documentElement.getAttribute("data-theme");
-    return THEMES.indexOf(t) >= 0 ? t : "technical-light";
+    return THEMES.indexOf(t) >= 0 ? t : "swiss-light";
   }
   // Apply the bootstrap theme on boot. A saved user choice (wiki.js theme
   // button / command palette) outranks the server-side studio.theme config —

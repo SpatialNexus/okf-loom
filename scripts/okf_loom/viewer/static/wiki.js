@@ -24,8 +24,8 @@
   // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
   // graph.js / studio.js and render.py:_theme_button_html — each context
   // loads without the others (single-file viewer, static build, studio).
-  var THEMES = ["technical-light", "technical-dark", "swiss-light", "swiss-dark"];
-  var THEME_GLYPHS = { "technical-light": "☀", "technical-dark": "☾", "swiss-light": "◑", "swiss-dark": "◐" };
+  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
+  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
   // Map a returning user's retired theme choice to the nearest new theme.
   var LEGACY_THEMES = {
     light: "technical-light", dark: "technical-dark",
@@ -35,14 +35,14 @@
   function resolveAuto() {
     var dark = window.matchMedia &&
       window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return dark ? "technical-dark" : "technical-light";
+    return dark ? "swiss-dark" : "swiss-light";
   }
 
   function currentTheme() {
-    return document.documentElement.getAttribute("data-theme") || "technical-light";
+    return document.documentElement.getAttribute("data-theme") || "swiss-light";
   }
   function applyTheme(t, persist) {
-    if (THEMES.indexOf(t) < 0) t = "technical-light";
+    if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
     if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
     if (themeBtn) {

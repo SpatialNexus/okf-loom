@@ -27,8 +27,8 @@
   // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
   // wiki.js / studio.js and render.py:_theme_button_html — this file must
   // stand alone in the single-file viewer, which has no wiki.js.
-  var THEMES = ["technical-light", "technical-dark", "swiss-light", "swiss-dark"];
-  var THEME_GLYPHS = { "technical-light": "☀", "technical-dark": "☾", "swiss-light": "◑", "swiss-dark": "◐" };
+  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
+  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
 
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
@@ -77,10 +77,10 @@
     },
   };
 
-  // Resolve the palette for the CURRENT data-theme (technical-light fallback).
+  // Resolve the palette for the CURRENT data-theme (swiss-light fallback).
   function graphPalette() {
-    var t = document.documentElement.getAttribute("data-theme") || "technical-light";
-    return GRAPH_COLORS[t] || GRAPH_COLORS["technical-light"];
+    var t = document.documentElement.getAttribute("data-theme") || "swiss-light";
+    return GRAPH_COLORS[t] || GRAPH_COLORS["swiss-light"];
   }
 
   // ---- Config from data-* attributes (CSP-safe; no inline script) ------

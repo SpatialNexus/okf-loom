@@ -28,7 +28,7 @@
   --okf-fg: #0f172a;
   --okf-fg-muted: #475569;            /* P2-58: was #64748b (4.33:1); now ~7:1 on bg-inset */
   --okf-border: #e2e8f0;
-  --okf-border-strong: #cbd5e1;
+  --okf-border-strong: #111418;   /* Swiss fallback: hairline grid frame = fg */
   /* P2-8 (iter-1): the UI accent is now a confident deep teal instead of
    * the prior Tailwind blue-600 (#2563eb). A teal reads as
    * curation/trust/provenance (the OKF value prop) and avoids the default
@@ -76,7 +76,7 @@
   --okf-info-bg: oklch(0.96 0.03 235);
   --okf-error: oklch(0.50 0.17 27);
   --okf-error-bg: oklch(0.96 0.03 27);
-  --okf-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --okf-shadow: none;               /* Swiss fallback: flat, no elevation */
   /* Radii */
   --okf-radius: 8px;
   --okf-radius-sm: 4px;
@@ -117,26 +117,26 @@
   --okf-page-maxw: 1200px;     /* concept page shell (sidebar + article) */
   --okf-topbar-h: 52px;
   --okf-status-h: 30px;      /* bottom status strip */
-  /* --- Redesign fallback (technical-light family). These override the
-     legacy radius/font values above so a themeless page renders as
-     technical-light; each [data-theme] block redeclares them per family. */
-  --okf-radius: 6px;
-  --okf-radius-sm: 5px;
-  --okf-radius-pill: 4px;
+  /* --- Redesign fallback: Swiss is the primary family (user preference), so a
+     themeless page (pre-JS auto paint) renders Swiss — radius 0, Helvetica,
+     solid boxed active states. Each [data-theme] block redeclares per family. */
+  --okf-radius: 0;
+  --okf-radius-sm: 0;
+  --okf-radius-pill: 0;
   --okf-border-w: 1px;
-  --okf-font-display: Inter, system-ui, "Segoe UI", Roboto, sans-serif;
-  --okf-font-body: Inter, system-ui, "Segoe UI", Roboto,
+  --okf-font-display: "Helvetica Neue", Arial, "Liberation Sans", system-ui, sans-serif;
+  --okf-font-body: "Helvetica Neue", Arial, "Liberation Sans", system-ui,
     "Noto Sans CJK SC", sans-serif;
   --okf-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo,
     Consolas, monospace;
   --okf-tag-transform: uppercase;
-  --okf-tag-weight: 600;
-  --okf-tag-spacing: 0.07em;
-  --okf-title-weight: 700;
-  --okf-title-spacing: -0.01em;
-  --okf-active-fill: var(--okf-accent-bg);
-  --okf-active-fg: var(--okf-accent);
-  --okf-active-border: transparent;
+  --okf-tag-weight: 700;
+  --okf-tag-spacing: 0.09em;
+  --okf-title-weight: 800;
+  --okf-title-spacing: -0.02em;
+  --okf-active-fill: var(--okf-accent);
+  --okf-active-fg: var(--okf-accent-on);
+  --okf-active-border: var(--okf-accent);
   --okf-pop-shadow: -18px 0 46px rgba(15, 23, 42, 0.18);
   --okf-page-bg: #e6eaef;
 }

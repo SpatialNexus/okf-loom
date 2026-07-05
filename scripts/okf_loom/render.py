@@ -552,14 +552,16 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # THEME_GLYPHS copies in wiki.js:27-28, graph.js:30-31 and studio.js:219-220
 # (each JS context loads without the others). Four Editorial-Workbench
 # themes: technical/swiss families in light + dark.
+# Swiss is the primary family (user preference) \u2014 listed first so the theme
+# cycle starts on Swiss and `auto` resolves into it.
 _THEMES: tuple[str, ...] = (
-    "technical-light", "technical-dark", "swiss-light", "swiss-dark",
+    "swiss-light", "swiss-dark", "technical-light", "technical-dark",
 )
 _THEME_GLYPHS: dict[str, str] = {
-    "technical-light": "\u2600",  # \u2600 sun
-    "technical-dark": "\u263e",   # \u263e moon
     "swiss-light": "\u25d1",      # \u25d1 right half-black circle (solid-fill motif)
     "swiss-dark": "\u25d0",       # \u25d0 left half-black circle
+    "technical-light": "\u2600",  # \u2600 sun
+    "technical-dark": "\u263e",   # \u263e moon
 }
 
 
@@ -573,7 +575,7 @@ def _theme_button_html(initial_theme: str) -> str:
     four themes, so it carries an aria-label naming the current theme
     rather than a two-state aria-pressed.
     """
-    theme = initial_theme if initial_theme in _THEMES else "technical-light"
+    theme = initial_theme if initial_theme in _THEMES else "swiss-light"
     glyph = _THEME_GLYPHS[theme]
     return (
         '<button id="okf-theme" type="button" '
@@ -1486,7 +1488,7 @@ def _render_concept_page(
     # to avoid FOUC — P2-74).
     # P1-3: in static mode the Graph link must point at __graph.html (the
     # page is emitted at that path; the extensionless URL 404s).
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     nav_html = _nav_controls_html(
         root_prefix=root_prefix,
         graph_link=f"{root_prefix}__graph{'.html' if mode == 'static' else ''}",
@@ -2135,7 +2137,7 @@ def _render_index_page(
     )
 
     theme_attr = ""
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
 
@@ -2250,7 +2252,7 @@ def _render_search_page(
     results_html = "\n".join(result_parts) or '<p class="okf-search-empty">No results.</p>'
 
     theme_attr = ""
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
 
@@ -2331,7 +2333,7 @@ def _render_graph_page(
     static_prefix = "/__static" if mode in ("serve", "spa") else "__static"
     data_url = "/__data/graph.json" if mode in ("serve", "spa") else "__data/graph.json"
     back_link = "/" if mode in ("serve", "spa") else "index.html"
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     initial_layout = config.get("default_layout") or "cose"
     theme_attr = f' data-theme="{initial_theme}"' if initial_theme in _THEMES else ""
 
