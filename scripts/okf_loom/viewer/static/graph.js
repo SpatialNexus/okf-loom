@@ -27,8 +27,8 @@
   // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
   // wiki.js / studio.js and render.py:_theme_button_html — this file must
   // stand alone in the single-file viewer, which has no wiki.js.
-  var THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
-  var THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+  var THEMES = ["technical-light", "technical-dark", "swiss-light", "swiss-dark"];
+  var THEME_GLYPHS = { "technical-light": "☀", "technical-dark": "☾", "swiss-light": "◑", "swiss-dark": "◐" };
 
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
@@ -52,38 +52,35 @@
   //                (dark family).
   //   select       selection colour. = --okf-select (contrast ratios are
   //                documented in wiki.css).
+  // Four Editorial-Workbench themes. Swiss `edge` = --okf-border-strong = fg
+  // (the hairline-grid identity); technical `edge` = --okf-border-strong.
   var GRAPH_COLORS = {
-    light: {
+    "technical-light": {
       nodeText: "#0f172a", nodeBorder: "#0f172a", bridgeBorder: "#0f172a",
-      edge: "#cbd5e1", edgeLabel: "#334155", edgeLabelBg: "#ffffff",
+      edge: "#c0c7d0", edgeLabel: "#57606a", edgeLabelBg: "#ffffff",
       select: "#0c7373",
     },
-    dark: {
-      nodeText: "#e2e8f0", nodeBorder: "#0b1220", bridgeBorder: "#e2e8f0",
-      edge: "#334155", edgeLabel: "#cbd5e1", edgeLabelBg: "#0b1220",
-      select: "#3ec9c9",
+    "technical-dark": {
+      nodeText: "#e6edf3", nodeBorder: "#0f1319", bridgeBorder: "#e6edf3",
+      edge: "#3b444f", edgeLabel: "#8b949e", edgeLabelBg: "#161b22",
+      select: "#2dd4bf",
     },
-    pastel: {
-      nodeText: "#403a58", nodeBorder: "#403a58", bridgeBorder: "#403a58",
-      edge: "#bbaed6", edgeLabel: "#4c4569", edgeLabelBg: "#f7f4fb",
-      select: "#6d4fae",
+    "swiss-light": {
+      nodeText: "#111418", nodeBorder: "#111418", bridgeBorder: "#111418",
+      edge: "#111418", edgeLabel: "#5b636e", edgeLabelBg: "#ffffff",
+      select: "#0c7373",
     },
-    sepia: {
-      nodeText: "#3d3020", nodeBorder: "#3d3020", bridgeBorder: "#3d3020",
-      edge: "#c6b28a", edgeLabel: "#54432c", edgeLabelBg: "#faf4e6",
-      select: "#8a4a15",
-    },
-    midnight: {
-      nodeText: "#dbe2f4", nodeBorder: "#050810", bridgeBorder: "#dbe2f4",
-      edge: "#2a3352", edgeLabel: "#b8c1dd", edgeLabelBg: "#050810",
-      select: "#52d8d8",
+    "swiss-dark": {
+      nodeText: "#f0f2f4", nodeBorder: "#121417", bridgeBorder: "#f0f2f4",
+      edge: "#f0f2f4", edgeLabel: "#9aa1a9", edgeLabelBg: "#181b1f",
+      select: "#2dd4bf",
     },
   };
 
-  // Resolve the palette for the CURRENT data-theme (light fallback).
+  // Resolve the palette for the CURRENT data-theme (technical-light fallback).
   function graphPalette() {
-    var t = document.documentElement.getAttribute("data-theme") || "light";
-    return GRAPH_COLORS[t] || GRAPH_COLORS.light;
+    var t = document.documentElement.getAttribute("data-theme") || "technical-light";
+    return GRAPH_COLORS[t] || GRAPH_COLORS["technical-light"];
   }
 
   // ---- Config from data-* attributes (CSP-safe; no inline script) ------
@@ -976,7 +973,7 @@
             "background-position-y": "50%",
             "background-clip": "node",
             "label": "data(label)",
-            "color": GRAPH_COLORS.light.nodeText,
+            "color": GRAPH_COLORS["technical-light"].nodeText,
             // Review feedback: node names read "near-microscopic" at the
             // widened max spread (the auto-fit zooms the big graph out, so the
             // rendered size is font-size × zoom; measured max-range zoom is
@@ -999,19 +996,19 @@
             // plate is a touch more opaque (0.72→0.85) so the bolder text stays
             // crisp over edges at high spread. Padding stays 2 so the plate does
             // not enlarge the label footprint at the compact default.
-            "text-background-color": GRAPH_COLORS.light.edgeLabelBg,
+            "text-background-color": GRAPH_COLORS["technical-light"].edgeLabelBg,
             "text-background-opacity": 0.85,
             "text-background-padding": 2,
             "text-background-shape": "roundrectangle",
             "width": "data(vizSize)",
             "height": "data(vizSize)",
             "border-width": 1,
-            "border-color": GRAPH_COLORS.light.nodeBorder,
+            "border-color": GRAPH_COLORS["technical-light"].nodeBorder,
           },
         },
         {
           selector: "node:selected",
-          style: { "border-width": 3, "border-color": GRAPH_COLORS.light.select },
+          style: { "border-width": 3, "border-color": GRAPH_COLORS["technical-light"].select },
         },
         {
           selector: "edge",
@@ -1022,8 +1019,8 @@
             // still override (an inline ele.style() bypass would not).
             "width": "mapData(weight, 0, 1, 1.2, 4.8)",
             "opacity": "mapData(weight, 0, 1, 0.5, 1)",
-            "line-color": GRAPH_COLORS.light.edge,
-            "target-arrow-color": GRAPH_COLORS.light.edge,
+            "line-color": GRAPH_COLORS["technical-light"].edge,
+            "target-arrow-color": GRAPH_COLORS["technical-light"].edge,
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
             // Phase 3: arrowheads scale with edge weight so direction stays
@@ -1036,7 +1033,7 @@
             // Review feedback: the contextual relationship labels were
             // faint/thin/unreadable at high spread. The faintness was the COLOR
             // and WEIGHT, so fix exactly those — a 600 weight and the darkened
-            // slate token (GRAPH_COLORS.light.edgeLabel, #334155 ≈ 10:1) — and
+            // slate token (GRAPH_COLORS["technical-light"].edgeLabel, #334155 ≈ 10:1) — and
             // leave the plate opacity/padding at their reviewed defaults so the
             // many overlapping selected-node labels do not stack into an opaque
             // blob at the compact default. min-zoomed-font-size is raised 7→9 so
@@ -1047,9 +1044,9 @@
             // .okf-show-label) and only changes WHEN they paint.
             "font-size": 11,
             "font-weight": 600,
-            "color": GRAPH_COLORS.light.edgeLabel,
+            "color": GRAPH_COLORS["technical-light"].edgeLabel,
             "text-rotation": "autorotate",
-            "text-background-color": GRAPH_COLORS.light.edgeLabelBg,
+            "text-background-color": GRAPH_COLORS["technical-light"].edgeLabelBg,
             "text-background-opacity": 0.9,
             "text-background-padding": 2,
             "text-background-shape": "roundrectangle",
@@ -1076,7 +1073,7 @@
         // compose instead of fighting.
         { selector: ".okf-hover-dim", style: { "opacity": 0.18 } },
         { selector: "node.okf-hover", style: {
-            "underlay-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.18,
             "underlay-padding": 8,
         } },
@@ -1085,14 +1082,14 @@
         { selector: ".okf-path-dim", style: { "opacity": 0.12 } },
         { selector: "node.okf-path", style: {
             "border-width": 3,
-            "border-color": GRAPH_COLORS.light.select,
-            "underlay-color": GRAPH_COLORS.light.select,
+            "border-color": GRAPH_COLORS["technical-light"].select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.14,
             "underlay-padding": 6,
         } },
         { selector: "edge.okf-path", style: {
-            "line-color": GRAPH_COLORS.light.select,
-            "target-arrow-color": GRAPH_COLORS.light.select,
+            "line-color": GRAPH_COLORS["technical-light"].select,
+            "target-arrow-color": GRAPH_COLORS["technical-light"].select,
             "width": 4.5,
             "opacity": 1,
             "line-style": "solid",
@@ -1101,8 +1098,8 @@
         {
           selector: "edge:selected",
           style: {
-            "line-color": GRAPH_COLORS.light.select,
-            "target-arrow-color": GRAPH_COLORS.light.select,
+            "line-color": GRAPH_COLORS["technical-light"].select,
+            "target-arrow-color": GRAPH_COLORS["technical-light"].select,
             "line-style": "solid",
             "width": 5,
             "opacity": 1,
@@ -1112,7 +1109,7 @@
         // heavy double-black ring (reviewer blocker 1). Still a non-colour-only
         // SHAPE/halo cue; cross-group bridge edges stay dashed.
         { selector: "node.okf-bridge", style: {
-            "underlay-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.16,
             "underlay-padding": 6,
             "border-width": 2,
@@ -1120,11 +1117,11 @@
         { selector: "edge.okf-bridge-edge", style: { "line-style": "dashed" } },
         // Focus root: strong selection halo so the focused node is unmistakable.
         { selector: "node.okf-focus-root", style: {
-            "underlay-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.38,
             "underlay-padding": 14,
             "border-width": 4,
-            "border-color": GRAPH_COLORS.light.select,
+            "border-color": GRAPH_COLORS["technical-light"].select,
             "z-index": 30,
         } },
         // Non-neighbour dim during focus is stronger (~12%); reviewer asked ≤30%.
@@ -1136,7 +1133,7 @@
         // halo is theme-aware and distinct from auto-generated node fills.
         { selector: ".okf-presence-halo", style: {
             "border-width": 4,
-            "border-color": GRAPH_COLORS.light.select,
+            "border-color": GRAPH_COLORS["technical-light"].select,
             "border-opacity": 0.9,
             "z-index": 20,
           } },
