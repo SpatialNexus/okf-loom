@@ -66,16 +66,19 @@ labels. Active item uses the active-state tokens (§5).
   *(This SUPERSEDES the earlier "margin notes in a right-hand gutter" idea — the
   gutter reserved space and read like a docked panel; removed per user.)*
 
-**3.4 Studio loop = docked panel** *(REVISED 2026-07-05 per user feedback —
-supersedes the earlier "summoned pop-over" decision. The pop-over hid the
-studio's working controls; the user wants them first-class, so the panel is now
-a persistent right-hand dock.)* — a right **docked, non-modal studio column**,
-**open by default** on concept pages, **collapsible** (a "Studio" toggle in the
-status strip; `Esc` collapses) for a full-width read. It **reflows** the reading
-column (the body reserves `--okf-studio-w` on the right — no scrim, no overlap).
-Tabs: **Comments / Changes / Outline / Metadata**; the **Quick-Action directive
-buttons** (Add section / Split / Add links / Enrich) sit at the top of the
-Comments tab where they pre-fill the composer.
+**3.4 Studio loop = thin rail + overlays** *(REVISED 2026-07-05, Round 2 —
+supersedes the docked-panel decision. The dock reflowed the reading column and
+squeezed the split view; the user chose a thin always-docked rail so controls
+stay first-class, with panels that pop OVER content on demand.)* — a **thin
+(~48px) icon rail** docked at the right edge on concept pages (≥900px):
+Comments·N / Changes / Outline / Metadata / quick-actions / rail-toggle. The
+page reserves a slim `--okf-rail-w` gutter so content never sits under the rail.
+Clicking a rail icon opens the corresponding **overlay panel** (reuse
+`.okf-panel`, ~380px) that pops OVER the reading column (no reflow), carries
+`--okf-pop-shadow`, and dismisses on **Esc / click-away** (the transparent
+`.okf-panel-overlay` scrim). Tabs inside the overlay: **Comments / Changes /
+Outline / Metadata**; the **Quick-Action directive buttons** sit at the top of
+the Comments overlay where they pre-fill the composer.
 
 **3.5 Bottom status strip** — ambient/noisy status moved off the top bar:
 connection indicator · agent-watching state · validation count · a plain
@@ -186,9 +189,12 @@ Editorial (serif) theme · Neo-Brutalist theme · any Mac/Windows cue (`⌘K`
 glyph, window dots, SF font, centered Spotlight search) · stretching body prose
 edge-to-edge.
 
-*(REVISED 2026-07-05: the earlier "no docked/persistent comments column"
-non-goal is withdrawn — the studio loop is now a docked panel, see §3.4. Swiss
-is also the default family now, per user preference.)*
+*(REVISED 2026-07-05, Round 2: the studio loop is a thin rail + on-demand
+overlay panels (see §3.4), NOT a docked reflow column. The reading column is
+never reflowed by studio chrome — overlays pop over it. Swiss remains the
+default family. A Workbench ↔ Focus reading mode (Focus collapses nav + rail +
+frame for Source/Split) is added; Rendered prose stays at the ~76ch measure
+even in Focus.)*
 
 ## 9. Baseline / rollback
 
