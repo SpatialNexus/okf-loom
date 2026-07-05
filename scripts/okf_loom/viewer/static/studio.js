@@ -330,6 +330,16 @@
   });
   leftGroup.appendChild(watchingToggle);
 
+  // Bundle-size stat (ambient dash): the Diátaxis nav lists every concept, so
+  // its link count is the bundle size. Present on concept pages only.
+  const conceptCount = document.querySelectorAll(".okf-nav__link").length;
+  if (conceptCount > 0) {
+    leftGroup.appendChild(el("span", { class: "okf-statseg", title: conceptCount + " concepts in this bundle" }, [
+      el("span", { class: "okf-statseg__mark", "aria-hidden": "true", text: "◆" }),
+      document.createTextNode(" " + conceptCount + " concepts"),
+    ]));
+  }
+
   // Connection indicator (driven by live.js hub). iter1 CRI-015: aria-live
   // so "Reconnecting…" / "Live" / "Offline" state changes are announced to
   // assistive tech (presence + toasts already were; the conn chip was the
@@ -381,7 +391,20 @@
      el("kbd", { class: "okf-kbd", "aria-hidden": "true", text: paletteHint })]);
   paletteBtn.addEventListener("click", openPalette);
 
+  // Studio dock toggle: collapse/expand the persistent studio panel. Reflects
+  // the dock's open state via aria-pressed (synced in openPanel/closePanel).
+  const studioToggle = el("button", {
+    type: "button", class: "okf-studiobtn okf-studio-toggle",
+    "aria-pressed": "false", "aria-controls": "okf-panel",
+    title: "Show or hide the studio panel",
+  }, [
+    el("span", { class: "okf-studio-toggle__icon", "aria-hidden": "true", text: "◨" }),
+    document.createTextNode(" Studio"),
+  ]);
+  studioToggle.addEventListener("click", () => { state.openPanel ? closePanel() : openPanel("comments"); });
+
   // Assemble bar (view switch only on concept pages)
+  if (isConceptPage()) rightGroup.appendChild(studioToggle);
   rightGroup.appendChild(commentsBtn);
   rightGroup.appendChild(changesBtn);
   rightGroup.appendChild(paletteBtn);
@@ -1656,15 +1679,19 @@
     // of an open session they don't exist yet; create + append them. On
     // subsequent renders (SSE, user toggles, etc.) they persist, so the
     // composer textarea node survives across rebuilds.
+    var intentsZone = body.querySelector(".okf-comment-intents-wrap");
     var composerZone = body.querySelector(".okf-comment-composer-section");
     var toolbarZone = body.querySelector(".okf-comment-toolbar-wrap");
     var listZone = body.querySelector(".okf-comment-list-wrap");
-    var initial = !(composerZone && toolbarZone && listZone);
+    var initial = !(intentsZone && composerZone && toolbarZone && listZone);
     if (initial) {
       body.innerHTML = "";
+      // Quick-action directives sit at the very top of the Comments tab.
+      intentsZone = el("div", { class: "okf-comment-intents-wrap" });
       composerZone = el("div", { class: "okf-panel__section okf-comment-composer-section" });
       toolbarZone = el("div", { class: "okf-comment-toolbar-wrap" });
       listZone = el("div", { class: "okf-comment-list-wrap" });
+      body.appendChild(intentsZone);
       body.appendChild(composerZone);
       body.appendChild(toolbarZone);
       body.appendChild(listZone);
@@ -1690,6 +1717,11 @@
       }
       body.scrollTop = composerScroll;
     }
+
+    // Quick-action directive toolbar (stateless — rebuilt each render). Only
+    // when commenting is enabled; the buttons pre-fill the composer above.
+    intentsZone.innerHTML = "";
+    if (EDIT) intentsZone.appendChild(buildIntentsToolbar());
 
     // Rebuild the toolbar + list, EXCEPT when the user is mid-
     // reply in an inline composer. The inline composer lives inside
@@ -3149,8 +3181,11 @@
   // ====================================================================
   const panels = {}; // id → { id, label, render(container, ctx), __builtin }
   const panelOverlay = el("div", { class: "okf-panel-overlay", hidden: "" });
-  const panelShell = el("aside", { class: "okf-panel", hidden: "", role: "dialog",
-    "aria-modal": "true", "aria-label": "Studio panel", tabindex: "-1" });
+  // Editorial Workbench (revised): the studio panel is a DOCKED, non-modal
+  // right-hand workbench column (open by default), not a modal slide-over —
+  // so it uses role=complementary, no aria-modal, and no scrim/focus-trap.
+  const panelShell = el("aside", { class: "okf-panel", hidden: "", role: "complementary",
+    "aria-label": "Studio panel", tabindex: "-1" });
   const panelHeader = el("div", { class: "okf-panel__header" });
   const panelTitle = el("h2", { class: "okf-panel__title" });
   const panelClose = el("button", { type: "button", class: "okf-panel__close", "aria-label": "Close panel", text: "Esc" });
@@ -3174,10 +3209,9 @@
   panelClose.addEventListener("click", closePanel);
   document.addEventListener("keydown", (e) => {
     if (!state.openPanel) return;
+    // The dock is non-modal: Escape collapses it for a full-width read; Tab
+    // flows naturally between the dock and the reading column (no trap).
     if (e.key === "Escape") { e.preventDefault(); closePanel(); }
-    // iter1 CRI-016: trap focus inside the slide-over panel so Tab can't
-    // reach the page behind while aria-modal="true" is claimed.
-    else if (e.key === "Tab") { e.preventDefault(); trapFocusIn(panelShell, !e.shiftKey); }
   });
   function panelBodyEl() { return panelBody; }
   // iter1 CRI-016: remember the trigger so focus is restored on close.
@@ -3188,31 +3222,39 @@
     const p = panels[id];
     if (!p) return;
     state.openPanel = id;
+    document.body.classList.add("okf-studio-open");
+    try { localStorage.setItem("okf-studio-collapsed", "0"); } catch (e) {}
     panelShell.hidden = false;
-    panelOverlay.hidden = false;
+    panelOverlay.hidden = true;   // docked, not modal — never dim the page
     panelTitle.textContent = p.label;
     panelShell.setAttribute("aria-label", p.label);
     // Update aria-expanded on every toggle button.
     [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
     const tb = ({ comments: commentsBtn, changes: changesBtn })[id];
     if (tb) tb.setAttribute("aria-expanded", "true");
+    if (studioToggle) studioToggle.setAttribute("aria-pressed", "true");
     // Reflect the active tab in the pop-over tab bar.
     Object.keys(panelTabBtns).forEach(function (k) {
       panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
     });
-    // Save the trigger so closePanel can restore focus (CRI-016).
-    if (!panelLastFocus) panelLastFocus = document.activeElement;
+    // Save the trigger so closePanel can restore focus. Skipped on the
+    // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
+    // scroll on page load.
+    if (!opts.noFocus && !panelLastFocus) panelLastFocus = document.activeElement;
     // Render.
     panelBody.innerHTML = "";
     panelBody._focusComposer = !!opts.focusComposer;
     try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
-    try { panelShell.focus(); } catch (e) {}
+    if (!opts.noFocus) { try { panelShell.focus(); } catch (e) {} }
   }
   function closePanel() {
     state.openPanel = null;
+    document.body.classList.remove("okf-studio-open");
+    try { localStorage.setItem("okf-studio-collapsed", "1"); } catch (e) {}
     panelShell.hidden = true;
     panelOverlay.hidden = true;
     [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
+    if (studioToggle) studioToggle.setAttribute("aria-pressed", "false");
     // iter1 CRI-016: restore focus to the button/link that opened the panel.
     if (panelLastFocus && typeof panelLastFocus.focus === "function") {
       try { panelLastFocus.focus({ preventScroll: true }); } catch (e) {}
@@ -4032,7 +4074,10 @@
   // Editorial Workbench §3.2: the persistent Diátaxis nav is the primary rail;
   // the in-page heading list moved to the pop-over Outline tab, so "sections"
   // is retired here. Related (local graph) + Quick Actions stack below the nav.
-  var SIDEBAR_PANELS = ["related", "intents"];
+  // Quick-action "intents" moved OUT of the left nav into the Comments tab of
+  // the studio dock (buildIntentsToolbar) — so the left column stays a clean
+  // Diátaxis nav and the action buttons sit where they pre-fill the composer.
+  var SIDEBAR_PANELS = ["related"];
   var INTENTS = [
     { id: "add-section", label: "Add section", prompt: "Add a new section about" },
     { id: "split-doc", label: "Split document", prompt: "Split this document into" },
@@ -4074,7 +4119,9 @@
     // Build the dynamic panels in saved order, below the nav. "sections" is
     // retired (Outline tab covers it) — skip it in any legacy saved order.
     sbState.order.forEach(function (panelId) {
-      if (panelId === "sections") return;
+      // "sections" (→ Outline tab) and "intents" (→ Comments tab) are retired
+      // from the left column; skip them in any legacy saved order.
+      if (panelId === "sections" || panelId === "intents") return;
       var panel = buildPanel(panelId, sbState, existingGraph);
       if (panel) sidebar.appendChild(panel);
     });
@@ -4202,6 +4249,34 @@
     body.appendChild(container);
   }
 
+  // Editorial Workbench (revised): the quick-action directive buttons live at
+  // the top of the Comments tab in the studio dock. Same INTENTS + behaviour
+  // as the retired left-nav panel — clicking one pre-fills the composer prompt.
+  function buildIntentsToolbar() {
+    var wrap = el("div", { class: "okf-panel__intents", role: "group", "aria-label": "Quick actions" });
+    INTENTS.forEach(function (intent) {
+      var btn = el("button", {
+        class: "okf-panel__intent", type: "button", text: intent.label,
+        title: intent.prompt + "…",
+      });
+      btn.addEventListener("click", function () {
+        state.draftBody = intent.prompt + " ";
+        state.draftAnchor = { kind: "concept", ref: state.conceptId, concept: state.conceptId };
+        // We're already in the Comments tab — fill the live composer directly
+        // (renderCommentsPanel preserves the textarea node) and focus it.
+        var ta = panelBodyEl() && panelBodyEl().querySelector(".okf-composer__textarea");
+        if (ta) {
+          ta.value = state.draftBody;
+          try { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+        } else {
+          openPanel("comments", { focusComposer: true });
+        }
+      });
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
+
   function wireSidebarDnD(sidebar, sbState) {
     var dragSrc = null;
     sidebar.addEventListener("dragstart", function (e) {
@@ -4269,6 +4344,14 @@
       setView(state.view); // also deep-links + lazy-loads source if needed
       bindSelectionAffordance();
       buildSidebarPanels();
+      // Editorial Workbench (revised): the studio dock is open by default on
+      // concept pages so the agent-loop controls are always to hand. Respect a
+      // persisted user collapse. noFocus so it doesn't grab focus on load.
+      var studioCollapsed = false;
+      try { studioCollapsed = localStorage.getItem("okf-studio-collapsed") === "1"; } catch (e) {}
+      // Desktop only: on narrow screens the dock overlays, so don't force it
+      // open on load — the user opens it from the status strip.
+      if (!studioCollapsed && window.innerWidth > 900) openPanel("comments", { noFocus: true });
     } else if (document.getElementById("detail-body")) {
       // Graph page: bind selection affordance for the detail panel.
       bindSelectionAffordance();

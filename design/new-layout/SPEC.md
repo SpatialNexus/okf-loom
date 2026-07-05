@@ -66,11 +66,16 @@ labels. Active item uses the active-state tokens (§5).
   *(This SUPERSEDES the earlier "margin notes in a right-hand gutter" idea — the
   gutter reserved space and read like a docked panel; removed per user.)*
 
-**3.4 Comment loop = pop-over** — a right **slide-over overlay** summoned on
-demand (like today's `.okf-panel`), **default closed**, dismissed on scrim-click
-or `Esc`. Tabs: **Comments / Changes / Outline / Metadata**. Because it is absent
-most of the time it needs no collapse control. It overlays the reading column;
-it does not reflow it.
+**3.4 Studio loop = docked panel** *(REVISED 2026-07-05 per user feedback —
+supersedes the earlier "summoned pop-over" decision. The pop-over hid the
+studio's working controls; the user wants them first-class, so the panel is now
+a persistent right-hand dock.)* — a right **docked, non-modal studio column**,
+**open by default** on concept pages, **collapsible** (a "Studio" toggle in the
+status strip; `Esc` collapses) for a full-width read. It **reflows** the reading
+column (the body reserves `--okf-studio-w` on the right — no scrim, no overlap).
+Tabs: **Comments / Changes / Outline / Metadata**; the **Quick-Action directive
+buttons** (Add section / Split / Add links / Enrich) sit at the top of the
+Comments tab where they pre-fill the composer.
 
 **3.5 Bottom status strip** — ambient/noisy status moved off the top bar:
 connection indicator · agent-watching state · validation count · a plain
@@ -178,8 +183,12 @@ Reuse existing tokens where they already exist (`--okf-radius`,
 ## 8. Non-goals / explicitly rejected
 
 Editorial (serif) theme · Neo-Brutalist theme · any Mac/Windows cue (`⌘K`
-glyph, window dots, SF font, centered Spotlight search) · a docked/persistent
-comments column · stretching body prose edge-to-edge.
+glyph, window dots, SF font, centered Spotlight search) · stretching body prose
+edge-to-edge.
+
+*(REVISED 2026-07-05: the earlier "no docked/persistent comments column"
+non-goal is withdrawn — the studio loop is now a docked panel, see §3.4. Swiss
+is also the default family now, per user preference.)*
 
 ## 9. Baseline / rollback
 

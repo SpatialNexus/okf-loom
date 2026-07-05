@@ -73,6 +73,15 @@
   font-size: var(--okf-text-xs);
 }
 .okf-studio-bar--status .okf-studiobtn:hover { background: var(--okf-border); }
+/* Ambient dash stat (e.g. "◆ 30 concepts"). */
+.okf-statseg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--okf-fg-muted);
+  white-space: nowrap;
+}
+.okf-statseg__mark { color: var(--okf-accent); }
 
 /* Studio buttons reuse the topbar control look but a touch denser. */
 .okf-studiobtn {
@@ -1128,21 +1137,73 @@
   z-index: 70;
 }
 .okf-panel-overlay[hidden] { display: none; }
+/* Editorial Workbench (revised): the studio panel is a DOCKED, non-modal
+ * right-hand workbench column — open by default, collapsible for a full-width
+ * read. The reading content shifts left to make room (body.okf-studio-open)
+ * rather than being dimmed behind a modal scrim. */
 .okf-panel {
   position: fixed;
   top: 0;
   right: 0;
-  height: 100vh;
-  width: min(440px, 100vw);
+  bottom: 0;
+  width: var(--okf-studio-w, 380px);
   background: var(--okf-bg-elev);
   border-left: var(--okf-border-w) solid var(--okf-border-strong);
-  box-shadow: var(--okf-pop-shadow);
-  z-index: 71;
+  z-index: 8;                 /* beside — not over — the topbar (10) / status (9) */
   display: flex;
   flex-direction: column;
-  transform: translateX(0);
 }
 .okf-panel[hidden] { display: none; }
+/* When the dock is open the whole page reserves space on the right so nothing
+ * is hidden behind it (no overlap, no scrim). */
+body.okf-studio-open { padding-right: var(--okf-studio-w, 380px); }
+/* The dock header aligns with the top bar so the two read as one chrome line. */
+.okf-panel__header { min-height: var(--okf-topbar-h); }
+
+/* Quick-action directive toolbar at the top of the Comments tab. The buttons
+ * pre-fill the composer just below them. */
+.okf-panel__intents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--okf-space-1);
+  padding: var(--okf-space-3) var(--okf-space-4) 0;
+}
+.okf-panel__intent {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: var(--okf-text-xs);
+  font-weight: 600;
+  padding: 5px 9px;
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-inset);
+  color: var(--okf-fg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.okf-panel__intent::before {
+  content: "+";
+  margin-right: 5px;
+  font-weight: 700;
+  color: var(--okf-fg-muted);
+}
+.okf-panel__intent:hover {
+  border-color: var(--okf-active-border);
+  background: var(--okf-active-fill);
+  color: var(--okf-active-fg);
+}
+.okf-panel__intent:hover::before { color: var(--okf-active-fg); }
+
+/* Narrow screens: the dock can't shrink the reading column to nothing, so it
+ * overlays the content instead (full width, on top) and the page keeps its
+ * width. The user opens/closes it from the status strip. */
+@media (max-width: 900px) {
+  /* full-width overlay (width:100vw is set by the shared mobile block below);
+   * lift it above the chrome and don't reserve page space. */
+  .okf-panel { z-index: 71; box-shadow: var(--okf-pop-shadow); }
+  body.okf-studio-open { padding-right: 0; }
+}
 .okf-panel__header {
   display: flex;
   align-items: center;
