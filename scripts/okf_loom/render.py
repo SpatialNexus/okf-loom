@@ -549,15 +549,17 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 
 # Valid data-theme values. wiki.css defines a token block per theme; the
 # button cycles them in this order. KEEP IN SYNC with the THEMES /
-# THEME_GLYPHS copies in wiki.js, graph.js and studio.js (each JS context
-# loads without the others).
-_THEMES: tuple[str, ...] = ("light", "dark", "pastel", "sepia", "midnight")
+# THEME_GLYPHS copies in wiki.js:27-28, graph.js:30-31 and studio.js:219-220
+# (each JS context loads without the others). Four Editorial-Workbench
+# themes: technical/swiss families in light + dark.
+_THEMES: tuple[str, ...] = (
+    "technical-light", "technical-dark", "swiss-light", "swiss-dark",
+)
 _THEME_GLYPHS: dict[str, str] = {
-    "light": "\u2600",     # \u2600 sun
-    "dark": "\u263e",      # \u263e moon
-    "pastel": "\u273f",    # \u273f flower
-    "sepia": "\u2615",     # \u2615 hot beverage
-    "midnight": "\u2605",  # \u2605 star
+    "technical-light": "\u2600",  # \u2600 sun
+    "technical-dark": "\u263e",   # \u263e moon
+    "swiss-light": "\u25d1",      # \u25d1 right half-black circle (solid-fill motif)
+    "swiss-dark": "\u25d0",       # \u25d0 left half-black circle
 }
 
 
@@ -568,10 +570,10 @@ def _theme_button_html(initial_theme: str) -> str:
     paint is consistent. ``wiki.js`` / ``graph.js`` update both the
     ``data-theme`` attribute and the button glyph atomically when the user
     (or localStorage) overrides the initial theme. The button cycles the
-    five themes, so it carries an aria-label naming the current theme
+    four themes, so it carries an aria-label naming the current theme
     rather than a two-state aria-pressed.
     """
-    theme = initial_theme if initial_theme in _THEMES else "light"
+    theme = initial_theme if initial_theme in _THEMES else "technical-light"
     glyph = _THEME_GLYPHS[theme]
     return (
         '<button id="okf-theme" type="button" '
