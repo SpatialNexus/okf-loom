@@ -623,6 +623,71 @@ def _nav_controls_html(
     )
 
 
+# Canonical Diátaxis ordering for the concept left-nav (Editorial Workbench
+# SPEC §3.2). ``demo`` is featured first (the bundle's showcase entry point);
+# the four Diátaxis quadrants follow in pedagogical order; unknown types sort
+# alphabetically after the known set.
+_NAV_TYPE_ORDER: tuple[str, ...] = (
+    "demo", "tutorial", "how-to", "howto", "reference", "explanation",
+)
+
+
+def _norm_type(t: str) -> str:
+    """Normalise a type for order matching (case- and separator-insensitive)."""
+    return t.strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def _nav_type_label(t: str) -> str:
+    """Group heading for a Diátaxis type. Real-bundle frontmatter types are
+    already display-ready ("Demo", "How-to") and CSS upper-cases them; only the
+    synthetic ``<untyped>`` bucket needs a friendly name."""
+    return "Other" if t == "<untyped>" else t
+
+
+def _concept_nav_html(bundle: Bundle, concept: Concept, mode: str) -> str:
+    """Diátaxis-grouped left-nav for concept pages (Editorial Workbench §3.2).
+
+    Every concept in the bundle is grouped by its Diátaxis ``type`` under a
+    small uppercase group label, ordered by :data:`_NAV_TYPE_ORDER` (unknown
+    types alphabetical, deterministic). Within a group, concepts sort by title
+    then id (§3.2 determinism). The current concept's link is marked
+    ``aria-current="page"`` and carries ``--current`` for the active-state
+    tokens. This is a persistent wayfinding rail; studio.js mounts its dynamic
+    panels (related graph, quick actions) *below* it without disturbing it.
+    """
+    by_type: dict[str, list[Concept]] = {}
+    for c in bundle.concepts.values():
+        by_type.setdefault(c.type or "<untyped>", []).append(c)
+
+    def _type_key(t: str) -> tuple[int, str]:
+        norm = _norm_type(t)
+        try:
+            return (_NAV_TYPE_ORDER.index(norm), "")
+        except ValueError:
+            return (len(_NAV_TYPE_ORDER), norm)
+
+    parts: list[str] = ['<nav class="okf-nav" aria-label="Concepts">']
+    for t in sorted(by_type, key=_type_key):
+        parts.append(
+            f'<p class="okf-nav__group">{_esc(_nav_type_label(t))}</p>'
+        )
+        for c in sorted(by_type[t], key=lambda c: (c.title.lower(), c.id)):
+            url = url_for_concept(c.id, mode, source_cid=concept.id)
+            if c.id == concept.id:
+                parts.append(
+                    f'<a class="okf-nav__link okf-nav__link--current"'
+                    f' aria-current="page" href="{_esc(url)}"'
+                    f' title="{_esc(c.title)}">{_esc(c.title)}</a>'
+                )
+            else:
+                parts.append(
+                    f'<a class="okf-nav__link" href="{_esc(url)}"'
+                    f' title="{_esc(c.title)}">{_esc(c.title)}</a>'
+                )
+    parts.append("</nav>")
+    return "".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Single-file viewer
 # ---------------------------------------------------------------------------
@@ -1447,6 +1512,9 @@ def _render_concept_page(
     # P2-3 (iter-1): clickable breadcrumb trail (replaces the flat raw id).
     breadcrumb_html = _render_breadcrumb(concept, mode=mode, name=name)
 
+    # Editorial Workbench §3.2: Diátaxis-grouped left-nav rail.
+    concept_nav_html = _concept_nav_html(bundle, concept, mode)
+
     rendered = (
         template
         .replace("__LANG__", "en")
@@ -1470,6 +1538,7 @@ def _render_concept_page(
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__CONCEPT_ID__", _esc(cid_str))
         .replace("__BREADCRUMB_HTML__", breadcrumb_html)
+        .replace("__CONCEPT_NAV_HTML__", concept_nav_html)
         .replace("__CONCEPT_TYPE__", _esc(concept.type or "concept"))
         .replace("__CONCEPT_TYPE_COLOR__", _esc(type_color))
         .replace("__CONCEPT_TYPE_FG__", _esc(_chip_fg(type_color)))

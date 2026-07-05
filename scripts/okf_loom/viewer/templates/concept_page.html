@@ -51,9 +51,9 @@ __WIKI_CSS_LINK__
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>
 <header class="okf-topbar">
   <div class="okf-topbar__brand">
-    <a href="__BRAND_HREF__" class="okf-brand-link"><strong>__BUNDLE_NAME__</strong></a>
-    <span class="okf-muted">okf-loom wiki</span>
+    <a href="__BRAND_HREF__" class="okf-brand-link"><span class="okf-brand-mark" aria-hidden="true"></span><strong>__BUNDLE_NAME__</strong></a>
   </div>
+  __BREADCRUMB_HTML__
   __NAV_HTML__
 </header>
 
@@ -66,13 +66,13 @@ __WIKI_CSS_LINK__
 <p class="okf-studio-fallback-banner" role="status">Live studio unavailable. Showing a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p>
 
 <main id="okf-main" class="okf-page">
-  <aside class="okf-page__sidebar" aria-label="Related concepts">
+  <aside class="okf-page__sidebar" aria-label="Navigation">
+    __CONCEPT_NAV_HTML__
     <div class="okf-local-graph" id="okf-local-graph" data-graph="__LOCAL_GRAPH_DATA__" data-root-prefix="__ROOT_PREFIX__"></div>
   </aside>
 
   <article class="okf-page__main">
     <header class="okf-page__header" style="--okf-type-accent:__CONCEPT_TYPE_COLOR__">
-      __BREADCRUMB_HTML__
       <div class="okf-page__typerow">
         <span class="okf-type-iconwrap" style="color:__CONCEPT_TYPE_COLOR__" aria-hidden="true">__TYPE_ICON__</span>
         <span class="okf-type-chip" style="background:__CONCEPT_TYPE_COLOR__;color:__CONCEPT_TYPE_FG__">__CONCEPT_TYPE__</span>
@@ -82,12 +82,16 @@ __WIKI_CSS_LINK__
       __CONCEPT_SUBTITLE__
       <p class="okf-page__description">__CONCEPT_DESCRIPTION__</p>
       <div class="okf-page__meta">__CONCEPT_RESOURCE__ __CONCEPT_TAGS__</div>
-      __GOVERNED_HTML__
     </header>
 
     <div class="okf-prose okf-page__body">
       __CONCEPT_BODY__
     </div>
+
+    <!-- Governed keys (entities · provenance · citations · relations) sit
+         below the body so the header reads as a clean editorial masthead
+         (Editorial Workbench §3.3); frontmatter table + relations follow. -->
+    __GOVERNED_HTML__
 
     <details class="okf-frontmatter">
       <summary>All fields</summary>

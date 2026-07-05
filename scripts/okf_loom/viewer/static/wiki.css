@@ -114,7 +114,7 @@
    * mile-long lines. */
   --okf-maxw: 1200px;          /* index/search shell */
   --okf-prose-maxw: 76ch;      /* body text measure */
-  --okf-page-maxw: 1560px;     /* concept page shell (sidebar + article) */
+  --okf-page-maxw: 1200px;     /* concept page shell (sidebar + article) */
   --okf-topbar-h: 52px;
   --okf-status-h: 30px;      /* bottom status strip */
   /* --- Redesign fallback (technical-light family). These override the
@@ -353,7 +353,9 @@ body {
   font-size: 16px;
   line-height: 1.6;
   color: var(--okf-fg);
-  background: var(--okf-bg);
+  /* Editorial Workbench: the page sits on the recessed --okf-page-bg; the
+   * chrome bars + content surface float on it as elevated planes. */
+  background: var(--okf-page-bg);
   -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
@@ -494,12 +496,11 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
 .okf-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--okf-space-4);
   padding: 0 var(--okf-space-5);
   height: var(--okf-topbar-h);
   background: var(--okf-bg-elev);
-  border-bottom: 1px solid var(--okf-border);
+  border-bottom: var(--okf-border-w) solid var(--okf-border);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -533,10 +534,34 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
  * flowing prose at a comfortable measure. */
 .okf-nav-collapsed .okf-page__main { max-width: 940px; margin-inline: auto; }
 .okf-nav-collapsed .okf-page__body { max-width: var(--okf-prose-maxw); }
-.okf-topbar__brand { display: flex; align-items: baseline; gap: var(--okf-space-2); min-width: 0; }
-.okf-topbar__brand strong { font-size: var(--okf-text-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.okf-brand-link { color: inherit; }
+.okf-topbar__brand { display: flex; align-items: center; gap: var(--okf-space-2); min-width: 0; flex: none; }
+.okf-topbar__brand strong {
+  font-size: var(--okf-text-base);
+  font-family: var(--okf-font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.okf-brand-link { display: inline-flex; align-items: center; gap: var(--okf-space-2); color: inherit; }
 .okf-brand-link:hover { text-decoration: none; color: var(--okf-accent); }
+/* Editorial Workbench §3.1: the accent "mark" square anchors the wordmark. */
+.okf-brand-mark {
+  width: 15px; height: 15px; flex: none;
+  background: var(--okf-accent);
+  border-radius: var(--okf-radius-pill);
+}
+/* Breadcrumb relocated into the top bar (SPEC §3.1). It takes the slack
+ * between the brand and the controls, on one line, clipping if it must. */
+.okf-topbar .okf-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: var(--okf-text-sm);
+}
+.okf-topbar .okf-breadcrumb__current { color: var(--okf-fg); }
 .okf-topbar__controls {
   display: flex;
   align-items: center;
@@ -1311,26 +1336,63 @@ sup.okf-footnote-ref { line-height: 0; }
 /* ---- Page (concept) layout -------------------------------------------- */
 .okf-page {
   display: grid;
-  grid-template-columns: var(--okf-sidebar-w, 272px) minmax(0, 1fr);
-  gap: var(--okf-space-6);
+  grid-template-columns: var(--okf-sidebar-w, 216px) minmax(0, 1fr);
+  gap: 0;
   flex: 1;
-  max-width: var(--okf-page-maxw);
-  margin: 0 auto;
-  padding: var(--okf-space-5) var(--okf-space-6);
   width: 100%;
+  max-width: var(--okf-page-maxw);
+  margin: var(--okf-space-5) auto;
+  /* Editorial Workbench: the reading surface is an elevated plane framed on
+   * the recessed page bg. Swiss carries the frame on --okf-border-strong (=fg)
+   * with radius 0; Technical softens it with radius + a subtle --okf-shadow. */
+  background: var(--okf-bg);
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius);
+  box-shadow: var(--okf-shadow);
+  overflow: hidden;
 }
 .okf-page__sidebar {
-  position: sticky;
-  top: calc(var(--okf-topbar-h) + 16px);
-  align-self: start;
-  max-height: calc(100vh - var(--okf-topbar-h) - 32px);
-  overflow-y: auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--okf-space-2);
-  resize: horizontal;
-  min-width: 180px;
-  max-width: 600px;
+  gap: var(--okf-space-3);
+  padding: var(--okf-space-4) var(--okf-space-3);
+  background: var(--okf-bg-elev);
+  border-right: var(--okf-border-w) solid var(--okf-border);
+}
+
+/* Diátaxis nav rail (Editorial Workbench §3.2) — the persistent primary
+ * wayfinding column, grouped by content type. The current concept's link uses
+ * the active-state tokens (subtle tint in Technical, solid box in Swiss). */
+.okf-nav { display: flex; flex-direction: column; min-width: 0; }
+.okf-nav__group {
+  margin: var(--okf-space-4) var(--okf-space-1) var(--okf-space-1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--okf-fg-muted);
+}
+.okf-nav__group:first-child { margin-top: 2px; }
+.okf-nav__link {
+  display: block;
+  padding: 6px 9px;
+  margin: 1px 0;
+  border: var(--okf-border-w) solid transparent;
+  border-radius: var(--okf-radius-sm);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.okf-nav__link:hover { color: var(--okf-fg); background: var(--okf-bg-inset); text-decoration: none; }
+.okf-nav__link--current {
+  color: var(--okf-active-fg);
+  background: var(--okf-active-fill);
+  border-color: var(--okf-active-border);
+  font-weight: 600;
 }
 
 /* Sidebar panel system (user-requested feature) */
@@ -1508,23 +1570,21 @@ sup.okf-footnote-ref { line-height: 0; }
 }
 .okf-local-graph__empty { color: var(--okf-fg-muted); font-size: var(--okf-text-sm); padding: var(--okf-space-2); }
 
-.okf-page__main { min-width: 0; max-width: none; }
-/* Concept header band (UI overhaul phase 1): the type accent tints a left
- * border + a faint wash so every concept page carries its type identity.
- * color-mix keeps the wash theme-aware; browsers without it fall back to
- * the plain elevated surface. */
+/* Editorial Workbench §3.3: the reading content sits at a comfortable,
+ * centred measure inside the reading cell — the column is undivided (no
+ * reserved comment gutter) but lines never run the full card width. */
+.okf-page__main {
+  min-width: 0;
+  width: 100%;
+  max-width: calc(var(--okf-prose-maxw) + 2 * var(--okf-space-6));
+  margin-inline: auto;
+  padding: var(--okf-space-6);
+}
+/* Flat concept header (Editorial Workbench §3.3): the type identity now lives
+ * in the type band + nav, so the header drops the bordered left-accent card
+ * and reads as a clean editorial masthead on the reading surface. */
 .okf-page__header {
   margin-bottom: var(--okf-space-5);
-  padding: var(--okf-space-4) var(--okf-space-5);
-  border: 1px solid var(--okf-border);
-  border-left: 4px solid var(--okf-type-accent, var(--okf-accent));
-  border-radius: var(--okf-radius);
-  background: var(--okf-bg-elev);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--okf-type-accent, var(--okf-accent)) 7%, var(--okf-bg-elev)),
-    var(--okf-bg-elev) 55%
-  );
 }
 .okf-page__typerow {
   display: flex;

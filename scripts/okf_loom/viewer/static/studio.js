@@ -4029,7 +4029,10 @@
 
   // ---- sidebar panel system (user-requested: collapsible, reorderable, resizable) ----
   var SIDEBAR_KEY = "okf:sidebar";
-  var SIDEBAR_PANELS = ["related", "sections", "intents"];
+  // Editorial Workbench §3.2: the persistent Diátaxis nav is the primary rail;
+  // the in-page heading list moved to the pop-over Outline tab, so "sections"
+  // is retired here. Related (local graph) + Quick Actions stack below the nav.
+  var SIDEBAR_PANELS = ["related", "intents"];
   var INTENTS = [
     { id: "add-section", label: "Add section", prompt: "Add a new section about" },
     { id: "split-doc", label: "Split document", prompt: "Split this document into" },
@@ -4054,18 +4057,24 @@
     var sidebar = $(".okf-page__sidebar");
     if (!sidebar) return;
     var sbState = getSidebarState();
-    // Apply saved width.
-    document.documentElement.style.setProperty("--okf-sidebar-w", sbState.width + "px");
 
-    // Capture the existing local graph node (preserve event listeners
-    // by moving the actual node, not copying HTML).
+    // Capture the server-rendered nodes we must preserve (move the actual
+    // nodes, keeping wiki.js event listeners): the primary Diátaxis nav rail
+    // and the local-graph widget.
+    var existingNav = $(".okf-nav", sidebar);
     var existingGraph = $(".okf-local-graph", sidebar);
 
     // Clear sidebar.
     sidebar.innerHTML = "";
 
-    // Build panels in saved order.
+    // The Diátaxis nav is the persistent wayfinding rail — re-mount it at the
+    // top, NOT as a draggable panel, so it always leads the column.
+    if (existingNav) sidebar.appendChild(existingNav);
+
+    // Build the dynamic panels in saved order, below the nav. "sections" is
+    // retired (Outline tab covers it) — skip it in any legacy saved order.
     sbState.order.forEach(function (panelId) {
+      if (panelId === "sections") return;
       var panel = buildPanel(panelId, sbState, existingGraph);
       if (panel) sidebar.appendChild(panel);
     });
