@@ -445,6 +445,54 @@ def test_claimed_comment_has_no_sidestripe(server_url: str, page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 - thin rail + overlay panels (replaces the docked reflow dock)
+# ---------------------------------------------------------------------------
+
+
+def test_rail_present_and_overlay_does_not_reflow(server_url: str, page) -> None:
+    """Round 2: a thin rail is docked; opening a panel overlays (no reflow)."""
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-rail", timeout=10000)
+    # Rail has the four tab icons + quick-actions.
+    ids = page.eval_on_selector_all(
+        ".okf-rail__btn[data-rail-id]", "els => els.map(e => e.dataset.railId)"
+    )
+    assert set(ids) >= {"comments", "changes", "outline", "metadata"}
+    # Body must NOT reserve 380px (no docked reflow), only the slim rail gutter.
+    # The reserve slides in over a 0.2s boot transition; let it settle before
+    # measuring so we compare steady states around the open (not mid-animation).
+    # (to_have_css polls via the CSP-safe assertion path, unlike a raw
+    # wait_for_function expression which the page CSP blocks from eval.)
+    expect(page.locator("body")).to_have_css("padding-right", "48px")
+    pad_before = page.evaluate("getComputedStyle(document.body).paddingRight")
+    page.click('.okf-rail__btn[data-rail-id="comments"]')
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    pad_after = page.evaluate("getComputedStyle(document.body).paddingRight")
+    assert pad_before == pad_after, "opening a panel must not reflow the body"
+    # Slim reserve == rail width (48px), never the 380px dock width.
+    assert pad_after.startswith("48"), f"expected 48px rail reserve, got {pad_after}"
+
+
+def test_overlay_closes_on_scrim_and_esc(server_url: str, page) -> None:
+    """Round 2: the overlay panel dismisses on scrim click-away and on Esc."""
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-rail", timeout=10000)
+    page.click('.okf-rail__btn[data-rail-id="comments"]')
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    # click-away on the scrim closes. (state="hidden": the panel gets [hidden];
+    # a plain wait_for_selector defaults to state="visible" and would hang.)
+    page.eval_on_selector(".okf-panel-overlay", "el => el.click()")
+    page.wait_for_selector(".okf-panel", state="hidden", timeout=5000)
+    # re-open, then Esc closes.
+    page.click('.okf-rail__btn[data-rail-id="comments"]')
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".okf-panel", state="hidden", timeout=5000)
+
+
+# ---------------------------------------------------------------------------
 # B5 - focus trap in palette + panel (CRI-016)
 # ---------------------------------------------------------------------------
 

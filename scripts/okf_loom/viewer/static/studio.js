@@ -403,10 +403,9 @@
   ]);
   studioToggle.addEventListener("click", () => { state.openPanel ? closePanel() : openPanel("comments"); });
 
-  // Assemble bar (view switch only on concept pages)
-  if (isConceptPage()) rightGroup.appendChild(studioToggle);
-  rightGroup.appendChild(commentsBtn);
-  rightGroup.appendChild(changesBtn);
+  // Assemble bar (view switch only on concept pages). Comments/Changes now
+  // live in the rail; the dock toggle is retired. Footer keeps only the
+  // wired actions + ambient (reorganised in Task 4).
   rightGroup.appendChild(paletteBtn);
   rightGroup.appendChild(connChip);
   bar.appendChild(leftGroup);
@@ -3216,16 +3215,17 @@
   function panelBodyEl() { return panelBody; }
   // iter1 CRI-016: remember the trigger so focus is restored on close.
   let panelLastFocus = null;
+  // Round 2: the thin rail's icon buttons (set by buildRail); openPanel/
+  // closePanel reflect the active tab onto them via aria-pressed.
+  var railButtons = [];
 
   function openPanel(id, opts) {
     opts = opts || {};
     const p = panels[id];
     if (!p) return;
     state.openPanel = id;
-    document.body.classList.add("okf-studio-open");
-    try { localStorage.setItem("okf-studio-collapsed", "0"); } catch (e) {}
     panelShell.hidden = false;
-    panelOverlay.hidden = true;   // docked, not modal — never dim the page
+    panelOverlay.hidden = false;  // overlay: show the click-away scrim
     panelTitle.textContent = p.label;
     panelShell.setAttribute("aria-label", p.label);
     // Update aria-expanded on every toggle button.
@@ -3236,6 +3236,10 @@
     // Reflect the active tab in the pop-over tab bar.
     Object.keys(panelTabBtns).forEach(function (k) {
       panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
+    });
+    // Reflect the open tab on the rail icons.
+    (railButtons || []).forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset.railId === id ? "true" : "false");
     });
     // Save the trigger so closePanel can restore focus. Skipped on the
     // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
@@ -3249,12 +3253,11 @@
   }
   function closePanel() {
     state.openPanel = null;
-    document.body.classList.remove("okf-studio-open");
-    try { localStorage.setItem("okf-studio-collapsed", "1"); } catch (e) {}
     panelShell.hidden = true;
     panelOverlay.hidden = true;
     [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
     if (studioToggle) studioToggle.setAttribute("aria-pressed", "false");
+    (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
     // iter1 CRI-016: restore focus to the button/link that opened the panel.
     if (panelLastFocus && typeof panelLastFocus.focus === "function") {
       try { panelLastFocus.focus({ preventScroll: true }); } catch (e) {}
@@ -3262,6 +3265,39 @@
     panelLastFocus = null;
   }
   function togglePanel(id) { state.openPanel === id ? closePanel() : openPanel(id); }
+
+  // Editorial Workbench Round 2: the thin studio rail. Always docked on
+  // concept pages (>=900px); each icon opens the matching overlay tab. The
+  // Comments icon carries a live count badge (synced by updateBadges).
+  var railCommentBadge = null;
+  function buildRail() {
+    var rail = el("aside", { class: "okf-rail", role: "toolbar",
+      "aria-label": "Studio", "aria-orientation": "vertical" });
+    function railBtn(id, glyph, label) {
+      var b = el("button", { type: "button", class: "okf-rail__btn",
+        "aria-pressed": "false", "aria-controls": "okf-panel",
+        title: label, "aria-label": label, text: glyph });
+      b.dataset.railId = id;
+      b.addEventListener("click", function () { togglePanel(id); });
+      rail.appendChild(b);
+      return b;
+    }
+    var cBtn = railBtn("comments", "💬", "Comments");   // 💬
+    railCommentBadge = el("span", { class: "okf-rail__badge", "aria-hidden": "true", hidden: "", text: "0" });
+    cBtn.appendChild(railCommentBadge);
+    railBtn("changes", "↻", "Changes");                      // ↻
+    railBtn("outline", "☰", "Outline");                      // ☰
+    railBtn("metadata", "ⓘ", "Metadata");                    // ⓘ
+    rail.appendChild(el("span", { class: "okf-rail__spacer", "aria-hidden": "true" }));
+    // Quick-actions (+) jumps to the Comments overlay (its intents toolbar).
+    var plus = el("button", { type: "button", class: "okf-rail__btn",
+      title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel", text: "+" });
+    plus.addEventListener("click", function () { openPanel("comments", { focusComposer: false }); });
+    rail.appendChild(plus);
+    document.body.appendChild(rail);
+    railButtons = rail.querySelectorAll(".okf-rail__btn[data-rail-id]");
+    return rail;
+  }
 
   function ctx() {
     return {
@@ -3491,6 +3527,11 @@
     const open = state.comments.filter((c) => c.state === "open" || c.state === "claimed").length;
     commentsBadge.textContent = String(open);
     commentsBadge.setAttribute("aria-label", open + " open comments");
+    // Round 2: mirror the live open-comment count onto the rail badge.
+    if (railCommentBadge) {
+      railCommentBadge.textContent = String(open);
+      railCommentBadge.hidden = !(open > 0);
+    }
     const acts = state.events.filter((e) => e.type === "activity" || e.action).length;
     changesBadge.textContent = String(acts);
   }
@@ -4344,14 +4385,12 @@
       setView(state.view); // also deep-links + lazy-loads source if needed
       bindSelectionAffordance();
       buildSidebarPanels();
-      // Editorial Workbench (revised): the studio dock is open by default on
-      // concept pages so the agent-loop controls are always to hand. Respect a
-      // persisted user collapse. noFocus so it doesn't grab focus on load.
-      var studioCollapsed = false;
-      try { studioCollapsed = localStorage.getItem("okf-studio-collapsed") === "1"; } catch (e) {}
-      // Desktop only: on narrow screens the dock overlays, so don't force it
-      // open on load — the user opens it from the status strip.
-      if (!studioCollapsed && window.innerWidth > 900) openPanel("comments", { noFocus: true });
+      // Round 2: always-docked thin rail (>=900px); overlays open on demand
+      // (no auto-open dock). The slim reserve keeps content clear of the rail.
+      if (window.innerWidth > 900) {
+        buildRail();
+        document.body.classList.add("okf-has-rail");
+      }
     } else if (document.getElementById("detail-body")) {
       // Graph page: bind selection affordance for the detail panel.
       bindSelectionAffordance();

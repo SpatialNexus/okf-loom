@@ -117,6 +117,7 @@
   --okf-page-maxw: 1200px;     /* concept page shell (sidebar + article) */
   --okf-topbar-h: 52px;
   --okf-status-h: 30px;      /* bottom status strip */
+  --okf-rail-w: 48px;          /* thin studio icon rail (Round 2) */
   --okf-studio-w: 380px;     /* docked right studio panel width */
   /* --- Redesign fallback: Swiss is the primary family (user preference), so a
      themeless page (pre-JS auto paint) renders Swiss — radius 0, Helvetica,

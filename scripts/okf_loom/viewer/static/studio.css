@@ -1133,30 +1133,88 @@
 .okf-panel-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.35);
-  z-index: 70;
+  background: transparent;   /* click-catcher, not a modal dim (pops OVER, not modal) */
+  z-index: 7;                /* under panel(8)/rail(8); over content */
 }
 .okf-panel-overlay[hidden] { display: none; }
-/* Editorial Workbench (revised): the studio panel is a DOCKED, non-modal
- * right-hand workbench column — open by default, collapsible for a full-width
- * read. The reading content shifts left to make room (body.okf-studio-open)
- * rather than being dimmed behind a modal scrim. */
+/* Editorial Workbench Round 2: the studio panel is an OVERLAY that pops OVER
+ * the reading column from a rail icon — it no longer reflows content. It sits
+ * to the left of the thin rail, elevated by --okf-pop-shadow, dismissed on
+ * Esc / click-away (the .okf-panel-overlay scrim). */
 .okf-panel {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  top: var(--okf-topbar-h);
+  right: var(--okf-rail-w);
+  bottom: var(--okf-status-h);
   width: var(--okf-studio-w, 380px);
   background: var(--okf-bg-elev);
   border-left: var(--okf-border-w) solid var(--okf-border-strong);
-  z-index: 8;                 /* beside — not over — the topbar (10) / status (9) */
+  box-shadow: var(--okf-pop-shadow);   /* elevation over content */
+  z-index: 8;                          /* over content + scrim(7); under status(9)/topbar(10) */
   display: flex;
   flex-direction: column;
 }
 .okf-panel[hidden] { display: none; }
-/* When the dock is open the whole page reserves space on the right so nothing
- * is hidden behind it (no overlap, no scrim). */
-body.okf-studio-open { padding-right: var(--okf-studio-w, 380px); }
+/* The reading column reserves a slim gutter for the always-docked rail so
+ * content never sits under it. The overlay panel does NOT reflow content. */
+body.okf-has-rail { padding-right: var(--okf-rail-w); }
+
+/* ---- Thin studio rail (Round 2) ------------------------------------- */
+.okf-rail {
+  position: fixed;
+  top: var(--okf-topbar-h);
+  right: 0;
+  bottom: var(--okf-status-h);
+  width: var(--okf-rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--okf-space-1);
+  padding: var(--okf-space-2) 0;
+  background: var(--okf-bg-elev);
+  border-left: var(--okf-border-w) solid var(--okf-border);
+  z-index: 8;
+}
+.okf-rail[hidden] { display: none; }
+.okf-rail__btn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: var(--okf-text-base);
+  border: var(--okf-border-w) solid transparent;
+  border-radius: var(--okf-radius-sm);
+  background: transparent;
+  color: var(--okf-fg-muted);
+  cursor: pointer;
+}
+.okf-rail__btn:hover { color: var(--okf-fg); background: var(--okf-bg-inset); }
+.okf-rail__btn[aria-pressed="true"] {
+  color: var(--okf-active-fg);
+  background: var(--okf-active-fill);
+  border-color: var(--okf-active-border);
+}
+.okf-rail__btn:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+.okf-rail__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--okf-radius-pill);
+  background: var(--okf-accent);
+  color: var(--okf-accent-on);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.okf-rail__badge[hidden] { display: none; }
+.okf-rail__spacer { flex: 1 1 auto; }   /* pushes the rail toggle to the bottom */
 /* The dock header aligns with the top bar so the two read as one chrome line. */
 .okf-panel__header { min-height: var(--okf-topbar-h); }
 
@@ -1195,14 +1253,13 @@ body.okf-studio-open { padding-right: var(--okf-studio-w, 380px); }
 }
 .okf-panel__intent:hover::before { color: var(--okf-active-fg); }
 
-/* Narrow screens: the dock can't shrink the reading column to nothing, so it
- * overlays the content instead (full width, on top) and the page keeps its
- * width. The user opens/closes it from the status strip. */
 @media (max-width: 900px) {
-  /* full-width overlay (width:100vw is set by the shared mobile block below);
-   * lift it above the chrome and don't reserve page space. */
-  .okf-panel { z-index: 71; box-shadow: var(--okf-pop-shadow); }
-  body.okf-studio-open { padding-right: 0; }
+  /* Narrow screens: no rail reserve; the overlay covers the full width and
+   * lifts above the chrome. The user opens/closes it from the footer. */
+  .okf-rail { display: none; }
+  body.okf-has-rail { padding-right: 0; }
+  .okf-panel { top: 0; right: 0; bottom: 0; z-index: 71; }
+  .okf-panel-overlay { background: rgba(15, 23, 42, 0.35); z-index: 70; } /* modal dim on mobile */
 }
 .okf-panel__header {
   display: flex;
