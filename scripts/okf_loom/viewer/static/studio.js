@@ -274,7 +274,9 @@
   // ====================================================================
   // 3. Studio bar
   // ====================================================================
-  const bar = el("div", { class: "okf-studio-bar", role: "region", "aria-label": "Studio controls" });
+  // The studio controls live in a bottom status strip (Editorial Workbench
+  // layout): ambient state on the left, on-demand actions on the right.
+  const bar = el("div", { class: "okf-studio-bar okf-studio-bar--status", role: "region", "aria-label": "Studio status" });
   const leftGroup = el("div", { class: "okf-studio-bar__group" });
   const rightGroup = el("div", { class: "okf-studio-bar__group okf-studio-bar__group--right" });
 
@@ -390,12 +392,9 @@
   bar.appendChild(rightGroup);
 
   function mountBar() {
-    const topbar = $(".okf-topbar");
-    if (topbar && topbar.parentNode) {
-      topbar.parentNode.insertBefore(bar, topbar.nextSibling);
-    } else {
-      document.body.insertBefore(bar, document.body.firstChild);
-    }
+    // Bottom status strip: append as the last in-flow child of the flex-column
+    // body so it pins to the viewport bottom (sticky, see studio.css).
+    document.body.appendChild(bar);
     if (isConceptPage()) {
       leftGroup.appendChild(viewSwitch);
     }

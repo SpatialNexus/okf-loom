@@ -47,6 +47,33 @@
 .okf-studio-bar__group--right { flex-wrap: nowrap; }
 .okf-studio-bar[hidden] { display: none; }
 
+/* Editorial Workbench: the studio bar is a bottom status strip. Ambient
+ * state (presence/watching/connection/validation) on the left; on-demand
+ * actions (Comments/Changes/Commands) on the right. Sticky to the viewport
+ * bottom so it stays visible as the reading column scrolls. */
+.okf-studio-bar--status {
+  position: sticky;
+  bottom: 0;
+  z-index: 9;
+  min-height: var(--okf-status-h);
+  padding: 0 var(--okf-space-4);
+  gap: var(--okf-space-3);
+  background: var(--okf-bg-elev);
+  border-top: var(--okf-border-w) solid var(--okf-border);
+  border-bottom: none;
+  font-family: var(--okf-font-mono);
+  font-size: var(--okf-text-xs);
+}
+/* In the status strip the on-demand actions read as quiet text buttons, not
+ * raised chips — the strip stays calm. */
+.okf-studio-bar--status .okf-studiobtn {
+  padding: 3px 9px;
+  border-color: var(--okf-border);
+  background: var(--okf-bg-inset);
+  font-size: var(--okf-text-xs);
+}
+.okf-studio-bar--status .okf-studiobtn:hover { background: var(--okf-border); }
+
 /* Studio buttons reuse the topbar control look but a touch denser. */
 .okf-studiobtn {
   font: inherit;
