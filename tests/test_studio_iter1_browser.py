@@ -1775,6 +1775,65 @@ def test_split_view_divider_and_synced_scroll(server_url: str, page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 — Workbench <-> Focus reading mode + split fix (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_split_view_auto_enters_focus(server_url: str, page) -> None:
+    """Round 2: switching to Split auto-enters Focus, dropping the .okf-page__main
+    cap so the panes fill the width (the real split fix); leaving Split exits it.
+    """
+    # Above 900px so the rail mounts + Focus width behaviour is meaningful.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-viewswitch__btn[data-mode='split']", timeout=10000)
+    assert (
+        page.evaluate("document.documentElement.hasAttribute('data-okf-focus')")
+        is False
+    ), "Focus must be off before entering Split"
+    page.click(".okf-viewswitch__btn[data-mode='split']")
+    page.wait_for_function(
+        "document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+    # In Focus the reading column is uncapped, so the source pane is wide — far
+    # past half of the old ~740px trapped measure (panes were ~402|268px).
+    w = page.eval_on_selector(
+        ".okf-view[data-okf-view='split'] > .okf-source",
+        "el => el.getBoundingClientRect().width",
+    )
+    assert w > 400, f"source pane should be wide in focus/split, got {w}"
+    # Leaving Split exits the auto-focus (Split was what turned it on).
+    page.click(".okf-viewswitch__btn[data-mode='rendered']")
+    page.wait_for_function(
+        "!document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+
+
+def test_split_divider_resizes_visually(server_url: str, page) -> None:
+    """Round 2: the divider drag now drives --okf-split-pct, which the split grid
+    consumes as a percentage (was a no-op before the reconcile)."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders?view=split", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-split__divider", timeout=10000)
+    before = page.eval_on_selector(
+        ".okf-view[data-okf-view='split']",
+        "el => getComputedStyle(el).gridTemplateColumns",
+    )
+    divider = page.locator(".okf-split__divider")
+    divider.focus()
+    divider.press("ArrowRight")
+    after = page.eval_on_selector(
+        ".okf-view[data-okf-view='split']",
+        "el => getComputedStyle(el).gridTemplateColumns",
+    )
+    assert before != after, (
+        f"divider should change the grid tracks (before={before!r}, after={after!r})"
+    )
+
+
+# ---------------------------------------------------------------------------
 # iter2 G9 — change-list virtualization (only the visible window in the DOM)
 # iter2 G10 — 1000-row cap messaging shown UP FRONT
 # ---------------------------------------------------------------------------

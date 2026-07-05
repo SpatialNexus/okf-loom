@@ -1595,6 +1595,26 @@ sup.okf-footnote-ref { line-height: 0; }
   margin-inline: auto;
   padding: var(--okf-space-6);
 }
+/* Editorial Workbench Round 2 — Focus mode. Collapses nav + rail + frame and
+ * lets Source/Split bleed wide; Rendered prose stays at the ~76ch measure. */
+:root[data-okf-focus] .okf-page {
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  grid-template-columns: minmax(0, 1fr);   /* nav column gone */
+}
+:root[data-okf-focus] .okf-page__sidebar { display: none; }
+:root[data-okf-focus] .okf-page__main {
+  max-width: none;                          /* drop the split trap */
+}
+/* Rendered view re-centers at the measure even in Focus. The view wrap always
+ * exists on concept pages (ensureViewWrap runs at boot), so target it. */
+:root[data-okf-focus] .okf-view[data-okf-view="rendered"] {
+  max-width: calc(var(--okf-prose-maxw) + 2 * var(--okf-space-6));
+  margin-inline: auto;
+}
 /* Flat concept header (Editorial Workbench §3.3): the type identity now lives
  * in the type band + nav, so the header drops the bordered left-accent card
  * and reads as a clean editorial masthead on the reading surface. */

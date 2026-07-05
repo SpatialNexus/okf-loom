@@ -291,11 +291,9 @@
  * property on .okf-view so the drag handler only updates one value. */
 .okf-view[data-okf-view="split"] {
   display: grid;
-  /* Split view: rendered view keeps the same max-width as non-split mode.
-   * Source/code view takes 2/3 of the rendered view's width.
-   * Grid: [rendered (3fr)] [divider] [source (2fr)] so the source is 2/3
-   * the width of the rendered pane, and the rendered pane fills its track. */
-  grid-template-columns: 3fr 7px 2fr;
+  /* Rendered pane width is driven by --okf-split-pct (set by the divider drag
+   * in studio.js); source fills the rest. Divider is a fixed 7px track. */
+  grid-template-columns: var(--okf-split-pct, 60%) 7px minmax(0, 1fr);
   gap: 0;
   align-items: stretch;
 }
@@ -1162,6 +1160,12 @@
 /* The reading column reserves a slim gutter for the always-docked rail so
  * content never sits under it. The overlay panel does NOT reflow content. */
 body.okf-has-rail { padding-right: var(--okf-rail-w); }
+
+/* Focus mode (Round 2): collapse the rail and drop its slim reserve so
+ * Source/Split fill the width. (Rendered re-centers via wiki.css.) The
+ * attribute-scoped body selector wins on specificity over the reserve rule. */
+:root[data-okf-focus] .okf-rail { display: none; }
+:root[data-okf-focus] body.okf-has-rail { padding-right: 0; }
 
 /* ---- Thin studio rail (Round 2) ------------------------------------- */
 .okf-rail {

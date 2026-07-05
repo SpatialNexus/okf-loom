@@ -440,7 +440,9 @@
 
   function applySplitPct(pct) {
     splitPct = Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, pct));
-    if (viewWrap) viewWrap.style.setProperty("--okf-split-pct", splitPct + "fr");
+    // Round 2: the split grid now consumes --okf-split-pct as a PERCENTAGE
+    // (rendered-pane width); source fills the rest via minmax(0,1fr).
+    if (viewWrap) viewWrap.style.setProperty("--okf-split-pct", (splitPct * 100).toFixed(2) + "%");
     if (splitDivider) {
       splitDivider.setAttribute("aria-valuenow", String(Math.round(splitPct * 100)));
       splitDivider.setAttribute("aria-valuetext",
@@ -552,6 +554,15 @@
   function setView(mode) {
     if (mode !== "rendered" && mode !== "source" && mode !== "split") return;
     state.view = mode;
+    // Round 2: Split auto-enters Focus (drops the __main cap so the panes fill
+    // the width — the real split fix); leaving Split exits Focus only if Split
+    // was what turned it on (a manual toggleFocus detaches from this).
+    if (mode === "split") {
+      if (!isFocus()) { focusFromSplit = true; setFocus(true); }
+      closePanel();               // overlays would fight the wide split
+    } else if (focusFromSplit) {
+      focusFromSplit = false; setFocus(false);
+    }
     ensureViewWrap();
     if (viewWrap) viewWrap.dataset.okfView = mode;
     if (sourcePre) sourcePre.hidden = (mode === "rendered");
@@ -564,6 +575,26 @@
     window.history.replaceState(null, "", url.toString());
     // Source/split need the raw markdown; load lazily.
     if (mode !== "rendered") ensureSourceLoaded();
+  }
+
+  // Editorial Workbench Round 2 — Workbench <-> Focus reading mode. Focus is a
+  // net-new attribute on <html> (data-okf-focus) that collapses nav + rail +
+  // frame and uncaps the reading column for Source/Split (Rendered stays at the
+  // ~76ch measure, re-applied in CSS). Distinct from the graph's okf-focus-root.
+  // focusBtn is built by the footer toolbar (Task 4); here it stays null and
+  // setFocus null-guards it. Not persisted in Phase 1.
+  var focusBtn = null;
+  var focusFromSplit = false;
+  function setFocus(on) {
+    if (on) document.documentElement.setAttribute("data-okf-focus", "");
+    else document.documentElement.removeAttribute("data-okf-focus");
+    if (focusBtn) focusBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  function isFocus() { return document.documentElement.hasAttribute("data-okf-focus"); }
+  function toggleFocus() {
+    var on = !isFocus();
+    focusFromSplit = false;      // manual toggle detaches from split auto-mode
+    setFocus(on);
   }
 
   function ensureSourceLoaded() {
