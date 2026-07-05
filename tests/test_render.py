@@ -991,14 +991,20 @@ def test_iter1_subtitle_uses_css_class_not_inline_style(tmp_path: _Path) -> None
 
 
 def test_iter1_concept_page_sidebar_labeled_related(tmp_path: _Path) -> None:
-    """P2-4: the concept-page sidebar aria-label says 'Related concepts'
-    (honest — it's a flat labelled pill list, not a graph)."""
+    """Editorial Workbench §3.2: the concept-page sidebar is now the Diátaxis
+    navigation rail (with the related-graph / quick-action panels mounted below
+    it by studio.js), so its aria-label is the honest 'Navigation' and it
+    carries the server-rendered ``.okf-nav`` rail with grouped concept links."""
     bundle = _build_bundle_with(tmp_path, {
         "c.md": "---\ntype: T\ntitle: C\n---\nbody\n",
     })
     html = _render_concept_html(bundle, "c")
-    assert 'aria-label="Related concepts"' in html
-    assert 'aria-label="Concept navigation"' not in html
+    assert 'aria-label="Navigation"' in html
+    # The Diátaxis nav rail is server-rendered into the sidebar with a group
+    # heading and an active current-page link.
+    assert 'class="okf-nav"' in html
+    assert "okf-nav__group" in html
+    assert "okf-nav__link--current" in html
 
 
 def test_iter1_accent_is_not_tailwind_blue() -> None:
