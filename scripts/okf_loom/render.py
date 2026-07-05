@@ -612,6 +612,9 @@ def _nav_controls_html(
         f'<form action="{search_target}" method="get" role="search" class="okf-search-form">'
         '<input type="search" name="q" placeholder="Search\u2026" autocomplete="off"'
         f' aria-label="Search"{search_value}>'
+        # Plain "/" keycap (Editorial Workbench; SPEC \u00a73.1 \u2014 no OS glyph). The
+        # "/" key focuses this field (studio.js); the cue is OS-neutral.
+        '<kbd class="okf-kbd okf-search-kbd" aria-hidden="true">/</kbd>'
         '</form>'
         f'<a class="okf-btn" href="{graph_link}">Graph</a>'
         f'<a class="okf-btn" href="{index_href}">Index</a>'

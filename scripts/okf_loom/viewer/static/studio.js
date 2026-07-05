@@ -369,15 +369,13 @@
   changesBtn.insertBefore(changesBadge, changesBtn.firstChild);
   changesBtn.addEventListener("click", () => togglePanel("changes"));
 
-  // User feedback: the palette trigger used to be a bare "⌘K"
-  // glyph — meaningless on the ~90% of machines without a command key.
-  // It now says what it does ("Commands") with a platform-correct
-  // shortcut hint (⌘K on Apple devices, Ctrl+K everywhere else).
-  const isApplePlatform = /Mac|iPhone|iPad|iPod/.test(
-    (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "");
-  const paletteHint = isApplePlatform ? "⌘K" : "Ctrl+K";
+  // Editorial Workbench / SPEC §8: NO OS glyph (no ⌘/⊞). The trigger says
+  // what it does ("Commands") with an OS-neutral plain keycap. The functional
+  // binding stays Ctrl/Cmd-K (wirePaletteKeys) — only the rendered cue is
+  // neutral. macOS users can also open it via the "/"-then-palette path.
+  const paletteHint = "Ctrl K";
   const paletteBtn = el("button", { type: "button", class: "okf-studiobtn okf-palettebtn",
-    "aria-label": "Open the command palette (" + (isApplePlatform ? "Command K" : "Control K") + ")",
+    "aria-label": "Open the command palette (Control or Command K)",
     title: "Search pages and run commands  (" + paletteHint + ")" },
     [document.createTextNode("Commands "),
      el("kbd", { class: "okf-kbd", "aria-hidden": "true", text: paletteHint })]);
@@ -2979,6 +2977,16 @@
     document.addEventListener("keydown", (e) => {
       const meta = e.ctrlKey || e.metaKey;
       if (meta && (e.key === "k" || e.key === "K")) { e.preventDefault(); togglePalette(); return; }
+      // "/" focuses the top-bar search (Editorial Workbench; SPEC §3.1). Skip
+      // when typing in a field or when a modifier is held.
+      if (e.key === "/" && !meta && !e.altKey) {
+        const t = e.target;
+        const typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+        if (!typing) {
+          const search = $('.okf-topbar__controls input[type="search"], #okf-search');
+          if (search) { e.preventDefault(); search.focus(); search.select && search.select(); return; }
+        }
+      }
       if (!paletteState.open) return;
       if (e.key === "Escape") { e.preventDefault(); closePalette(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); }

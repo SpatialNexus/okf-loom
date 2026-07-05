@@ -544,6 +544,27 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
 }
 .okf-search-note a { color: var(--okf-accent); }
 
+/* Keycap (Editorial Workbench). OS-neutral — never renders ⌘/⊞ (SPEC §8). */
+.okf-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: var(--okf-font-mono);
+  font-size: var(--okf-text-xs);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--okf-fg-muted);
+  background: var(--okf-bg);
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-sm);
+}
+/* The "/" hint sits just after the search field (the form is display:contents,
+ * so the input + keycap are flex siblings in the controls row). */
+.okf-search-kbd { margin-left: calc(-1 * var(--okf-space-2)); align-self: center; }
+
 /* ---- Two-pane layout (graph view, single-file) ------------------------ */
 .okf-layout {
   display: flex;
