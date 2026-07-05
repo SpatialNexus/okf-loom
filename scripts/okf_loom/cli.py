@@ -573,8 +573,14 @@ def cmd_discover(args: argparse.Namespace) -> int:
         _print_json(report.as_dict())
     else:
         suppressed = getattr(report, "suppressed", [])
-        extra = f" ({len(suppressed)} low-confidence suppressed)" if suppressed else ""
+        extra = f" ({len(suppressed)} suppressed)" if suppressed else ""
         print(f"# {len(report.suggestions)} suggestions across {len(report.by_rule())} rules{extra}")
+        bucket_counts = report.as_dict().get("actionability_counts", {})
+        if bucket_counts:
+            bucket_text = ", ".join(
+                f"{name}={count}" for name, count in bucket_counts.items()
+            )
+            print(f"  actionability: {bucket_text}")
         for s in report.suggestions:
             print(
                 f"  [{s.severity:8}] {s.rule:30} {concept_id_to_str(s.concept_id) if s.concept_id else '-'}"

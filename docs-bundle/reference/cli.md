@@ -155,7 +155,11 @@ scripts/okf-loom discover <bundle> [--rules RULES] [--out OUT]
 Emit a structured report of gaps the managing agent may fix.
 Suggestions carry a rule, severity, message, target concept, and an
 `action` verb phrase. JSON output includes suppressed suggestions and
-`suppressed_reason_counts` so filtered data remains inspectable.
+`suppressed_reason_counts` so filtered data remains inspectable. It also
+includes `actionability_counts` and an `actionability` object that groups
+items into buckets such as `safe_to_apply`, `needs_review`,
+`suppressed_existing_relation`, `suppressed_generic_label`,
+`suppressed_cross_cluster`, and `low_confidence`.
 
 | Flag | Effect |
 |---|---|

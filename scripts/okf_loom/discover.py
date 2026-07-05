@@ -201,6 +201,7 @@ class DiscoveryReport:
 
     def as_dict(self) -> dict:
         by_rule = self.by_rule()
+        actionability = _actionability_buckets(self.suggestions, self.suppressed)
         return {
             "bundle_root": str(self.bundle_root),
             "total": len(self.suggestions),
@@ -213,6 +214,10 @@ class DiscoveryReport:
             "suppressed_reason_counts": _suppression_reason_counts(
                 self.suppressed
             ),
+            "actionability_counts": {
+                bucket: len(items) for bucket, items in actionability.items()
+            },
+            "actionability": actionability,
             "suggestions": [s.as_dict() for s in self.suggestions],
             "suppressed": [s.as_dict() for s in self.suppressed],
         }
@@ -338,6 +343,84 @@ def _suppression_reason_counts(suggestions: list[Suggestion]) -> dict[str, int]:
         for reason in _detail_list(s.detail, "suppression_reasons"):
             counts[reason] = counts.get(reason, 0) + 1
     return counts
+
+
+def _suggestion_bucket(suggestion: Suggestion, *, suppressed: bool) -> str:
+    detail = suggestion.detail
+    confidence_reasons = set(_detail_list(detail, "confidence_reasons"))
+    suppression_reasons = set(_detail_list(detail, "suppression_reasons"))
+    if suppressed:
+        if "already_structurally_related" in suppression_reasons:
+            return "suppressed_existing_relation"
+        if {"configured_phrase", "configured_pair"} & suppression_reasons:
+            return "suppressed_configured"
+        if (
+            "different_graph_cluster" in confidence_reasons
+            or "different_top_level_folder" in confidence_reasons
+            or "cross_context_generic_label" in confidence_reasons
+        ):
+            return "suppressed_cross_cluster"
+        if (
+            "generic_duplicate_label" in confidence_reasons
+            or "common_label" in confidence_reasons
+            or "common_person_name" in confidence_reasons
+            or "status_label" in confidence_reasons
+            or "high_document_frequency" in confidence_reasons
+        ):
+            return "suppressed_generic_label"
+        if "low_confidence" in suppression_reasons:
+            return "low_confidence"
+        return "suppressed"
+
+    if suggestion.rule == "missing_indexes":
+        return "safe_to_apply"
+    if suggestion.rule == "unlinked_mentions":
+        confidence = float(detail.get("confidence", 0.0))
+        location_counts = detail.get("location_counts")
+        has_body = (
+            isinstance(location_counts, dict)
+            and int(location_counts.get("body", 0) or 0) > 0
+        )
+        noisy = bool({
+            "generic_duplicate_label",
+            "common_label",
+            "common_person_name",
+            "status_label",
+            "different_graph_cluster",
+            "different_top_level_folder",
+            "cross_context_generic_label",
+        } & confidence_reasons)
+        if confidence >= 0.7 and has_body and not noisy:
+            return "safe_to_apply"
+    return "needs_review"
+
+
+def _actionability_buckets(
+    suggestions: list[Suggestion],
+    suppressed: list[Suggestion],
+) -> dict[str, list[dict]]:
+    bucket_names = (
+        "safe_to_apply",
+        "needs_review",
+        "suppressed_existing_relation",
+        "suppressed_configured",
+        "suppressed_generic_label",
+        "suppressed_cross_cluster",
+        "low_confidence",
+        "suppressed",
+    )
+    buckets: dict[str, list[dict]] = {name: [] for name in bucket_names}
+    for suggestion in suggestions:
+        bucket = _suggestion_bucket(suggestion, suppressed=False)
+        item = suggestion.as_dict()
+        item["actionability_bucket"] = bucket
+        buckets.setdefault(bucket, []).append(item)
+    for suggestion in suppressed:
+        bucket = _suggestion_bucket(suggestion, suppressed=True)
+        item = suggestion.as_dict()
+        item["actionability_bucket"] = bucket
+        buckets.setdefault(bucket, []).append(item)
+    return {bucket: items for bucket, items in buckets.items() if items}
 
 
 def _load_discover_config(bundle: Bundle) -> object:

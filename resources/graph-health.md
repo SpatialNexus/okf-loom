@@ -92,3 +92,9 @@ discover:
 
 Configured suppressions stay visible in JSON as `configured_phrase` or
 `configured_pair` reasons.
+
+Use `actionability_counts` and the `actionability` buckets to triage large
+reports. Start with `safe_to_apply`, review `needs_review`, and treat
+`suppressed_existing_relation`, `suppressed_generic_label`,
+`suppressed_cross_cluster`, `suppressed_configured`, and `low_confidence` as
+explanatory buckets unless the user explicitly asks for a broad audit.

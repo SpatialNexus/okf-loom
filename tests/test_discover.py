@@ -659,11 +659,55 @@ def test_discovery_report_as_dict_json_serializable(tiny_good_bundle: Path) -> N
     b = Bundle.load(tiny_good_bundle)
     rep = discover_suggestions(b)
     d = rep.as_dict()
-    for key in ("bundle_root", "total", "counts", "suggestions"):
+    for key in (
+        "bundle_root",
+        "total",
+        "counts",
+        "actionability_counts",
+        "actionability",
+        "suggestions",
+    ):
         assert key in d
     assert d["total"] == len(rep.suggestions)
     blob = json.dumps(d)
     assert isinstance(blob, str)
+
+
+def test_discovery_report_actionability_buckets(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text(
+        "---\ntype: Note\ntitle: Note\n---\n"
+        "Payment Gateway is mentioned in body prose.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "heading.md").write_text(
+        "---\ntype: Note\ntitle: Heading\n---\n# Beta\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "payment_gateway.md").write_text(
+        "---\ntype: Service\ntitle: Payment Gateway\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "beta.md").write_text(
+        "---\ntype: Topic\ntitle: Beta\n---\nbody\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+
+    rep = discover_suggestions(b, rules=["unlinked_mentions"])
+    data = rep.as_dict()
+
+    assert data["actionability_counts"]["safe_to_apply"] == 1
+    assert data["actionability_counts"]["low_confidence"] == 1
+    assert (
+        data["actionability"]["safe_to_apply"][0]["target_concept_id"]
+        == "payment_gateway"
+    )
+    assert data["actionability"]["low_confidence"][0]["target_concept_id"] == "beta"
+    assert (
+        data["actionability"]["safe_to_apply"][0]["actionability_bucket"]
+        == "safe_to_apply"
+    )
 
 
 def test_suggestion_as_dict_json_serializable(tiny_good_bundle: Path) -> None:

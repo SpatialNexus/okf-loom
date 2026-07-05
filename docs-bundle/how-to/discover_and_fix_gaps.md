@@ -102,6 +102,15 @@ discover:
 These items stay visible in JSON under `suppressed` with reasons such as
 `configured_phrase` or `configured_pair`.
 
+For large reports, use the actionability buckets before reading every row:
+
+- `safe_to_apply` — high-confidence or mechanical suggestions.
+- `needs_review` — useful but not automatic.
+- `suppressed_existing_relation` — already represented by `relations:`.
+- `suppressed_generic_label` / `suppressed_cross_cluster` — likely string-match noise.
+- `suppressed_configured` — hidden by this bundle's config.
+- `low_confidence` — available for broad audits, not default action.
+
 # Step 4: Apply fixes directly via the mutators
 
 For a handful of suggestions, the authoring verbs are the fastest path.
