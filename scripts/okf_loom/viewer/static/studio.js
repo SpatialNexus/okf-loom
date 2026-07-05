@@ -17,8 +17,9 @@
  *   - Extension API (§13.6): okfLoomStudio.register(kind, impl). Wired kinds:
  *     {panel, viewMode}. Reserved (forward-compat, accepted + warned):
  *     {toolbar, graphDecorator, suggestionRenderer}.
- *   - Themes (§13.5): light/dark/pastel/sepia/midnight/auto, honouring
- *     saved choice + bootstrap + OS pref.
+ *   - Themes (§13.5): technical-light/technical-dark/swiss-light/swiss-dark
+ *     (+ auto), honouring saved choice + bootstrap + OS pref, with legacy
+ *     migration for retired theme names.
  *
  * Security: untrusted strings (comment bodies, summaries, ids) go through
  * textContent only. The only innerHTML assignment is the server-rendered
@@ -216,15 +217,21 @@
   // ====================================================================
   // Theme names + button glyphs. KEEP IN SYNC with the copies in wiki.js /
   // graph.js and render.py:_theme_button_html.
-  const THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
-  const THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+  const THEMES = ["technical-light", "technical-dark", "swiss-light", "swiss-dark"];
+  const THEME_GLYPHS = { "technical-light": "☀", "technical-dark": "☾", "swiss-light": "◑", "swiss-dark": "◐" };
+  // Map a returning user's retired theme choice to the nearest new theme.
+  const LEGACY_THEMES = {
+    light: "technical-light", dark: "technical-dark",
+    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
+  };
   function effectiveTheme(choice) {
     if (THEMES.indexOf(choice) >= 0) return choice;
-    // auto: follow OS preference
-    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    if (choice && LEGACY_THEMES[choice]) return LEGACY_THEMES[choice];
+    // auto (or unknown): follow OS preference within the technical family
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "technical-dark" : "technical-light";
   }
   function applyThemeAttr(t, opts) {
-    if (THEMES.indexOf(t) < 0) t = "light";
+    if (THEMES.indexOf(t) < 0) t = "technical-light";
     document.documentElement.setAttribute("data-theme", t);
     // Persist by default so a palette-chosen theme survives navigation
     // (wiki.js reads localStorage['okf-theme'] on every page). Boot and
@@ -244,7 +251,7 @@
   }
   function currentThemeChoice() {
     const t = document.documentElement.getAttribute("data-theme");
-    return THEMES.indexOf(t) >= 0 ? t : "light";
+    return THEMES.indexOf(t) >= 0 ? t : "technical-light";
   }
   // Apply the bootstrap theme on boot. A saved user choice (wiki.js theme
   // button / command palette) outranks the server-side studio.theme config —
@@ -253,6 +260,11 @@
   (function bootTheme() {
     let saved = null;
     try { saved = localStorage.getItem("okf-theme"); } catch (e) {}
+    // Migrate a retired saved theme to its nearest new value (and persist it).
+    if (saved && LEGACY_THEMES[saved]) {
+      saved = LEGACY_THEMES[saved];
+      try { localStorage.setItem("okf-theme", saved); } catch (e) {}
+    }
     const t = (saved && THEMES.indexOf(saved) >= 0)
       ? saved
       : effectiveTheme(BOOT.theme || "auto");
@@ -3043,11 +3055,10 @@
     if (EDIT && isConceptPage()) items.push({ label: "Post a comment / ask the agent", sub: "comment", run: () => openPanel("comments", { focusComposer: true }) });
     items.push({ label: "Open Comments panel", sub: "panel", run: () => openPanel("comments") });
     items.push({ label: "Open Changes panel", sub: "panel", run: () => openPanel("changes") });
-    items.push({ label: "Theme: Light", sub: "theme", run: () => applyThemeAttr("light") });
-    items.push({ label: "Theme: Dark", sub: "theme", run: () => applyThemeAttr("dark") });
-    items.push({ label: "Theme: Pastel", sub: "theme", run: () => applyThemeAttr("pastel") });
-    items.push({ label: "Theme: Sepia", sub: "theme", run: () => applyThemeAttr("sepia") });
-    items.push({ label: "Theme: Midnight", sub: "theme", run: () => applyThemeAttr("midnight") });
+    items.push({ label: "Theme: Technical Light", sub: "theme", run: () => applyThemeAttr("technical-light") });
+    items.push({ label: "Theme: Technical Dark", sub: "theme", run: () => applyThemeAttr("technical-dark") });
+    items.push({ label: "Theme: Swiss Light", sub: "theme", run: () => applyThemeAttr("swiss-light") });
+    items.push({ label: "Theme: Swiss Dark", sub: "theme", run: () => applyThemeAttr("swiss-dark") });
     items.push({ label: "Theme: Auto (follow OS)", sub: "theme", run: () => {
       // Clear the saved choice so the OS preference governs again.
       try { localStorage.removeItem("okf-theme"); } catch (e) {}
