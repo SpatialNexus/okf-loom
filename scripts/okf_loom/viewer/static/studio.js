@@ -366,19 +366,6 @@
   };
   Object.keys(viewBtns).forEach((k) => viewSwitch.appendChild(viewBtns[k]));
 
-  // Panel toggle buttons (right group)
-  const commentsBtn = el("button", { type: "button", class: "okf-studiobtn", "aria-expanded": "false",
-    "aria-controls": "okf-panel", text: "Comments" });
-  const commentsBadge = el("span", { class: "okf-badge", "aria-hidden": "true", text: "0" });
-  commentsBtn.insertBefore(commentsBadge, commentsBtn.firstChild);
-  commentsBtn.addEventListener("click", () => togglePanel("comments"));
-
-  const changesBtn = el("button", { type: "button", class: "okf-studiobtn", "aria-expanded": "false",
-    "aria-controls": "okf-panel", text: "Changes" });
-  const changesBadge = el("span", { class: "okf-badge", "aria-hidden": "true", text: "0" });
-  changesBtn.insertBefore(changesBadge, changesBtn.firstChild);
-  changesBtn.addEventListener("click", () => togglePanel("changes"));
-
   // Editorial Workbench / SPEC §8: NO OS glyph (no ⌘/⊞). The trigger says
   // what it does ("Commands") with an OS-neutral plain keycap. The functional
   // binding stays Ctrl/Cmd-K (wirePaletteKeys) — only the rendered cue is
@@ -390,18 +377,6 @@
     [document.createTextNode("Commands "),
      el("kbd", { class: "okf-kbd", "aria-hidden": "true", text: paletteHint })]);
   paletteBtn.addEventListener("click", openPalette);
-
-  // Studio dock toggle: collapse/expand the persistent studio panel. Reflects
-  // the dock's open state via aria-pressed (synced in openPanel/closePanel).
-  const studioToggle = el("button", {
-    type: "button", class: "okf-studiobtn okf-studio-toggle",
-    "aria-pressed": "false", "aria-controls": "okf-panel",
-    title: "Show or hide the studio panel",
-  }, [
-    el("span", { class: "okf-studio-toggle__icon", "aria-hidden": "true", text: "◨" }),
-    document.createTextNode(" Studio"),
-  ]);
-  studioToggle.addEventListener("click", () => { state.openPanel ? closePanel() : openPanel("comments"); });
 
   // Assemble bar (view switch only on concept pages). Comments/Changes now
   // live in the rail; the dock toggle is retired. Footer keeps only the
@@ -3180,10 +3155,12 @@
   // ====================================================================
   const panels = {}; // id → { id, label, render(container, ctx), __builtin }
   const panelOverlay = el("div", { class: "okf-panel-overlay", hidden: "" });
-  // Editorial Workbench (revised): the studio panel is a DOCKED, non-modal
-  // right-hand workbench column (open by default), not a modal slide-over —
-  // so it uses role=complementary, no aria-modal, and no scrim/focus-trap.
-  const panelShell = el("aside", { class: "okf-panel", hidden: "", role: "complementary",
+  // Editorial Workbench Round 2: the studio panel is an OVERLAY that pops OVER
+  // the reading column from a rail icon (not auto-opened). It keeps
+  // role=complementary and is dismissed on Esc / click-away via the
+  // .okf-panel-overlay scrim (no aria-modal, no focus-trap). id="okf-panel" is
+  // the aria-controls target for the rail buttons + view-switch.
+  const panelShell = el("aside", { class: "okf-panel", id: "okf-panel", hidden: "", role: "complementary",
     "aria-label": "Studio panel", tabindex: "-1" });
   const panelHeader = el("div", { class: "okf-panel__header" });
   const panelTitle = el("h2", { class: "okf-panel__title" });
@@ -3208,8 +3185,8 @@
   panelClose.addEventListener("click", closePanel);
   document.addEventListener("keydown", (e) => {
     if (!state.openPanel) return;
-    // The dock is non-modal: Escape collapses it for a full-width read; Tab
-    // flows naturally between the dock and the reading column (no trap).
+    // The overlay is non-modal: Escape dismisses it; Tab flows naturally
+    // between the panel and the reading column (no focus trap).
     if (e.key === "Escape") { e.preventDefault(); closePanel(); }
   });
   function panelBodyEl() { return panelBody; }
@@ -3228,11 +3205,6 @@
     panelOverlay.hidden = false;  // overlay: show the click-away scrim
     panelTitle.textContent = p.label;
     panelShell.setAttribute("aria-label", p.label);
-    // Update aria-expanded on every toggle button.
-    [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
-    const tb = ({ comments: commentsBtn, changes: changesBtn })[id];
-    if (tb) tb.setAttribute("aria-expanded", "true");
-    if (studioToggle) studioToggle.setAttribute("aria-pressed", "true");
     // Reflect the active tab in the pop-over tab bar.
     Object.keys(panelTabBtns).forEach(function (k) {
       panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
@@ -3255,8 +3227,6 @@
     state.openPanel = null;
     panelShell.hidden = true;
     panelOverlay.hidden = true;
-    [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
-    if (studioToggle) studioToggle.setAttribute("aria-pressed", "false");
     (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
     // iter1 CRI-016: restore focus to the button/link that opened the panel.
     if (panelLastFocus && typeof panelLastFocus.focus === "function") {
@@ -3271,15 +3241,16 @@
   // Comments icon carries a live count badge (synced by updateBadges).
   var railCommentBadge = null;
   function buildRail() {
-    var rail = el("aside", { class: "okf-rail", role: "toolbar",
-      "aria-label": "Studio", "aria-orientation": "vertical" });
+    // role="group" (not "toolbar") to match the sibling view-switch: the rail
+    // has no roving-focus arrow handling, so "toolbar" would over-promise.
+    var railEl = el("aside", { class: "okf-rail", role: "group", "aria-label": "Studio" });
     function railBtn(id, glyph, label) {
       var b = el("button", { type: "button", class: "okf-rail__btn",
         "aria-pressed": "false", "aria-controls": "okf-panel",
         title: label, "aria-label": label, text: glyph });
       b.dataset.railId = id;
       b.addEventListener("click", function () { togglePanel(id); });
-      rail.appendChild(b);
+      railEl.appendChild(b);
       return b;
     }
     var cBtn = railBtn("comments", "💬", "Comments");   // 💬
@@ -3288,15 +3259,15 @@
     railBtn("changes", "↻", "Changes");                      // ↻
     railBtn("outline", "☰", "Outline");                      // ☰
     railBtn("metadata", "ⓘ", "Metadata");                    // ⓘ
-    rail.appendChild(el("span", { class: "okf-rail__spacer", "aria-hidden": "true" }));
+    railEl.appendChild(el("span", { class: "okf-rail__spacer", "aria-hidden": "true" }));
     // Quick-actions (+) jumps to the Comments overlay (its intents toolbar).
     var plus = el("button", { type: "button", class: "okf-rail__btn",
       title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel", text: "+" });
     plus.addEventListener("click", function () { openPanel("comments", { focusComposer: false }); });
-    rail.appendChild(plus);
-    document.body.appendChild(rail);
-    railButtons = rail.querySelectorAll(".okf-rail__btn[data-rail-id]");
-    return rail;
+    railEl.appendChild(plus);
+    document.body.appendChild(railEl);
+    railButtons = railEl.querySelectorAll(".okf-rail__btn[data-rail-id]");
+    return railEl;
   }
 
   function ctx() {
@@ -3525,15 +3496,12 @@
   // ====================================================================
   function updateBadges() {
     const open = state.comments.filter((c) => c.state === "open" || c.state === "claimed").length;
-    commentsBadge.textContent = String(open);
-    commentsBadge.setAttribute("aria-label", open + " open comments");
-    // Round 2: mirror the live open-comment count onto the rail badge.
+    // Round 2: mirror the live open-comment count onto the rail badge (the
+    // footer comment/changes badges were retired with the docked dock).
     if (railCommentBadge) {
       railCommentBadge.textContent = String(open);
       railCommentBadge.hidden = !(open > 0);
     }
-    const acts = state.events.filter((e) => e.type === "activity" || e.action).length;
-    changesBadge.textContent = String(acts);
   }
 
   function jumpToActivity(aid) {

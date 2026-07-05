@@ -451,6 +451,8 @@ def test_claimed_comment_has_no_sidestripe(server_url: str, page) -> None:
 
 def test_rail_present_and_overlay_does_not_reflow(server_url: str, page) -> None:
     """Round 2: a thin rail is docked; opening a panel overlays (no reflow)."""
+    # Above the 900px breakpoint so the rail mounts (buildRail is desktop-only).
+    page.set_viewport_size({"width": 1280, "height": 900})
     page.goto(f"{server_url}/tables/orders", wait_until="load")
     _wait_for_studio(page)
     page.wait_for_selector(".okf-rail", timeout=10000)
@@ -462,8 +464,8 @@ def test_rail_present_and_overlay_does_not_reflow(server_url: str, page) -> None
     # Body must NOT reserve 380px (no docked reflow), only the slim rail gutter.
     # The reserve slides in over a 0.2s boot transition; let it settle before
     # measuring so we compare steady states around the open (not mid-animation).
-    # (to_have_css polls via the CSP-safe assertion path, unlike a raw
-    # wait_for_function expression which the page CSP blocks from eval.)
+    # to_have_css is the right tool here: a web-first assertion that auto-retries
+    # until the computed value settles, which a one-shot page.evaluate cannot.
     expect(page.locator("body")).to_have_css("padding-right", "48px")
     pad_before = page.evaluate("getComputedStyle(document.body).paddingRight")
     page.click('.okf-rail__btn[data-rail-id="comments"]')
@@ -476,6 +478,8 @@ def test_rail_present_and_overlay_does_not_reflow(server_url: str, page) -> None
 
 def test_overlay_closes_on_scrim_and_esc(server_url: str, page) -> None:
     """Round 2: the overlay panel dismisses on scrim click-away and on Esc."""
+    # Above the 900px breakpoint so the rail mounts (buildRail is desktop-only).
+    page.set_viewport_size({"width": 1280, "height": 900})
     page.goto(f"{server_url}/tables/orders", wait_until="load")
     _wait_for_studio(page)
     page.wait_for_selector(".okf-rail", timeout=10000)

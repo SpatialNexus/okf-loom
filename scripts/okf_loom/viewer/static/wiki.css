@@ -362,7 +362,9 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  /* Smoothly make room when the docked studio panel opens/closes. */
+  /* Smooths the body's right reserve: the okf-has-rail rail gutter easing in
+     on boot, and the future Focus-mode reserve collapse. Not the panel, which
+     is now a non-reflowing overlay. */
   transition: padding-right 0.2s ease;
 }
 

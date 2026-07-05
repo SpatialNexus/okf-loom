@@ -1197,7 +1197,7 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   background: var(--okf-active-fill);
   border-color: var(--okf-active-border);
 }
-.okf-rail__btn:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+.okf-rail__btn:focus-visible { outline-offset: 1px; }   /* outline itself comes from the universal :focus-visible (wiki.css) */
 .okf-rail__badge {
   position: absolute;
   top: -2px;
@@ -1208,7 +1208,7 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   border-radius: var(--okf-radius-pill);
   background: var(--okf-accent);
   color: var(--okf-accent-on);
-  font-size: 10px;
+  font-size: 10px;   /* deliberately below --okf-text-xs: count legibility at badge scale */
   font-weight: 700;
   line-height: 15px;
   text-align: center;
@@ -1255,7 +1255,8 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
 
 @media (max-width: 900px) {
   /* Narrow screens: no rail reserve; the overlay covers the full width and
-   * lifts above the chrome. The user opens/closes it from the footer. */
+   * lifts above the chrome. The rail is hidden and the footer no longer
+   * carries Comments/Changes, so the panel is opened from the Command Palette. */
   .okf-rail { display: none; }
   body.okf-has-rail { padding-right: 0; }
   .okf-panel { top: 0; right: 0; bottom: 0; z-index: 71; }
