@@ -1013,10 +1013,10 @@ def test_iter1_accent_is_not_tailwind_blue() -> None:
         assert m, f"token --{name} not defined in block"
         return m.group(1).strip()
 
-    root_block = css.split(":root", 1)[1].split("}", 1)[0]
-    light_accent = _token(root_block, "okf-accent")
+    light_block = css.split('[data-theme="technical-light"]', 1)[1].split("}", 1)[0]
+    light_accent = _token(light_block, "okf-accent")
     assert light_accent.lower() != "#2563eb", "light accent still Tailwind blue-600"
-    dark_block = css.split('[data-theme="dark"]', 1)[1].split("}", 1)[0]
+    dark_block = css.split('[data-theme="technical-dark"]', 1)[1].split("}", 1)[0]
     dark_accent = _token(dark_block, "okf-accent")
     assert dark_accent.lower() != "#60a5fa", "dark accent still Tailwind blue-400"
 
@@ -1204,14 +1204,15 @@ def test_iter2_graph_selection_color_is_token_governed() -> None:
     # GRAPH_COLORS per-theme palette block exists and is referenced.
     assert 'GRAPH_COLORS' in graph_js, "GRAPH_COLORS constants block missing"
     # Every theme ships a canvas palette (mirrors its wiki.css tokens).
-    for theme in ("light", "dark", "pastel", "sepia", "midnight"):
-        assert re.search(rf'\b{theme}:\s*\{{', graph_js), (
+    # Keys are hyphenated so they must be quoted in the JS object literal.
+    for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
+        assert re.search(rf'"{re.escape(theme)}":\s*\{{', graph_js), (
             f"GRAPH_COLORS missing the {theme} palette"
         )
     # node:selected border reads from the palette (not a literal).
     assert re.search(
-        r'"border-color":\s*GRAPH_COLORS\.light\.select', graph_js
-    ), "node:selected border-color does not read from GRAPH_COLORS.light.select"
+        r'"border-color":\s*GRAPH_COLORS\["technical-light"\]\.select', graph_js
+    ), 'node:selected border-color does not read from GRAPH_COLORS["technical-light"].select'
     # syncLabelColour re-syncs the selection color on theme change.
     sync_match = re.search(
         r'function\s+syncLabelColour\s*\(\)\s*\{(.*?)\n\s*\}',
@@ -1233,11 +1234,7 @@ def test_iter2_select_token_defined_in_wiki_css() -> None:
     """P2-5 (iter-2): the --okf-select token is defined in EVERY theme
     (the graph.js GRAPH_COLORS block mirrors these values)."""
     css = _runtime_file("viewer", "static", "wiki.css").read_text(encoding="utf-8")
-    root_block = css.split(":root", 1)[1].split("}", 1)[0]
-    assert re.search(r'--okf-select\s*:', root_block), (
-        "light theme missing --okf-select token"
-    )
-    for theme in ("dark", "pastel", "sepia", "midnight"):
+    for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
         block = css.split(f'[data-theme="{theme}"]', 1)[1].split("}", 1)[0]
         assert re.search(r'--okf-select\s*:', block), (
             f"{theme} theme missing --okf-select token"
@@ -1257,8 +1254,13 @@ def test_theme_blocks_override_full_token_set() -> None:
         "okf-code-fg", "okf-pre-bg", "okf-pre-fg", "okf-broken",
         "okf-ok", "okf-ok-bg", "okf-warn", "okf-warn-bg",
         "okf-info", "okf-info-bg", "okf-error", "okf-error-bg", "okf-shadow",
+        # redesign additions (SPEC §5/§6) — every theme must define these:
+        "okf-active-fill", "okf-active-fg", "okf-active-border",
+        "okf-font-display", "okf-font-body", "okf-font-mono",
+        "okf-border-w", "okf-tag-transform", "okf-tag-weight", "okf-tag-spacing",
+        "okf-title-weight", "okf-title-spacing", "okf-pop-shadow", "okf-page-bg",
     )
-    for theme in ("dark", "pastel", "sepia", "midnight"):
+    for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
         assert f'[data-theme="{theme}"]' in css, f"{theme} theme block missing"
         block = css.split(f'[data-theme="{theme}"]', 1)[1].split("}", 1)[0]
         for token in core_tokens:
