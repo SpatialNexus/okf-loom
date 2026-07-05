@@ -58,7 +58,9 @@
   position: sticky;
   bottom: 0;
   z-index: 9;
-  min-height: 40px;                 /* was --okf-status-h (30px): a real toolbar */
+  min-height: var(--okf-status-h);  /* now 40px (bumped in wiki.css :root): a real
+                                       toolbar, and the SAME token .okf-rail/.okf-panel
+                                       use for their bottom clearance, so they stay flush */
   padding: 0 var(--okf-space-4);
   gap: var(--okf-space-3);
   background: var(--okf-bg-inset);  /* recover the original bar feel */

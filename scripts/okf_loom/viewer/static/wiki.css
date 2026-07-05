@@ -116,7 +116,11 @@
   --okf-prose-maxw: 76ch;      /* body text measure */
   --okf-page-maxw: 1200px;     /* concept page shell (sidebar + article) */
   --okf-topbar-h: 52px;
-  --okf-status-h: 30px;      /* bottom status strip */
+  --okf-status-h: 40px;      /* bottom footer toolbar (Round 2: bordered-button
+                                toolbar, was a 30px status strip). Single source
+                                of truth: .okf-studio-bar--status height AND the
+                                .okf-rail/.okf-panel bottom clearance both read
+                                this token, so they stay flush with no overlap. */
   --okf-rail-w: 48px;          /* thin studio icon rail (Round 2) */
   --okf-studio-w: 380px;     /* docked right studio panel width */
   /* --- Redesign fallback: Swiss is the primary family (user preference), so a
