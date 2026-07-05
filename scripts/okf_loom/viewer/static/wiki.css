@@ -1148,9 +1148,15 @@ sup.okf-footnote-ref { line-height: 0; }
 .okf-index {
   flex: 1;
   max-width: var(--okf-maxw);
-  margin: 0 auto;
-  padding: 28px var(--okf-space-6) 64px;
+  margin: var(--okf-space-5) auto;
+  padding: var(--okf-space-6) var(--okf-space-6) 64px;
   width: 100%;
+  /* Editorial Workbench: the dashboard is a framed surface on the page bg,
+   * consistent with the concept reading card. */
+  background: var(--okf-bg);
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius);
+  box-shadow: var(--okf-shadow);
 }
 .okf-index__title {
   font-size: var(--okf-text-xl);
@@ -1349,7 +1355,8 @@ sup.okf-footnote-ref { line-height: 0; }
   border: var(--okf-border-w) solid var(--okf-border-strong);
   border-radius: var(--okf-radius);
   box-shadow: var(--okf-shadow);
-  overflow: hidden;
+  /* NB: no overflow:hidden — it would clip page content past one viewport.
+   * The nav rounds its own left corners instead to sit flush in the frame. */
 }
 .okf-page__sidebar {
   min-width: 0;
@@ -1359,6 +1366,8 @@ sup.okf-footnote-ref { line-height: 0; }
   padding: var(--okf-space-4) var(--okf-space-3);
   background: var(--okf-bg-elev);
   border-right: var(--okf-border-w) solid var(--okf-border);
+  border-top-left-radius: var(--okf-radius);
+  border-bottom-left-radius: var(--okf-radius);
 }
 
 /* Diátaxis nav rail (Editorial Workbench §3.2) — the persistent primary
@@ -1608,10 +1617,10 @@ sup.okf-footnote-ref { line-height: 0; }
   line-height: 1.15;
 }
 .okf-page__description {
-  color: var(--okf-fg-muted);
-  margin: 6px 0;
-  font-size: var(--okf-text-md);
-  line-height: 1.45;
+  color: var(--okf-fg);
+  margin: var(--okf-space-3) 0 0;
+  font-size: var(--okf-text-lg);
+  line-height: 1.5;
   max-width: var(--okf-prose-maxw);
 }
 /* P2-7 (iter-1): subtitle token rule. Previously the subtitle was the ONLY
@@ -1712,9 +1721,13 @@ details.okf-frontmatter th { background: var(--okf-bg-inset); }
 .okf-search {
   flex: 1;
   max-width: var(--okf-maxw);
-  margin: 0 auto;
-  padding: 28px var(--okf-space-6) 64px;
+  margin: var(--okf-space-5) auto;
+  padding: var(--okf-space-6) var(--okf-space-6) 64px;
   width: 100%;
+  background: var(--okf-bg);
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius);
+  box-shadow: var(--okf-shadow);
 }
 .okf-search__title { font-size: var(--okf-text-xl); margin: 0 0 var(--okf-space-4); font-family: var(--okf-font-display); letter-spacing: -0.015em; }
 .okf-search__results { display: grid; gap: 0; }
