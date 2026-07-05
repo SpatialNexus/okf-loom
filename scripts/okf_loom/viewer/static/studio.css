@@ -1244,12 +1244,15 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
 .okf-panel__header { min-height: var(--okf-topbar-h); }
 
 /* Quick-action directive toolbar at the top of the Comments tab. The buttons
- * pre-fill the composer just below them. */
+ * pre-fill the composer just below them. Top padding is 0: this row is the
+ * first child inside .okf-panel__body, whose own padding-top already gives
+ * the tab-bar-to-content gap (same single var(--okf-space-3) gap the
+ * Changes/Outline/Metadata tabs get); adding it again here would double it. */
 .okf-panel__intents {
   display: flex;
   flex-wrap: wrap;
   gap: var(--okf-space-1);
-  padding: var(--okf-space-3) var(--okf-space-4) 0;
+  padding: 0 var(--okf-space-4) var(--okf-space-3);   /* was `… 0` bottom — add breathing room before the composer */
 }
 .okf-panel__intent {
   flex: 1 1 auto;
