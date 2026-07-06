@@ -566,21 +566,54 @@ _THEME_GLYPHS: dict[str, str] = {
 
 
 def _theme_button_html(initial_theme: str) -> str:
-    """Server-side initial theme button to avoid FOUC (P2-74).
-
-    Emits the glyph that matches the initial ``data-theme`` so the first
-    paint is consistent. ``wiki.js`` / ``graph.js`` update both the
-    ``data-theme`` attribute and the button glyph atomically when the user
-    (or localStorage) overrides the initial theme. The button cycles the
-    four themes, so it carries an aria-label naming the current theme
-    rather than a two-state aria-pressed.
+    """Appearance-menu trigger + popover (Round 2 \u00a75.3), server-rendered to
+    avoid FOUC. Replaces the former theme-cycle button. Consolidates family
+    (technical/swiss) \u00b7 mode (light/dark/auto) \u00b7 contrast (high/soft) \u00b7 border
+    (on/muted/off). The trigger keeps id="okf-theme" so the wiki.js/graph.js/
+    studio.js bindings resolve it; the wiring (open/close + option handlers,
+    each reusing its bundle's applyTheme) lives in those IIFEs. contrast/border
+    default to high/on server-side (the server can't read the user's
+    localStorage); the client corrects aria-checked at boot.
     """
-    theme = initial_theme if initial_theme in _THEMES else "swiss-light"
-    glyph = _THEME_GLYPHS[theme]
+    theme = initial_theme if initial_theme in _THEMES else ""
+    if theme:
+        family, _, mode = theme.partition("-")  # "swiss-light" -> "swiss","light"
+    else:
+        family, mode = "swiss", "auto"          # auto resolves within Swiss (see JS)
+
+    def _opt(setk: str, val: str, label: str, checked: bool) -> str:
+        return (
+            '<button type="button" role="radio" class="okf-appearance__opt" '
+            f'data-okf-set="{setk}" data-okf-val="{val}" '
+            f'aria-checked="{"true" if checked else "false"}">{label}</button>'
+        )
+
+    def _group(setk: str, label: str, opts: tuple, current: str) -> str:
+        buttons = "".join(_opt(setk, v, lbl, v == current) for v, lbl in opts)
+        return (
+            f'<div class="okf-appearance__group" role="radiogroup" aria-label="{label}">'
+            f'<span class="okf-appearance__label">{label}</span>{buttons}</div>'
+        )
+
+    groups = (
+        _group("family", "Family",
+               (("technical", "Technical"), ("swiss", "Swiss")), family)
+        + _group("mode", "Mode",
+                 (("light", "Light"), ("dark", "Dark"), ("auto", "Auto")), mode)
+        + _group("contrast", "Contrast",
+                 (("high", "High"), ("soft", "Soft")), "high")
+        + _group("border", "Border",
+                 (("on", "On"), ("muted", "Muted"), ("off", "Off")), "on")
+    )
     return (
-        '<button id="okf-theme" type="button" '
-        f'aria-label="Change colour theme (current: {theme})" '
-        f'title="Theme: {theme} \u2014 click to cycle">{glyph}</button>'
+        '<div class="okf-appearance">'
+        '<button id="okf-theme" type="button" class="okf-appearance__trigger" '
+        'aria-haspopup="true" aria-expanded="false" '
+        'aria-controls="okf-appearance-menu" aria-label="Appearance settings" '
+        'title="Appearance">Aa <span aria-hidden="true">\u25be</span></button>'
+        '<div class="okf-appearance__menu" id="okf-appearance-menu" role="dialog" '
+        f'aria-label="Appearance" hidden>{groups}</div>'
+        '</div>'
     )
 
 

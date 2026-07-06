@@ -627,6 +627,24 @@ def test_p1_3_static_concept_nav_urls_have_html_extension(
     )
 
 
+def test_appearance_menu_replaces_theme_cycle_button(tiny_good_bundle: _Path) -> None:
+    """Round 2 §5.3: the topbar theme control is an Appearance popover
+    (family/mode/contrast/border), not a bare cycle button. The trigger keeps
+    id=okf-theme; the search form + Graph link (P1-3 contract) survive."""
+    html = _render_concept_html(tiny_good_bundle, "tables/users")  # same as test_p1_3
+    assert 'id="okf-theme"' in html
+    assert 'aria-haspopup="true"' in html
+    assert 'class="okf-appearance__menu"' in html
+    for setk in ("family", "mode", "contrast", "border"):
+        assert f'data-okf-set="{setk}"' in html, f"missing {setk} radiogroup"
+    for val in ("technical", "swiss", "light", "dark", "auto",
+                "high", "soft", "on", "muted", "off"):
+        assert f'data-okf-val="{val}"' in html, f"missing option {val}"
+    # P1-3 topbar contract survives.
+    assert 'role="search"' in html
+    assert ">Graph<" in html
+
+
 def test_p1_3_spa_concept_nav_urls_extensionless(
     tiny_good_bundle: _Path,
 ) -> None:
