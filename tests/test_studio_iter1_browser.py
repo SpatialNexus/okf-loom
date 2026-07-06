@@ -2386,3 +2386,25 @@ def test_agent_activity_panel_has_unique_sections(server_url: str, page) -> None
         "CRI3-007 'View full history in Changes' link missing from the "
         "agent-activity panel's recent-writes section"
     )
+
+
+def test_appearance_menu_sets_contrast_border_and_theme(server_url, page):
+    """Round 2 §5.3: the Appearance popover drives contrast/border/theme + persists."""
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector("#okf-theme", timeout=10000).click()
+    page.wait_for_selector(".okf-appearance__menu:not([hidden])", timeout=5000)
+    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") == "soft"
+    assert page.evaluate("localStorage.getItem('okf-contrast')") == "soft"
+    page.click('.okf-appearance__opt[data-okf-set="border"][data-okf-val="off"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-border')") == "off"
+    assert page.evaluate("localStorage.getItem('okf-border')") == "off"
+    page.click('.okf-appearance__opt[data-okf-set="family"][data-okf-val="technical"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')").startswith("technical")
+    assert page.get_attribute(
+        '.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]', "aria-checked") == "true"
+    # Back to defaults removes the attr + key (default = absent).
+    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="high"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") is None
+    assert page.evaluate("localStorage.getItem('okf-contrast')") is None

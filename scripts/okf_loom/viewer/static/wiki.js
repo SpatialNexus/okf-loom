@@ -45,14 +45,8 @@
     if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
     if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
-    if (themeBtn) {
-      themeBtn.textContent = THEME_GLYPHS[t];
-      themeBtn.setAttribute("title", "Theme: " + t + " — click to cycle");
-      themeBtn.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      // The button cycles four themes now; it is no longer a two-state
-      // toggle, so aria-pressed would be dishonest.
-      themeBtn.removeAttribute("aria-pressed");
-    }
+    // (Round 2) The trigger is the Appearance popover ("Aa ▾"), not a glyph —
+    // nothing to sync here; the popover reflects state via reflectAppearance().
   }
   // Honour saved preference on load (overrides server-side default).
   try {
@@ -66,12 +60,105 @@
       applyTheme(resolveAuto(), false);
     }
   } catch (e) {}
-  if (themeBtn) {
-    themeBtn.addEventListener("click", function () {
-      var next = (THEMES.indexOf(currentTheme()) + 1) % THEMES.length;
-      applyTheme(THEMES[next]);
-    });
+  // ---- Appearance menu (Round 2 §5.3) --------------------------------
+  // Consolidates family/mode/contrast/border. Wiring lives here because the
+  // theme setter applyTheme is IIFE-local. contrast/border are applied
+  // POST-paint from localStorage (no pre-paint script exists; inline scripts
+  // are CSP-blocked on 4/5 templates) — same timing as the theme read above.
+  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
+  var apMenu = document.getElementById("okf-appearance-menu");
+  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
+
+  function applyModifier(kind, val, persist) {
+    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
+    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
+    var def = kind === "contrast" ? "high" : "on";   // default = attribute absent
+    if (val && val !== def) document.documentElement.setAttribute(attr, val);
+    else document.documentElement.removeAttribute(attr);
+    if (persist !== false) {
+      try {
+        if (val && val !== def) localStorage.setItem(key, val);
+        else localStorage.removeItem(key);
+      } catch (e) {}
+    }
   }
+  // Apply persisted modifiers now (post-paint; mirrors the theme read above).
+  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
+  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
+
+  function currentFamily() {
+    return currentTheme().indexOf("technical") === 0 ? "technical" : "swiss";
+  }
+  function currentMode() {
+    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
+    if (!s || THEMES.indexOf(s) < 0) return "auto";
+    return s.indexOf("dark") >= 0 ? "dark" : "light";
+  }
+  function resolveAutoFamily(fam) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return fam + (dark ? "-dark" : "-light");
+  }
+  function setFamily(fam) {
+    if (currentMode() === "auto") applyTheme(resolveAutoFamily(fam), false); // stay auto, respect family
+    else applyTheme(fam + "-" + currentMode());
+  }
+  function setMode(mode) {
+    if (mode === "auto") {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      applyTheme(resolveAutoFamily(currentFamily()), false);
+    } else applyTheme(currentFamily() + "-" + mode);
+  }
+
+  function reflectAppearance() {
+    if (!apMenu) return;
+    var st = {
+      family: currentFamily(), mode: currentMode(),
+      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
+      border: document.documentElement.getAttribute("data-okf-border") || "on",
+    };
+    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
+    for (i = 0; i < opts.length; i++) {
+      o = opts[i];
+      o.setAttribute("aria-checked",
+        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
+    }
+  }
+  function openAppearance() {
+    if (!apMenu) return;
+    apMenu.hidden = false;
+    if (themeBtn) themeBtn.setAttribute("aria-expanded", "true");
+    reflectAppearance();
+  }
+  function closeAppearance() {
+    if (!apMenu) return;
+    apMenu.hidden = true;
+    if (themeBtn) themeBtn.setAttribute("aria-expanded", "false");
+  }
+
+  if (themeBtn) themeBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (apMenu && apMenu.hidden) openAppearance(); else closeAppearance();
+  });
+  if (apMenu) apMenu.addEventListener("click", function (e) {
+    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
+    if (!opt) return;
+    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
+    if (k === "family") setFamily(v);
+    else if (k === "mode") setMode(v);
+    else applyModifier(k, v);            // contrast | border
+    reflectAppearance();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && apMenu && !apMenu.hidden) {
+      closeAppearance();
+      if (themeBtn) themeBtn.focus();
+    }
+  });
+  document.addEventListener("click", function (e) {
+    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) closeAppearance();
+  });
+  reflectAppearance();
 
   // ---- Static-mode detection (P2-65) -----------------------------------
   // The server emits data-okf-enhance="1" for spa/serve and "0" for static
