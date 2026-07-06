@@ -742,6 +742,18 @@
 .okf-change__undo:disabled { opacity: 0.5; cursor: not-allowed; }
 .okf-change--group { background: var(--okf-accent-bg); border-radius: var(--okf-radius-sm); padding: var(--okf-space-2); margin: var(--okf-space-1) 0; border: 1px solid var(--okf-accent); }
 
+/* Round 2 §6.4: on-demand doc diff in the Changes tab. The diff TABLE reuses
+ * the existing .okf-conflict__diff-table styles; these style the trigger +
+ * the expandable container. */
+.okf-change__diffbtn {
+  padding: 2px 8px; font: inherit; font-size: var(--okf-text-xs);
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-elev); color: var(--okf-fg-muted); cursor: pointer;
+}
+.okf-change__diffbtn:hover { color: var(--okf-fg); border-color: var(--okf-border-strong); }
+.okf-change__diff { margin-top: var(--okf-space-2); max-height: 320px; overflow: auto; }
+
 /* Comment actions + threading */
 .okf-comment__actions { display: flex; gap: var(--okf-space-1); margin-top: var(--okf-space-1); }
 .okf-comment__action {

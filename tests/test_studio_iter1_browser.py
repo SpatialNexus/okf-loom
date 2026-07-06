@@ -2551,3 +2551,26 @@ def test_quick_action_run_posts_directive(server_url, page) -> None:
     ) as req:
         page.query_selector(".okf-panel__intent-run").click()
     assert req.value is not None
+
+
+# ---------------------------------------------------------------------------
+# Round 2 §6.4b - on-demand doc diff in the Changes tab
+# ---------------------------------------------------------------------------
+
+
+def test_changes_row_offers_view_diff_when_revs_resolvable(server_url, page) -> None:
+    """Round 2 §6.4: a change row with detail.before + rev exposes a View diff
+    button wired to the shared /__diff renderer."""
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    has_btn = page.evaluate("""() => {
+      const s = window.okfLoomStudio;
+      if (!s || typeof s._changeRow !== 'function') return null;
+      const row = s._changeRow({
+        type: 'changed', ids: ['tables/orders'], rev: 'newrev0000',
+        detail: { before: 'oldrev0000', before_concept: 'tables/orders' },
+        actor: 'agent', ts: new Date().toISOString(),
+      });
+      return !!(row && row.querySelector('.okf-change__diffbtn'));
+    }""")
+    assert has_btn is True

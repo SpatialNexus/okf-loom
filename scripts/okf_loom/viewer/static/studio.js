@@ -3028,7 +3028,30 @@
       undo.addEventListener("click", () => undoOne(r, undo));
       actions.appendChild(undo);
     }
+    // Round 2 §6.4: on-demand doc diff. The change event already carries both
+    // revs (detail.before = prior content-hash rev; rev = new), so reuse the
+    // conflict modal's diff renderer without scanning history. Snapshots older
+    // than the 50-per-concept ring return 404 → renderDiffInto shows it.
+    const diffConcept = (r.detail && r.detail.before_concept) || (r.ids && r.ids[0]);
+    let diffWrap = null;
+    if (diffConcept && r.detail && r.detail.before && r.rev) {
+      diffWrap = el("div", { class: "okf-change__diff", hidden: "" });
+      const diffBtn = el("button", { type: "button", class: "okf-change__diffbtn",
+        "aria-expanded": "false", text: "View diff" });
+      diffBtn.addEventListener("click", () => {
+        if (diffWrap.hasAttribute("hidden")) {
+          diffWrap.removeAttribute("hidden");
+          diffBtn.setAttribute("aria-expanded", "true");
+          renderDiffInto(diffWrap, { concept: diffConcept, from: r.detail.before, to: r.rev });
+        } else {
+          diffWrap.setAttribute("hidden", "");
+          diffBtn.setAttribute("aria-expanded", "false");
+        }
+      });
+      actions.appendChild(diffBtn);
+    }
     row.appendChild(actions);
+    if (diffWrap) row.appendChild(diffWrap);
     return row;
   }
 
@@ -3983,6 +4006,56 @@
     });
   }
 
+  // Round 2 §6.4: shared diff renderer. Fetches /__diff for (concept, from, to)
+  // and renders the line table into `container`. Extracted from the conflict
+  // modal's "View diff" so the Changes tab can reuse it on demand (the modal's
+  // Keep-mine/Take-agent resolution actions stay modal-only). tokenFetch is
+  // required by the server (403 otherwise). Returns a Promise.
+  async function renderDiffInto(container, opts) {
+    opts = opts || {};
+    container.innerHTML = "";
+    const placeholder = el("div", { class: "okf-conflict__diff-loading", text: "Loading diff…" });
+    container.appendChild(placeholder);
+    try {
+      const concept = encodeURIComponent(String(opts.concept || ""));
+      const fromRev = encodeURIComponent(String(opts.from || ""));
+      const toRev = encodeURIComponent(String(opts.to || ""));
+      const res = await tokenFetch(
+        "/__diff?concept=" + concept + "&from=" + fromRev + "&to=" + toRev,
+        { headers: { Accept: "application/json" } },
+      );
+      const payload = await res.json();
+      placeholder.remove();
+      if (!payload || payload.ok === false) {
+        container.appendChild(el("p", { class: "okf-conflict__diff-empty",
+          text: payload && payload.error ? payload.error : "Diff unavailable." }));
+        return;
+      }
+      const rows = Array.isArray(payload.diff) ? payload.diff : [];
+      if (!rows.length) {
+        container.appendChild(el("p", { class: "okf-conflict__diff-empty", text: "No textual differences." }));
+        return;
+      }
+      const table = el("table", { class: "okf-conflict__diff-table" });
+      const tbody = el("tbody");
+      rows.forEach((row) => {
+        const tr = el("tr", { class: "okf-conflict__diff-row okf-conflict__diff-row--" + (row.kind || "ctx") });
+        tr.appendChild(el("td", { class: "okf-conflict__diff-num", text: String(row.num != null ? row.num : "") }));
+        tr.appendChild(el("td", { class: "okf-conflict__diff-kind", text: row.kind === "add" ? "+" : (row.kind === "del" ? "-" : " ") }));
+        const td = el("td", { class: "okf-conflict__diff-text" });
+        td.textContent = String(row.text != null ? row.text : "");
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      container.appendChild(table);
+    } catch (e) {
+      placeholder.remove();
+      container.appendChild(el("p", { class: "okf-conflict__diff-empty",
+        text: "Diff fetch failed: " + (e && e.message ? e.message : String(e)) }));
+    }
+  }
+
   function _buildConflictModal() {
     const overlay = el("div", {
       class: "okf-conflict-overlay", hidden: "",
@@ -4047,58 +4120,16 @@
     // comment).
     viewBtn.addEventListener("click", async () => {
       viewBtn.disabled = true;
-      diffPanel.innerHTML = "";
       diffPanel.removeAttribute("hidden");
-      const placeholder = el("div", { class: "okf-conflict__diff-loading", text: "Loading diff…" });
-      diffPanel.appendChild(placeholder);
       try {
         const { data: cdata } = conflictState._retryArgs;
-        const concept = encodeURIComponent(String(cdata.concept || ""));
-        const fromRev = encodeURIComponent(String(cdata.expected_rev || ""));
-        const toRev = encodeURIComponent(String(cdata.current_rev || ""));
-        const res = await tokenFetch(
-          "/__diff?concept=" + concept + "&from=" + fromRev + "&to=" + toRev,
-          { headers: { Accept: "application/json" } },
-        );
-        const payload = await res.json();
-        placeholder.remove();
-        if (!payload || payload.ok === false) {
-          diffPanel.appendChild(el("p", {
-            class: "okf-conflict__diff-empty",
-            text: payload && payload.error ? payload.error : "Diff unavailable.",
-          }));
-          return;
-        }
-        const rows = Array.isArray(payload.diff) ? payload.diff : [];
-        if (!rows.length) {
-          diffPanel.appendChild(el("p", {
-            class: "okf-conflict__diff-empty",
-            text: "No textual differences.",
-          }));
-          return;
-        }
-        const table = el("table", { class: "okf-conflict__diff-table" });
-        const tbody = el("tbody");
-        rows.forEach((row) => {
-          const tr = el("tr", { class: "okf-conflict__diff-row okf-conflict__diff-row--" + (row.kind || "ctx") });
-          tr.appendChild(el("td", { class: "okf-conflict__diff-num", text: String(row.num != null ? row.num : "") }));
-          tr.appendChild(el("td", { class: "okf-conflict__diff-kind", text: row.kind === "add" ? "+" : (row.kind === "del" ? "-" : " ") }));
-          const td = el("td", { class: "okf-conflict__diff-text" });
-          td.textContent = String(row.text != null ? row.text : "");
-          tr.appendChild(td);
-          tbody.appendChild(tr);
+        // Reuse the shared renderer (Round 2 §6.4 extraction). Same DOM as
+        // before — the iter1 conflict-modal tests exercise this path.
+        await renderDiffInto(diffPanel, {
+          concept: cdata.concept, from: cdata.expected_rev, to: cdata.current_rev,
         });
-        table.appendChild(tbody);
-        diffPanel.appendChild(table);
-      } catch (e) {
-        placeholder.remove();
-        diffPanel.appendChild(el("p", {
-          class: "okf-conflict__diff-empty",
-          text: "Diff fetch failed: " + (e && e.message ? e.message : String(e)),
-        }));
       } finally {
-        // Allow re-clicking to refresh.
-        setTimeout(() => { viewBtn.disabled = false; }, 500);
+        setTimeout(() => { viewBtn.disabled = false; }, 500);  // allow re-click to refresh
       }
     });
 
@@ -4356,6 +4387,7 @@
     ctx,
     // Test/debug helpers.
     _toast: toast, _loadComments: loadComments, _renderChangeList: renderChangeList,
+    _changeRow: changeRow,
     _showConflictModal: (payload) => showConflictModal({
       data: payload,
       url: "/__apply",
