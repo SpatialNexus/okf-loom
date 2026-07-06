@@ -679,6 +679,53 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
  * so the input + keycap are flex siblings in the controls row). */
 .okf-search-kbd { margin-left: calc(-1 * var(--okf-space-2)); align-self: center; }
 
+/* ---- Appearance menu (Round 2 §5.3) ---------------------------------- */
+.okf-appearance { position: relative; display: inline-flex; }
+.okf-appearance__trigger {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 4px 10px;
+  font: inherit; font-size: var(--okf-text-sm); line-height: 1.2;
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-elev); color: var(--okf-fg);
+  cursor: pointer;
+}
+.okf-appearance__trigger:hover { border-color: var(--okf-accent); color: var(--okf-accent); }
+.okf-appearance__trigger:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+.okf-appearance__menu {
+  position: absolute; top: calc(100% + var(--okf-space-1)); right: 0;
+  z-index: 30;                       /* above topbar chrome + content */
+  display: flex; flex-direction: column; gap: var(--okf-space-3);
+  min-width: 220px;
+  padding: var(--okf-space-3) var(--okf-space-4);
+  background: var(--okf-bg-elev);
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius);
+  box-shadow: var(--okf-pop-shadow);
+}
+.okf-appearance__menu[hidden] { display: none; }
+.okf-appearance__group {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--okf-space-1);
+}
+.okf-appearance__label {
+  flex: 0 0 100%;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--okf-fg-muted); margin-bottom: 2px;
+}
+.okf-appearance__opt {
+  padding: 4px 10px; font: inherit; font-size: var(--okf-text-sm);
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  background: transparent; color: var(--okf-fg-muted); cursor: pointer;
+}
+.okf-appearance__opt:hover { color: var(--okf-fg); border-color: var(--okf-border-strong); }
+.okf-appearance__opt[aria-checked="true"] {
+  color: var(--okf-active-fg);
+  background: var(--okf-active-fill);
+  border-color: var(--okf-active-border);
+}
+.okf-appearance__opt:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+
 /* ---- Two-pane layout (graph view, single-file) ------------------------ */
 .okf-layout {
   display: flex;
