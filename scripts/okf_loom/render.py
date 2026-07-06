@@ -15,7 +15,7 @@ watchdog, atomic writes for build output.
 """
 from __future__ import annotations
 
-import html
+import html as _html
 import json
 import os
 import re
@@ -1235,7 +1235,7 @@ def _build_toc_html(body_html: str) -> str:
     heads = _TOC_HEADING_RE.findall(body_html)
     items: list[str] = []
     for level, slug, inner in heads:
-        text = html.unescape(_TOC_TAG_RE.sub("", inner)).strip()  # unescape (inner is already-escaped HTML) so _esc() escapes exactly once
+        text = _html.unescape(_TOC_TAG_RE.sub("", inner)).strip()  # unescape (inner is already-escaped HTML) so _esc() escapes exactly once
         if not text:
             continue
         items.append(
