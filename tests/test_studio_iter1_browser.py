@@ -2574,3 +2574,99 @@ def test_changes_row_offers_view_diff_when_revs_resolvable(server_url, page) -> 
       return !!(row && row.querySelector('.okf-change__diffbtn'));
     }""")
     assert has_btn is True
+
+
+def test_changes_row_view_diff_toggles_and_guards_reentrant_click(server_url, page) -> None:
+    """Round 2 review-gate fix (§6.4b Finding 1 + 2): drive the REAL changeRow
+    click -> toggle -> renderDiffInto wiring (the presence-only test above
+    never clicks). Mounts a synthetic change row via the ``_changeRow`` seam
+    into the live DOM, then proves:
+
+    1. Toggle wiring: clicking ``.okf-change__diffbtn`` reveals
+       ``.okf-change__diff`` + flips ``aria-expanded`` to "true", and fires a
+       request to ``/__diff`` scoped to THIS row's own concept/from/to
+       (``detail.before`` -> ``rev``). A second click (after the button
+       re-enables) collapses it again.
+    2. The re-entrancy guard: the button must be ``disabled`` for the
+       duration of the in-flight ``/__diff`` fetch. ``page.route`` holds the
+       response deliberately unfulfilled so the in-flight window is fully
+       controlled (not a wall-clock guess), then releases it explicitly; the
+       button must re-enable once the response lands. Before the fix,
+       ``diffBtn`` never disabled, so this assertion fails against the
+       unfixed code (RED for the right reason); the modal's ``viewBtn``
+       already has this guard (studio.js ~4122/4132) -- this mirrors it for
+       the Changes-tab button.
+
+    The synthetic row's revs are fake, so /__diff (mocked here) can't return
+    a real table -- rendered diff CONTENT is the conflict-modal tests' job
+    (test_conflict_modal_view_diff_fetches_diff_endpoint et al.); this test
+    only asserts the toggle, the scoped request, and the disable/re-enable.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+
+    # Hold the /__diff response pending (don't fulfill yet) so the in-flight
+    # window is fully deterministic -- we control exactly when it resolves,
+    # rather than racing a wall-clock guess against Playwright's sync-API
+    # dispatcher (a blocking time.sleep() *inside* the route handler was
+    # tried first and found to stall that single dispatcher thread, which
+    # also delays delivery of expect_request/locator polls to the test until
+    # the handler returns -- masking the very state transition under test).
+    pending: dict = {}
+
+    def _capture_diff(route) -> None:
+        pending["route"] = route
+
+    page.route("**/__diff*", _capture_diff)
+
+    # The _changeRow seam returns a DETACHED node -- mount it into the live
+    # DOM so Playwright can actually click it.
+    page.evaluate("""() => {
+      const s = window.okfLoomStudio;
+      const row = s._changeRow({
+        type: 'changed', ids: ['tables/orders'], rev: 'newrev0000',
+        detail: { before: 'oldrev0000', before_concept: 'tables/orders' },
+        actor: 'agent', ts: new Date().toISOString(),
+      });
+      row.id = 'okf-test-change-row';
+      document.body.appendChild(row);
+    }""")
+
+    btn = page.locator("#okf-test-change-row .okf-change__diffbtn")
+    diff_wrap = page.locator("#okf-test-change-row .okf-change__diff")
+
+    def _is_this_rows_diff_request(request) -> bool:
+        # Pin the path AND the (concept, from, to) query params to THIS
+        # row's own detail.before/rev -- not just any /__diff call.
+        return (
+            "/__diff" in request.url
+            and "concept=tables%2Forders" in request.url
+            and "from=oldrev0000" in request.url
+            and "to=newrev0000" in request.url
+        )
+
+    # --- expand: toggle wiring + the scoped request ------------------------
+    with page.expect_request(_is_this_rows_diff_request, timeout=4000):
+        btn.click()
+
+    expect(diff_wrap).to_be_visible()
+    expect(btn).to_have_attribute("aria-expanded", "true")
+
+    # --- Finding-1 guard: disabled while the fetch is in flight -------------
+    # The route is captured but deliberately NOT fulfilled yet, so the
+    # request is still genuinely in flight from the browser's perspective.
+    expect(btn).to_be_disabled(timeout=1000)
+    # Hold it a while longer to prove the guard isn't a one-tick flash --
+    # still disabled well after the click, as long as the response hasn't
+    # landed.
+    time.sleep(0.3)
+    expect(btn).to_be_disabled()
+
+    # --- release the held response; the button re-enables -------------------
+    pending["route"].fulfill(status=200, json={"ok": True, "diff": []})
+    expect(btn).to_be_enabled(timeout=4000)
+
+    # --- collapse: second click, now that it's enabled again ----------------
+    btn.click()
+    expect(diff_wrap).to_be_hidden()
+    expect(btn).to_have_attribute("aria-expanded", "false")

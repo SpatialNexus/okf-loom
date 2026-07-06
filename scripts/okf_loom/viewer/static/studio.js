@@ -3042,7 +3042,15 @@
         if (diffWrap.hasAttribute("hidden")) {
           diffWrap.removeAttribute("hidden");
           diffBtn.setAttribute("aria-expanded", "true");
-          renderDiffInto(diffWrap, { concept: diffConcept, from: r.detail.before, to: r.rev });
+          // Round 2 §6.4 review-gate fix: guard against overlapping renders.
+          // Without this, rapid expand->collapse->expand within one /__diff
+          // round-trip starts a second renderDiffInto against the same
+          // diffWrap before the first settles (a slower/erroring call can
+          // clobber a faster/successful render). Mirrors the conflict
+          // modal's viewBtn precedent (disable for the fetch duration).
+          diffBtn.disabled = true;
+          renderDiffInto(diffWrap, { concept: diffConcept, from: r.detail.before, to: r.rev })
+            .finally(() => { diffBtn.disabled = false; });
         } else {
           diffWrap.setAttribute("hidden", "");
           diffBtn.setAttribute("aria-expanded", "false");
