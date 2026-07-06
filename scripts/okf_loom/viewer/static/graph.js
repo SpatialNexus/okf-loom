@@ -223,17 +223,14 @@
     return common;
   }
 
-  function applyTheme(t) {
+  var onThemeApplied = null;   // registered by init() → syncLabelColour (canvas re-sync)
+  function applyTheme(t, persist) {
     if (THEMES.indexOf(t) < 0) t = "light";
     document.documentElement.setAttribute("data-theme", t);
-    try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {}
-    if (themeBtn) {
-      themeBtn.textContent = THEME_GLYPHS[t];
-      themeBtn.setAttribute("title", "Theme: " + t + " — click to cycle");
-      themeBtn.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      // Five-way cycle, not a two-state toggle — aria-pressed would lie.
-      themeBtn.removeAttribute("aria-pressed");
-    }
+    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
+    // (Round 2) The trigger is the Appearance popover ("Aa ▾") — no glyph to
+    // sync. Any theme change recolours the canvas through onThemeApplied.
+    if (onThemeApplied) onThemeApplied();
   }
 
   // ---- Luminance-aware chip foreground (P0-4 / P2-23) ------------------
@@ -366,10 +363,91 @@
       else applyTheme(INITIAL_THEME);
     }
   } catch (e) { applyTheme(INITIAL_THEME); }
-  if (themeBtn) themeBtn.addEventListener("click", function () {
-    var cur = document.documentElement.getAttribute("data-theme") || "light";
-    applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+  // ---- Appearance menu (Round 2 §5.3) --------------------------------
+  // Same popover as wiki.js, wired here for the graph + single-file viewers
+  // (graph.js is inlined into single_file). Reuses graph's applyTheme (which
+  // drives the canvas re-sync via onThemeApplied). contrast/border apply
+  // post-paint and do NOT reach the Cytoscape canvas (documented P2 limit).
+  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
+  var apMenu = document.getElementById("okf-appearance-menu");
+  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
+
+  function applyModifier(kind, val, persist) {
+    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
+    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
+    var def = kind === "contrast" ? "high" : "on";
+    if (val && val !== def) document.documentElement.setAttribute(attr, val);
+    else document.documentElement.removeAttribute(attr);
+    if (persist !== false) {
+      try {
+        if (val && val !== def) localStorage.setItem(key, val);
+        else localStorage.removeItem(key);
+      } catch (e) {}
+    }
+  }
+  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
+  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
+
+  function apFamily() {
+    return (document.documentElement.getAttribute("data-theme") || "swiss-light")
+      .indexOf("technical") === 0 ? "technical" : "swiss";
+  }
+  function apMode() {
+    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+    if (!s || THEMES.indexOf(s) < 0) return "auto";
+    return s.indexOf("dark") >= 0 ? "dark" : "light";
+  }
+  function apAutoFamily(fam) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return fam + (dark ? "-dark" : "-light");
+  }
+  function apSetFamily(fam) {
+    if (apMode() === "auto") applyTheme(apAutoFamily(fam), false);
+    else applyTheme(fam + "-" + apMode());
+  }
+  function apSetMode(mode) {
+    if (mode === "auto") {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      applyTheme(apAutoFamily(apFamily()), false);
+    } else applyTheme(apFamily() + "-" + mode);
+  }
+  function apReflect() {
+    if (!apMenu) return;
+    var st = {
+      family: apFamily(), mode: apMode(),
+      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
+      border: document.documentElement.getAttribute("data-okf-border") || "on",
+    };
+    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
+    for (i = 0; i < opts.length; i++) {
+      o = opts[i];
+      o.setAttribute("aria-checked",
+        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
+    }
+  }
+  function apOpen() { if (apMenu) { apMenu.hidden = false; if (themeBtn) themeBtn.setAttribute("aria-expanded", "true"); apReflect(); } }
+  function apClose() { if (apMenu) { apMenu.hidden = true; if (themeBtn) themeBtn.setAttribute("aria-expanded", "false"); } }
+
+  if (themeBtn) themeBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (apMenu && apMenu.hidden) apOpen(); else apClose();
   });
+  if (apMenu) apMenu.addEventListener("click", function (e) {
+    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
+    if (!opt) return;
+    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
+    if (k === "family") apSetFamily(v);
+    else if (k === "mode") apSetMode(v);
+    else applyModifier(k, v);
+    apReflect();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && apMenu && !apMenu.hidden) { apClose(); if (themeBtn) themeBtn.focus(); }
+  });
+  document.addEventListener("click", function (e) {
+    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) apClose();
+  });
+  apReflect();
 
   // ---- Bundle acquisition ------------------------------------------------
   function acquireBundle() {
@@ -1182,8 +1260,10 @@
       syncBridgeColour();
     }
     syncLabelColour();
-    var themeBtn2 = document.getElementById("okf-theme");
-    if (themeBtn2) themeBtn2.addEventListener("click", syncLabelColour);
+    // (Round 2) Any applyTheme() recolours the canvas via this hook — so a
+    // theme change from the Appearance menu (or OS) re-syncs, even though the
+    // trigger click now opens the popover instead of cycling.
+    onThemeApplied = syncLabelColour;
     // P3-11: keep Cytoscape label colours in sync with OS colour-scheme.
     if (window.matchMedia) {
       var colourSchemeMq = window.matchMedia("(prefers-color-scheme: dark)");

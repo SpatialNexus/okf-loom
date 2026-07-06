@@ -241,6 +241,18 @@ def test_graph_renders(server_url: str, page) -> None:
     )
 
 
+def test_graph_appearance_menu_sets_contrast_and_theme(server_url, page):
+    """Round 2: the graph page's Appearance popover drives contrast + theme."""
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    page.wait_for_selector("#okf-graph", timeout=15000)
+    page.wait_for_selector("#okf-theme", timeout=10000).click()
+    page.wait_for_selector(".okf-appearance__menu:not([hidden])", timeout=5000)
+    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") == "soft"
+    page.click('.okf-appearance__opt[data-okf-set="mode"][data-okf-val="dark"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')").endswith("-dark")
+
+
 def test_concept_page_loads(server_url: str, page) -> None:
     """A concept page renders its H1 title and a non-empty body."""
     page.goto(f"{server_url}/tables/orders", wait_until="domcontentloaded")

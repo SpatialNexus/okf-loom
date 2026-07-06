@@ -240,14 +240,8 @@
     if (!opts || opts.persist !== false) {
       try { localStorage.setItem("okf-theme", t); } catch (e) {}
     }
-    // Keep the existing topbar cycle button (wiki.js) in sync if present.
-    const tb = document.getElementById("okf-theme");
-    if (tb) {
-      tb.textContent = THEME_GLYPHS[t];
-      tb.setAttribute("title", "Theme: " + t + " — click to cycle");
-      tb.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      tb.removeAttribute("aria-pressed");
-    }
+    // (Round 2) The topbar control is the Appearance popover ("Aa ▾"), wired by
+    // wiki.js — no glyph to sync here (studio.js does not own the popover).
   }
   function currentThemeChoice() {
     const t = document.documentElement.getAttribute("data-theme");
