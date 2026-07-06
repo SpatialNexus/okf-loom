@@ -628,6 +628,8 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
   align-items: center;
   gap: var(--okf-space-2);
   flex-wrap: nowrap;
+  margin-left: auto;   /* consistency: controls sit top-RIGHT on every page —
+                          index/search/graph have no breadcrumb to push them. */
 }
 .okf-topbar__controls input[type="search"],
 .okf-topbar__controls select,

@@ -2447,3 +2447,11 @@ def test_footer_studio_button_on_mobile_concept_opens_comments(server_url, page)
     # carries aria-selected (rail buttons use aria-pressed), so this is unambiguous.
     active = page.wait_for_selector('.okf-panel__tab[aria-selected="true"]', timeout=5000)
     assert active.text_content() == "Comments"
+
+
+def test_topbar_controls_right_aligned_on_index(server_url, page):
+    """Consistency: search/Graph/Index/Aa sit top-RIGHT on the index, matching concept pages."""
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{server_url}/", wait_until="load")
+    left = page.eval_on_selector(".okf-topbar__controls", "el => el.getBoundingClientRect().left")
+    assert left > 720, f"topbar controls should be right-aligned on index (left>720 of 1440), got {left}"
