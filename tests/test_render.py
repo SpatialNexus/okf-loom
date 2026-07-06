@@ -1750,7 +1750,10 @@ def test_p3_3_live_search_highlights_query_terms(tiny_good_bundle):
         b, mode="serve", name=b.name, config={}, query="users",
         results=[{"title": "Users", "concept_id": "tables/users", "id": "tables/users",
                   "description": "The users table stores users.", "type": "BigQuery Table"}])
-    assert "<mark>" in html, "query terms must be highlighted"
+    # <mark> must wrap the ACTUAL matched substring, not merely exist somewhere:
+    # the title (original case preserved) and the snippet term.
+    assert "<mark>Users</mark>" in html, "title term must be wrapped (case preserved)"
+    assert "<mark>users</mark>" in html, "snippet term must be wrapped exactly"
     assert 'class="okf-search-result__meta' in html, "live meta must survive"
 
 
@@ -1763,3 +1766,42 @@ def test_p3_3_live_search_tolerates_missing_fields(tiny_good_bundle):
         b, mode="static", name=b.name, config={}, query="orders",
         results=[{"title": "Orders", "concept_id": "c", "id": "c"}])
     assert 'class="okf-search-result"' in html  # no crash on missing fields
+
+
+def test_p3_3_live_search_does_not_shatter_entities(tiny_good_bundle):
+    """Round 2 §6.3: query terms are matched against the RAW text, so a term
+    that collides with an HTML entity NAME — "gt"/"amp", which an identifier
+    query like ``gt_flag``/``amp_events`` tokenizes to — must NOT land inside
+    an escaped ``&gt;``/``&amp;`` and shatter it. Data-catalog docs routinely
+    carry ``<`` / ``>`` / ``&`` (SQL comparisons, ``Q&A``, ``AT&T``). RED
+    against the entity-splitting bug (matching on the escaped string) that
+    Task 5's static highlighter would otherwise inherit."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="serve", name=b.name, config={}, query="gt_flag amp_events",
+        results=[{"title": "Cmp", "concept_id": "c", "id": "c",
+                  "description": "cost > 50, A & B"}])
+    snippet = html.split('class="okf-search-snippet">', 1)[1].split("</div>", 1)[0]
+    assert "&gt;" in snippet, f"&gt; entity shattered: {snippet!r}"
+    assert "&amp;" in snippet, f"&amp; entity shattered: {snippet!r}"
+    assert "&<mark>" not in snippet, f"<mark> spliced inside an entity: {snippet!r}"
+
+
+def test_p3_3_live_search_prefers_snippet_over_description(tiny_good_bundle):
+    """Round 2 §6.3 headline feature: when the backend supplies a match-centred
+    ``snippets`` excerpt, the renderer shows/highlights THAT (so the matched
+    term is visible) rather than the curated ``description``, which frequently
+    lacks the query term. Exercises the snippet-source preference line (no
+    prior test carried a ``snippets`` key, so it always fell through to
+    ``description``)."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="serve", name=b.name, config={}, query="keyed",
+        results=[{"title": "Users", "concept_id": "c", "id": "c",
+                  "description": "The users table.",
+                  "snippets": ["A row per user, keyed by user_id."]}])
+    snippet = html.split('class="okf-search-snippet">', 1)[1].split("</div>", 1)[0]
+    assert "The users table." not in snippet, "fell back to description, not snippet"
+    assert "<mark>keyed</mark>" in snippet, "match-centred snippet term not highlighted"

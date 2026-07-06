@@ -2290,24 +2290,33 @@ _HIGHLIGHT_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def _highlight(text: str, query: str, *, limit: int = 200) -> str:
-    """Escape ``text``, truncate to ``limit``, and wrap query-term occurrences
-    in ``<mark>`` (Round 2 §6.3). Escaping happens FIRST; ``<mark>`` tags are
-    inserted around the already-escaped runs, so no user text can break out of
-    the markup (CSP-safe; mirrors the static-search.js ``highlight()``). Terms
-    are the query's word tokens (>=2 chars), matched case-insensitively."""
+    """Truncate ``text`` to ``limit`` and wrap query-term matches in ``<mark>``
+    (Round 2 §6.3). Terms are matched against the RAW (pre-escape) text; each
+    segment — the gaps AND each matched run — is then HTML-escaped
+    independently via ``_esc`` and the match is wrapped in a LITERAL ``<mark>``.
+    Matching on the raw text (never the escaped string) is what keeps HTML
+    entities intact: a query term that collides with an entity name (e.g.
+    "gt"/"amp", which an identifier query like ``gt_flag``/``amp_events``
+    tokenizes to) can no longer land inside an escaped ``&gt;``/``&amp;`` and
+    shatter it. Every char of ``text`` is still escaped, so injected markup —
+    even a literal ``<mark>`` planted in the doc text — renders inert
+    (CSP-safe). This is the reference algorithm Task 5's static highlighter
+    mirrors. Terms are the query's word tokens (>=2 chars), matched
+    case-insensitively, longest-first so overlapping terms don't half-wrap."""
     s = str(text or "")[:limit]
-    esc = _esc(s)
-    terms = {m.group(0).lower() for m in _HIGHLIGHT_WORD_RE.finditer(query or "")}
-    terms = [t for t in terms if len(t) >= 2]
-    if not terms or not esc:
-        return esc
-    # Match on the escaped string; word tokens escape to themselves, so this is
-    # exact. Longest-first so overlapping terms don't half-wrap.
-    pat = re.compile(
-        "(" + "|".join(re.escape(_esc(t)) for t in sorted(terms, key=len, reverse=True)) + ")",
-        re.IGNORECASE,
-    )
-    return pat.sub(r"<mark>\1</mark>", esc)
+    terms = [t for t in _HIGHLIGHT_WORD_RE.findall((query or "").lower()) if len(t) >= 2]
+    if not terms:
+        return _esc(s)
+    terms.sort(key=len, reverse=True)  # longest-first so overlapping terms win
+    pat = re.compile("|".join(re.escape(t) for t in terms), re.IGNORECASE)
+    out: list[str] = []
+    last = 0
+    for m in pat.finditer(s):  # match on the RAW text, never the escaped string
+        out.append(_esc(s[last:m.start()]))  # escape the gap
+        out.append("<mark>" + _esc(m.group()) + "</mark>")  # escape+wrap the match
+        last = m.end()
+    out.append(_esc(s[last:]))  # escape the tail
+    return "".join(out)
 
 
 def _render_search_page(
