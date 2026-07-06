@@ -336,6 +336,35 @@
     document.createTextNode(" " + conceptCount + " concepts"),
   ]);
 
+  // Round 2 §6.4 / SPEC §3.5: validation count (ambient). Hidden until the
+  // read-only /__validate fetch resolves; refreshed on bundle changes.
+  const validationStatseg = el("span", { class: "okf-statseg okf-statseg--validation",
+    role: "status", "aria-live": "polite", hidden: "", title: "Bundle validation" }, [
+    el("span", { class: "okf-statseg__mark", "aria-hidden": "true", text: "◇" }),
+    document.createTextNode(" validating…"),
+  ]);
+  function refreshValidation() {
+    if (typeof tokenFetch !== "function") return;
+    tokenFetch("/__validate", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var label = d.error ? (d.error + " error" + (d.error === 1 ? "" : "s"))
+          : d.warning ? (d.warning + " warning" + (d.warning === 1 ? "" : "s"))
+          : "valid";
+        var mark = validationStatseg.querySelector(".okf-statseg__mark");
+        if (mark) mark.textContent = d.error ? "✕" : d.warning ? "!" : "✓";
+        validationStatseg.setAttribute("data-state", d.error ? "error" : d.warning ? "warn" : "ok");
+        while (validationStatseg.childNodes.length > 1) {
+          validationStatseg.removeChild(validationStatseg.lastChild);
+        }
+        validationStatseg.appendChild(document.createTextNode(" " + label));
+        validationStatseg.setAttribute("title", "Bundle validation: " + label);
+        validationStatseg.removeAttribute("hidden");
+      })
+      .catch(function () {});
+  }
+
   // Connection indicator (driven by live.js hub). iter1 CRI-015: aria-live
   // so "Reconnecting…" / "Live" / "Offline" state changes are announced to
   // assistive tech (presence + toasts already were; the conn chip was the
@@ -405,6 +434,7 @@
   // RIGHT (ambient): presence · ◆ N concepts · ● Live
   rightGroup.appendChild(presenceChip);
   if (conceptCount > 0) rightGroup.appendChild(conceptStatseg);
+  rightGroup.appendChild(validationStatseg);
   rightGroup.appendChild(connChip);
   bar.appendChild(leftGroup);
   bar.appendChild(el("span", { class: "okf-studio-bar__divider", "aria-hidden": "true" }));
@@ -3706,9 +3736,10 @@
       // still get their own toast, but a rapid stream no longer stacks 8.
       scheduleActivityToast(a);
     });
-    window.okfLoomLive.on("changed", (d) => { upsertEvent({ type: "changed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); });
-    window.okfLoomLive.on("created", (d) => { upsertEvent({ type: "created", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); });
-    window.okfLoomLive.on("removed", (d) => { upsertEvent({ type: "removed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); });
+    window.okfLoomLive.on("changed", (d) => { upsertEvent({ type: "changed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); refreshValidation(); });
+    window.okfLoomLive.on("created", (d) => { upsertEvent({ type: "created", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); refreshValidation(); });
+    window.okfLoomLive.on("removed", (d) => { upsertEvent({ type: "removed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); refreshValidation(); });
+    refreshValidation();   // Round 2 §6.4: initial validation count (rev-cached server-side, so repeats are cheap)
     window.okfLoomLive.on("resync", () => { loadComments(); });
     // INTENT5-001 / QUA5-002: comment_link consumer — upsert the event into
     // state.events so changeRow's lookup finds it and re-renders the back-link

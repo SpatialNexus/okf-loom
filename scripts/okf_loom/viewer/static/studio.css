@@ -102,6 +102,11 @@
 }
 .okf-statseg__mark { color: var(--okf-accent); }
 
+/* Round 2 §6.4: validation status chip states (ambient). */
+.okf-statseg--validation[data-state="ok"] { color: var(--okf-fg-muted); }
+.okf-statseg--validation[data-state="warn"] { color: var(--okf-warn, var(--okf-accent)); }
+.okf-statseg--validation[data-state="error"] { color: var(--okf-danger, #d64545); }
+
 /* Studio buttons reuse the topbar control look but a touch denser. */
 .okf-studiobtn {
   font: inherit;

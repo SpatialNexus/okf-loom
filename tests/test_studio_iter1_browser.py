@@ -2670,3 +2670,13 @@ def test_changes_row_view_diff_toggles_and_guards_reentrant_click(server_url, pa
     btn.click()
     expect(diff_wrap).to_be_hidden()
     expect(btn).to_have_attribute("aria-expanded", "false")
+
+
+def test_footer_shows_validation_count(server_url, page):
+    """Round 2 §6.4 / SPEC §3.5: the footer shows a validation-count chip fed
+    by the read-only /__validate endpoint."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    seg = page.wait_for_selector(".okf-statseg--validation:not([hidden])", timeout=10000)
+    assert seg is not None

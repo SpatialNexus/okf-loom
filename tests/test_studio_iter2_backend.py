@@ -418,6 +418,60 @@ def test_diff_rejects_bad_concept_id(bundle: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 §6.4: /__validate GET endpoint (read-only validation counts)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_requires_token(bundle: Path) -> None:
+    """Round 2 §6.4: /__validate is token-gated (same guard as /__diff)."""
+    port = _free_port()
+    proc = _start_server(bundle, port)
+    try:
+        _wait_for_server(port)
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/__validate")
+        try:
+            urllib.request.urlopen(req, timeout=5).read()
+            pytest.fail("expected 403")
+        except urllib.error.HTTPError as e:
+            assert e.code == 403, f"expected 403, got {e.code}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_validate_returns_counts_with_token(bundle: Path) -> None:
+    """Round 2 §6.4: with the token, /__validate returns {ok,error,warning}."""
+    import json
+    port = _free_port()
+    proc = _start_server(bundle, port)
+    try:
+        _wait_for_server(port)
+        token_path = bundle / ".okf-loom" / "session" / ".token"
+        deadline = time.time() + 5
+        while time.time() < deadline and not token_path.is_file():
+            time.sleep(0.1)
+        token = token_path.read_text(encoding="utf-8").strip()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/__validate",
+            headers={"X-OKF-Token": token},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read())
+        assert set(data) >= {"ok", "error", "warning"}
+        assert isinstance(data["error"], int) and isinstance(data["warning"], int)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+# ---------------------------------------------------------------------------
 # Cross-process SSE tail — CLI mutator events broadcast by serve
 # ---------------------------------------------------------------------------
 
