@@ -4186,14 +4186,12 @@
   }
 
   // ---- sidebar panel system (user-requested: collapsible, reorderable, resizable) ----
-  var SIDEBAR_KEY = "okf:sidebar";
   // Editorial Workbench §3.2: the persistent Diátaxis nav is the primary rail;
   // the in-page heading list moved to the pop-over Outline tab, so "sections"
   // is retired here. Related (local graph) + Quick Actions stack below the nav.
   // Quick-action "intents" moved OUT of the left nav into the Comments tab of
   // the studio dock (buildIntentsToolbar) — so the left column stays a clean
   // Diátaxis nav and the action buttons sit where they pre-fill the composer.
-  var SIDEBAR_PANELS = ["related"];
   var INTENTS = [
     { id: "add-section", label: "Add section", prompt: "Add a new section about" },
     { id: "split-doc", label: "Split document", prompt: "Split this document into" },
@@ -4201,23 +4199,9 @@
     { id: "enrich", label: "Enrich content", prompt: "Enrich this page with" },
   ];
 
-  function getSidebarState() {
-    try {
-      var s = JSON.parse(localStorage.getItem(SIDEBAR_KEY) || "{}");
-      if (!s.order || !Array.isArray(s.order)) s.order = SIDEBAR_PANELS.slice();
-      if (!s.collapsed) s.collapsed = {};
-      if (!s.width) s.width = 260;
-      return s;
-    } catch (e) { return { order: SIDEBAR_PANELS.slice(), collapsed: {}, width: 260 }; }
-  }
-  function saveSidebarState(s) {
-    try { localStorage.setItem(SIDEBAR_KEY, JSON.stringify(s)); } catch (e) {}
-  }
-
   function buildSidebarPanels() {
     var sidebar = $(".okf-page__sidebar");
     if (!sidebar) return;
-    var sbState = getSidebarState();
 
     // Capture the server-rendered nodes we must preserve (move the actual
     // nodes, keeping wiki.js event listeners): the primary Diátaxis nav rail
@@ -4241,137 +4225,11 @@
       sidebar.appendChild(related);
     }
 
-    // Build any remaining dynamic panels in saved order, below Related.
-    // "sections" (→ Outline tab), "intents" (→ Comments tab), and "related"
-    // (flat above, handled directly) are retired from the draggable-card
-    // path; skip them in any legacy saved order.
-    sbState.order.forEach(function (panelId) {
-      if (panelId === "sections" || panelId === "intents" || panelId === "related") return;
-      var panel = buildPanel(panelId, sbState, existingGraph);
-      if (panel) sidebar.appendChild(panel);
-    });
-
-    // Wire drag-and-drop reordering.
-    wireSidebarDnD(sidebar, sbState);
     // Re-render the local graph pills inside the new panel location so
     // wiki.js's click handlers (navigation) are properly bound.
     if (window.okfWiki && window.okfWiki.renderLocalGraph) {
       try { window.okfWiki.renderLocalGraph(); } catch (e) {}
     }
-  }
-
-  function buildPanel(panelId, sbState, existingGraph) {
-    var isCollapsed = !!sbState.collapsed[panelId];
-    var panel = el("div", {
-      class: "okf-sidebar-panel" + (isCollapsed ? " okf-sidebar-panel--collapsed" : ""),
-      "data-panel-id": panelId,
-      draggable: "true",
-    });
-    var header = el("div", { class: "okf-sidebar-panel__header" });
-    var toggle = el("button", {
-      class: "okf-sidebar-panel__toggle",
-      type: "button",
-      "aria-label": isCollapsed ? "Expand" : "Collapse",
-      text: isCollapsed ? "+" : "-",
-    });
-    toggle.addEventListener("click", function () {
-      var p = panel.classList.toggle("okf-sidebar-panel--collapsed");
-      toggle.textContent = p ? "+" : "-";
-      toggle.setAttribute("aria-label", p ? "Expand" : "Collapse");
-      sbState.collapsed[panelId] = p;
-      saveSidebarState(sbState);
-    });
-    header.appendChild(toggle);
-    header.appendChild(el("span", { class: "okf-sidebar-panel__title", text: sidebarPanelTitle(panelId) }));
-    panel.appendChild(header);
-
-    var body = el("div", { class: "okf-sidebar-panel__body" });
-    if (panelId === "related") {
-      // Move the actual DOM node to preserve event listeners on the
-      // local graph pills (buttons that navigate to concepts).
-      if (existingGraph) body.appendChild(existingGraph);
-    } else if (panelId === "sections") {
-      buildSectionsPanel(body);
-    } else if (panelId === "intents") {
-      buildIntentsPanel(body);
-    }
-    panel.appendChild(body);
-    return panel;
-  }
-
-  function sidebarPanelTitle(id) {
-    return ({ related: "Related", sections: "Sections", intents: "Quick Actions" })[id] || id;
-  }
-
-  function buildSectionsPanel(body) {
-    var headings = $$("h1, h2, h3, h4, h5, h6", $(".okf-page__body") || document);
-    if (headings.length === 0) {
-      body.appendChild(el("p", { class: "okf-fg-muted", text: "No sections." }));
-      return;
-    }
-    var ul = el("ul", { class: "okf-sidebar-toc" });
-    headings.forEach(function (h) {
-      var li = el("li", { class: "toc-" + h.tagName.toLowerCase() });
-      var a = el("a", { href: "#" + (h.id || ""), text: (h.textContent || "").trim().slice(0, 50) });
-      a.addEventListener("click", function (e) {
-        e.preventDefault();
-        if (h.id) {
-          var target = document.getElementById(h.id);
-          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-      });
-      li.appendChild(a);
-      ul.appendChild(li);
-    });
-    body.appendChild(ul);
-    wireTocScrollSpy(ul, headings);
-  }
-
-  // Phase 2: scroll-spy — the TOC entry whose section is currently on
-  // screen carries .is-active. One shared observer per panel build; the
-  // previous observer (pre-SSE-patch rebuild) is disconnected so patches
-  // don't stack observers.
-  var _tocObserver = null;
-  function wireTocScrollSpy(ul, headings) {
-    if (!("IntersectionObserver" in window)) return;
-    if (_tocObserver) { _tocObserver.disconnect(); _tocObserver = null; }
-    var links = $$("a", ul);
-    var byId = {};
-    links.forEach(function (a) {
-      var id = (a.getAttribute("href") || "").slice(1);
-      if (id) byId[id] = a;
-    });
-    function activate(id) {
-      links.forEach(function (a) { a.classList.remove("is-active"); });
-      if (byId[id]) byId[id].classList.add("is-active");
-    }
-    // Track which headings are intersecting; the topmost wins.
-    var visible = {};
-    _tocObserver = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (!en.target.id) return;
-        visible[en.target.id] = en.isIntersecting;
-      });
-      for (var i = 0; i < headings.length; i++) {
-        if (headings[i].id && visible[headings[i].id]) { activate(headings[i].id); return; }
-      }
-    }, { rootMargin: "-10% 0px -70% 0px" });
-    headings.forEach(function (h) { if (h.id) _tocObserver.observe(h); });
-  }
-
-  function buildIntentsPanel(body) {
-    var container = el("div", { class: "okf-sidebar-intents" });
-    INTENTS.forEach(function (intent) {
-      var btn = el("button", { class: "okf-sidebar-intent", type: "button", text: intent.label });
-      btn.addEventListener("click", function () {
-        // Pre-fill the comment composer with the intent prompt.
-        state.draftBody = intent.prompt + " ";
-        state.draftAnchor = { kind: "concept", ref: state.conceptId, concept: state.conceptId };
-        openPanel("comments", { focusComposer: true });
-      });
-      container.appendChild(btn);
-    });
-    body.appendChild(container);
   }
 
   // Editorial Workbench (revised): the quick-action directive buttons live at
@@ -4400,51 +4258,6 @@
       wrap.appendChild(btn);
     });
     return wrap;
-  }
-
-  function wireSidebarDnD(sidebar, sbState) {
-    var dragSrc = null;
-    sidebar.addEventListener("dragstart", function (e) {
-      var panel = e.target.closest(".okf-sidebar-panel");
-      if (!panel) return;
-      dragSrc = panel;
-      panel.classList.add("okf-sidebar-panel--dragging");
-      e.dataTransfer.effectAllowed = "move";
-    });
-    sidebar.addEventListener("dragend", function (e) {
-      var panel = e.target.closest(".okf-sidebar-panel");
-      if (panel) panel.classList.remove("okf-sidebar-panel--dragging");
-      $$(".okf-sidebar-panel--drag-target", sidebar).forEach(function (p) {
-        p.classList.remove("okf-sidebar-panel--drag-target");
-      });
-    });
-    sidebar.addEventListener("dragover", function (e) {
-      e.preventDefault();
-      var panel = e.target.closest(".okf-sidebar-panel");
-      if (!panel || panel === dragSrc) return;
-      $$(".okf-sidebar-panel--drag-target", sidebar).forEach(function (p) {
-        p.classList.remove("okf-sidebar-panel--drag-target");
-      });
-      panel.classList.add("okf-sidebar-panel--drag-target");
-    });
-    sidebar.addEventListener("drop", function (e) {
-      e.preventDefault();
-      var target = e.target.closest(".okf-sidebar-panel");
-      if (!target || !dragSrc || target === dragSrc) return;
-      // Insert dragSrc before or after target based on drop position.
-      var rect = target.getBoundingClientRect();
-      var after = (e.clientY - rect.top) > rect.height / 2;
-      if (after) {
-        target.parentNode.insertBefore(dragSrc, target.nextSibling);
-      } else {
-        target.parentNode.insertBefore(dragSrc, target);
-      }
-      // Save new order.
-      sbState.order = $$(".okf-sidebar-panel", sidebar).map(function (p) {
-        return p.getAttribute("data-panel-id");
-      });
-      saveSidebarState(sbState);
-    });
   }
 
   // Editorial Workbench §3.3 (Round 2: functional pin): clicking a commented

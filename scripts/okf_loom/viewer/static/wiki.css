@@ -1512,49 +1512,6 @@ sup.okf-footnote-ref { line-height: 0; }
   font-weight: 600;
 }
 
-/* Sidebar panel system (user-requested feature) */
-.okf-sidebar-panel {
-  background: var(--okf-bg-elev);
-  border: 1px solid var(--okf-border);
-  border-radius: var(--okf-radius);
-  overflow: hidden;
-}
-.okf-sidebar-panel__header {
-  display: flex;
-  align-items: center;
-  gap: var(--okf-space-1);
-  padding: var(--okf-space-2) var(--okf-space-3);
-  cursor: grab;
-  user-select: none;
-  border-bottom: 1px solid var(--okf-border);
-  font-size: var(--okf-text-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--okf-fg-muted);
-}
-.okf-sidebar-panel__header:hover { color: var(--okf-fg); }
-.okf-sidebar-panel__header:active { cursor: grabbing; }
-.okf-sidebar-panel__toggle {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 6px;
-  font-size: var(--okf-text-sm);
-  color: var(--okf-fg-muted);
-  line-height: 1;
-}
-.okf-sidebar-panel__toggle:hover { color: var(--okf-accent); }
-.okf-sidebar-panel__title { flex: 1; }
-.okf-sidebar-panel__body {
-  padding: var(--okf-space-2) var(--okf-space-3);
-  font-size: var(--okf-text-sm);
-}
-.okf-sidebar-panel--collapsed .okf-sidebar-panel__body { display: none; }
-.okf-sidebar-panel--collapsed .okf-sidebar-panel__header { border-bottom: none; }
-.okf-sidebar-panel--dragging { opacity: 0.5; }
-.okf-sidebar-panel--drag-target { border-color: var(--okf-accent); border-style: dashed; }
-
 /* Sections TOC panel */
 .okf-sidebar-toc { list-style: none; padding: 0; margin: 0; }
 .okf-sidebar-toc li { padding: 2px 0; }
@@ -1632,22 +1589,6 @@ sup.okf-footnote-ref { line-height: 0; }
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--okf-fg-muted);
-}
-/* When the local-graph widget lives inside a studio sidebar
-   panel, the panel header is the user-facing label. We do TWO things:
-   1. Hide the widget's own title (the panel header replaces it).
-   2. Flatten the widget's wrapper with `display: contents` so the
-      neighbour pills become direct children of the panel body —
-      no nested inner container, just the pills themselves inside
-      the Related panel.
-   In read-only mode (no studio boot), the widget is a direct child
-   of .okf-page__sidebar and these rules don't fire, so it renders
-   normally with its own title + wrapper. */
-.okf-sidebar-panel__body .okf-local-graph {
-  display: contents;
-}
-.okf-sidebar-panel__body .okf-local-graph__title {
-  display: none;
 }
 .okf-local-graph__node {
   display: flex;
