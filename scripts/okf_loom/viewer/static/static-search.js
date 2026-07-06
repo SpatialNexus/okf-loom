@@ -216,20 +216,35 @@
   }
 
   function highlight(text, tokens) {
-    // Round 2 §6.3: wrap query-term matches in <mark>. Mirrors the
-    // CORRECTED render.py _highlight() (scripts/okf_loom/render.py) — terms
-    // are matched against the RAW (pre-escape) text, then EVERY segment
-    // (the gaps AND each matched run) is escaped independently via
-    // escapeHtml, splicing a LITERAL <mark> around the escaped match.
-    // Matching the ALREADY-escaped string instead (escape-then-match) would
-    // let a token equal to an HTML entity name ("gt"/"amp"/"lt"/"quot")
-    // land inside an escaped "&gt;"/"&amp;" and shatter it — data-catalog
-    // text routinely carries "<"/">"/"&" (SQL comparisons, "Q&A", "AT&T").
-    // Because eligibleTokens() only lets word-chars-only, >=2-char tokens
-    // through, a match can never straddle the "&"/";" of an entity sitting
-    // in a gap, so gaps always escape atomically. Terms are deduped (by
+    // Round 2 §6.3: wrap query-term matches in <mark>. Shares the
+    // CORRECTED render.py _highlight()'s (scripts/okf_loom/render.py)
+    // entity-safe ALGORITHM — terms are matched against the RAW
+    // (pre-escape) text, then EVERY segment (the gaps AND each matched
+    // run) is escaped independently via escapeHtml, splicing a LITERAL
+    // <mark> around the escaped match. Matching the ALREADY-escaped string
+    // instead (escape-then-match) would let a token equal to an HTML
+    // entity name ("gt"/"amp"/"lt"/"quot") land inside an escaped
+    // "&gt;"/"&amp;" and shatter it — data-catalog text routinely carries
+    // "<"/">"/"&" (SQL comparisons, "Q&A", "AT&T"). Because
+    // eligibleTokens() only lets word-chars-only, >=2-char tokens through,
+    // a match can never straddle the "&"/";" of an entity sitting in a
+    // gap, so gaps always escape atomically. Terms are deduped (by
     // eligibleTokens) and sorted longest-first here so overlapping terms
     // don't half-wrap one another.
+    //
+    // Phase-3 final-review parity note: `tokens` here comes from this
+    // file's tokenize() (`/[\p{L}\p{N}_]+/gu`, which KEEPS `_`), while
+    // render.py's _highlight() tokenizes the query with
+    // `_HIGHLIGHT_WORD_RE` (`[^\W_]+`, which SPLITS on `_`). The shared
+    // algorithm above therefore produces IDENTICAL <mark> boundaries to
+    // the live highlighter only for single alphanumeric-token queries. For
+    // an underscore/multi-part identifier query (e.g. "user_role") this
+    // marks "user_role" as one run while the server-side highlighter marks
+    // "user"+"role" separately; for a query like "a_b" (sub-2-char parts)
+    // this marks the whole "a_b" token while the server-side version marks
+    // nothing (no eligible >=2-char term). Not a correctness/security
+    // issue — both stay entity-safe and match-visible — just a
+    // <mark>-boundary difference.
     var s = String(text == null ? "" : text);
     var uniq = eligibleTokens(tokens);
     if (!s || !uniq.length) return escapeHtml(s);

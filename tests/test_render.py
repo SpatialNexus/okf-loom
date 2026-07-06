@@ -1705,6 +1705,43 @@ def test_p3_1_toc_escapes_heading_entities_once(tiny_good_bundle: _Path) -> None
     assert "&amp;amp;" not in toc, "double-escaped ampersand in ToC"
 
 
+def test_p3_1_toc_replace_not_clobbered_by_body_sentinel_heading(
+    tiny_good_bundle: _Path,
+) -> None:
+    """Phase-3 final-review Fix 1: a heading whose rendered TEXT equals one
+    of the LATER template sentinels (e.g. ``__CONCEPT_BODY__``) must not
+    have its ToC link text clobbered.
+
+    ``_render_concept_page``'s ``.replace(...)`` chain builds ``toc_html``
+    from user heading text (``_esc()`` deliberately leaves ``_`` alone), so
+    if ``__TOC_HTML__`` were substituted BEFORE ``__CONCEPT_BODY__`` /
+    ``__BACKLINKS_HTML__`` / ``__OUTGOING_HTML__``, a heading literally
+    named after one of those sentinels would inject that exact substring
+    into ``rendered`` early, and the later ``.replace("__CONCEPT_BODY__",
+    body_html)`` call would then match INSIDE the just-inserted ToC anchor
+    text too, stomping it with the entire rendered body. The heading text
+    below is wrapped in backticks (inline code) so the markdown renderer's
+    ``__..__`` emphasis regex doesn't consume the sentinel's own
+    underscores before it reaches the ToC.
+    """
+    doc = tiny_good_bundle / "references" / "tocsentinel.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: TocSentinel\n"
+        "description: Probe doc with a sentinel-named heading.\n---\n\n"
+        "# First Section\n\nAlpha.\n\n"
+        "# `__CONCEPT_BODY__`\n\nBeta.\n\n"
+        "# Third Section\n\nGamma.\n",
+        encoding="utf-8",
+    )
+    html = _render_concept_html(tiny_good_bundle, "references/tocsentinel")
+    toc = html.split('<nav class="okf-toc"', 1)[1].split("</nav>", 1)[0]
+    assert ">__CONCEPT_BODY__</a>" in toc, (
+        "ToC link text for the sentinel-named heading was clobbered — "
+        "__TOC_HTML__ must be the LAST replace in the chain so no later "
+        f"sentinel replace can act on its injected content. toc={toc!r}"
+    )
+
+
 # --- Round 2 §6.2: index dashboard data-okf-* attrs ------------------------
 
 

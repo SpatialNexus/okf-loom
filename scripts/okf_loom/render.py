@@ -1213,6 +1213,12 @@ def _search_corpus_json(bundle: Bundle) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 # Editorial Workbench §6.1: on-page ToC (reader-facing, server-rendered).
+# Phase-3 final-review note: this regex hard-codes the assumption that
+# markdown.py emits `<hN id="slug">` with `id` as the FIRST (sole,
+# double-quoted) attribute — a future change to that heading emitter (e.g.
+# an extra attribute before `id`, or single-quoting it) would silently drop
+# ToC headings with no failing test. (Verified correct today: markdown.py:729
+# emits id-first; `_demote_headings` preserves id position.)
 _TOC_HEADING_RE = re.compile(r'<h([23])\s+id="([^"]+)"[^>]*>(.*?)</h\1>', re.DOTALL)
 _TOC_TAG_RE = re.compile(r"<[^>]+>")
 _TOC_MIN_HEADINGS = 3
@@ -1638,13 +1644,23 @@ def _render_concept_page(
         .replace("__CONCEPT_DESCRIPTION__", _esc(concept.description))
         .replace("__CONCEPT_RESOURCE__", resource_html)
         .replace("__CONCEPT_TAGS__", tags_html)
-        .replace("__TOC_HTML__", toc_html)
         .replace("__CONCEPT_BODY__", body_html)
         .replace("__BACKLINKS_HTML__", backlinks_html)
         .replace("__OUTGOING_HTML__", outgoing_html)
         .replace("__FRONTMATTER_HTML__", frontmatter_html)
         .replace("__GOVERNED_HTML__", governed_html)
         .replace("__LOCAL_GRAPH_DATA__", _esc(local_data))
+        # Phase-3 final-review Fix 1: __TOC_HTML__ MUST be replaced LAST.
+        # toc_html is built from user heading text (_build_toc_html), and
+        # _esc() deliberately doesn't touch "_", so a heading whose text is
+        # itself one of the sentinels above (e.g. "__CONCEPT_BODY__") would
+        # survive into the ToC verbatim. If __TOC_HTML__ were substituted
+        # earlier in this chain, that sentinel-shaped ToC link text would
+        # then be matched (and clobbered) by that sentinel's own later
+        # .replace() call above. Being last means nothing after it can act
+        # on toc_html's injected content. The placeholders are otherwise
+        # independent, so no other replace here depends on ordering.
+        .replace("__TOC_HTML__", toc_html)
     )
     # P2-68: strip empty ``<section class="okf-relations__block">`` blocks
     # (those whose only content was an empty link list + the heading).
@@ -2300,9 +2316,24 @@ def _highlight(text: str, query: str, *, limit: int = 200) -> str:
     tokenizes to) can no longer land inside an escaped ``&gt;``/``&amp;`` and
     shatter it. Every char of ``text`` is still escaped, so injected markup —
     even a literal ``<mark>`` planted in the doc text — renders inert
-    (CSP-safe). This is the reference algorithm Task 5's static highlighter
-    mirrors. Terms are the query's word tokens (>=2 chars), matched
-    case-insensitively, longest-first so overlapping terms don't half-wrap."""
+    (CSP-safe). Terms are the query's word tokens (>=2 chars), matched
+    case-insensitively, longest-first so overlapping terms don't half-wrap.
+
+    Parity note (Phase-3 final review): static-search.js's ``highlight()``
+    (Task 5's static highlighter) shares this exact entity-safe
+    match-on-raw → escape-per-segment ALGORITHM, but the two query
+    TOKENIZERS differ on ``_``: ``_HIGHLIGHT_WORD_RE`` (``[^\\W_]+``)
+    SPLITS on underscore, while static's ``tokenize()``
+    (``/[\\p{L}\\p{N}_]+/gu``) KEEPS it. So for an underscore/multi-part
+    identifier query (e.g. ``user_role``) this function marks ``user`` and
+    ``role`` as two separate matches while the static highlighter marks
+    ``user_role`` as one run; for sub-2-char parts (e.g. ``a_b``) this
+    function has no eligible (>=2-char) term and marks nothing, while
+    static keeps ``a_b`` whole and marks it. Both stay entity-safe and
+    match-visible either way — the divergence is only ``<mark>`` boundary
+    placement, not a correctness/security issue — so the two highlighters
+    are byte-identical only for single alphanumeric-token queries.
+    """
     s = str(text or "")[:limit]
     terms = [t for t in _HIGHLIGHT_WORD_RE.findall((query or "").lower()) if len(t) >= 2]
     if not terms:
