@@ -1329,6 +1329,31 @@ def test_theme_blocks_override_full_token_set() -> None:
             )
 
 
+def test_validation_error_chip_uses_themed_error_token() -> None:
+    """Round 2 deferred-item fix (Item 2): the validation chip's error state
+    must reference a THEMED status token so it adapts light/dark, not render a
+    fixed colour. It previously used ``var(--okf-danger, #d64545)`` — but
+    ``--okf-danger`` is defined nowhere, so every theme fell back to the fixed
+    ``#d64545`` (even sub-AA on the light themes). Reuse the existing
+    ``--okf-error`` token — guaranteed present in every theme block by
+    ``test_theme_blocks_override_full_token_set`` — exactly as the warn chip
+    reuses ``--okf-warn`` and the offline-conn dot reuses ``--okf-error`` in
+    the same status bar. RED against a regression to an undefined status
+    token."""
+    css = _runtime_file("viewer", "static", "studio.css").read_text(encoding="utf-8")
+    m = re.search(
+        r'\.okf-statseg--validation\[data-state="error"\]\s*\{([^}]*)\}', css
+    )
+    assert m, "error-state validation chip rule not found in studio.css"
+    rule = m.group(1)
+    assert "var(--okf-error" in rule, (
+        f"error chip must use the themed --okf-error token, got: {rule!r}"
+    )
+    assert "--okf-danger" not in rule, (
+        f"error chip must not reference the undefined --okf-danger token: {rule!r}"
+    )
+
+
 def test_appearance_contrast_and_border_modifier_blocks() -> None:
     """Round 2 §5.1: soft-contrast + border modifiers are orthogonal root
     data-attr blocks placed AFTER the theme blocks, border after contrast."""
