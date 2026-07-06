@@ -100,6 +100,16 @@
   color: var(--okf-fg-muted);
   white-space: nowrap;
 }
+/* Round 2 §6.4 review: validationStatseg is created with [hidden] until
+ * /__validate resolves (studio.js). The author .okf-statseg {
+ * display:inline-flex } above beats the UA [hidden] rule by cascade ORIGIN,
+ * so a hidden chip would stay visible -- restate display:none here (mirrors
+ * .okf-card[hidden] in wiki.css). Same specificity (0,2,0) as the grouped
+ * ".okf-studio-bar--status .okf-statseg" selector above; placed after it so
+ * the source-order tie resolves in this rule's favour. Scoped to
+ * .okf-statseg so conceptStatseg/connChip (which never set [hidden]) are
+ * unaffected. */
+.okf-statseg[hidden] { display: none; }
 .okf-statseg__mark { color: var(--okf-accent); }
 
 /* Round 2 §6.4: validation status chip states (ambient). */

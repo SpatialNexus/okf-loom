@@ -462,6 +462,9 @@ def test_validate_returns_counts_with_token(bundle: Path) -> None:
             assert resp.status == 200
             data = json.loads(resp.read())
         assert set(data) >= {"ok", "error", "warning"}
+        # Round 2 §6.4 review (Finding 3): also check "ok" itself, not just
+        # that the count fields are present and int-typed.
+        assert isinstance(data["ok"], bool)
         assert isinstance(data["error"], int) and isinstance(data["warning"], int)
     finally:
         proc.terminate()

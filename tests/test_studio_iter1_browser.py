@@ -2680,3 +2680,49 @@ def test_footer_shows_validation_count(server_url, page):
     _wait_for_studio(page)
     seg = page.wait_for_selector(".okf-statseg--validation:not([hidden])", timeout=10000)
     assert seg is not None
+    # Round 2 §6.4 review (Finding 2): prove the fetch->render actually
+    # populated a real validation state, not just that [hidden] was removed.
+    # Assert set-membership (not a specific value) -- do not assume the demo
+    # bundle validates clean.
+    state = seg.get_attribute("data-state")
+    assert state in {"ok", "warn", "error"}, f"unexpected data-state: {state!r}"
+
+
+def test_validation_statseg_stays_hidden_pre_fetch(server_url: str, page) -> None:
+    """Round 2 §6.4 review (Finding 1): a hidden .okf-statseg must compute
+    display:none, not just carry the [hidden] attribute.
+
+    validationStatseg (studio.js) is created with the HTML `hidden` attribute
+    so it stays invisible until the /__validate fetch resolves. But
+    `.okf-statseg { display: inline-flex }` (studio.css) is an author-normal
+    rule that beats the UA `[hidden] { display: none }` rule by cascade
+    ORIGIN -- the exact cascade Task 3 already hit for `.okf-card`
+    (wiki.css). This test is deterministic and does NOT depend on the async
+    /__validate fetch's timing: it builds the chip's worst-case cascade
+    context directly -- a `.okf-studio-bar.okf-studio-bar--status` container
+    (specificity ties against this exact grouped selector) holding a hidden
+    `.okf-statseg.okf-statseg--validation` span -- and reads the computed
+    style. If the fix wins here, it wins everywhere.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    display = page.evaluate(
+        """() => {
+            const bar = document.createElement('div');
+            bar.className = 'okf-studio-bar okf-studio-bar--status';
+            const span = document.createElement('span');
+            span.className = 'okf-statseg okf-statseg--validation';
+            span.setAttribute('hidden', '');
+            span.textContent = 'validating…';
+            bar.appendChild(span);
+            document.body.appendChild(bar);
+            const display = getComputedStyle(span).display;
+            bar.remove();
+            return display;
+        }"""
+    )
+    assert display == "none", (
+        f"hidden .okf-statseg computed display:{display!r}, expected 'none' "
+        "(.okf-statseg{display:inline-flex} is beating [hidden] -- "
+        "add .okf-statseg[hidden]{display:none} to studio.css)"
+    )
