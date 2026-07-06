@@ -2302,7 +2302,7 @@ def _render_index_page(
     )
 
 
-_HIGHLIGHT_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_HIGHLIGHT_WORD_RE = re.compile(r"\w+", re.UNICODE)
 
 
 def _highlight(text: str, query: str, *, limit: int = 200) -> str:
@@ -2319,20 +2319,26 @@ def _highlight(text: str, query: str, *, limit: int = 200) -> str:
     (CSP-safe). Terms are the query's word tokens (>=2 chars), matched
     case-insensitively, longest-first so overlapping terms don't half-wrap.
 
-    Parity note (Phase-3 final review): static-search.js's ``highlight()``
-    (Task 5's static highlighter) shares this exact entity-safe
-    match-on-raw → escape-per-segment ALGORITHM, but the two query
-    TOKENIZERS differ on ``_``: ``_HIGHLIGHT_WORD_RE`` (``[^\\W_]+``)
-    SPLITS on underscore, while static's ``tokenize()``
-    (``/[\\p{L}\\p{N}_]+/gu``) KEEPS it. So for an underscore/multi-part
-    identifier query (e.g. ``user_role``) this function marks ``user`` and
-    ``role`` as two separate matches while the static highlighter marks
-    ``user_role`` as one run; for sub-2-char parts (e.g. ``a_b``) this
-    function has no eligible (>=2-char) term and marks nothing, while
-    static keeps ``a_b`` whole and marks it. Both stay entity-safe and
-    match-visible either way — the divergence is only ``<mark>`` boundary
-    placement, not a correctness/security issue — so the two highlighters
-    are byte-identical only for single alphanumeric-token queries.
+    Tokenizer parity: ``_HIGHLIGHT_WORD_RE`` (``\\w+``) is deliberately the
+    SAME word regex the live LEXICAL search backend tokenizes the query with
+    (``search.py`` ``_WORD_RE``), so an identifier query like ``user_role`` is
+    one ``\\w+`` token to both and is marked as ONE run — not shattered into
+    ``user``/``role`` fragments the way the old ``[^\\W_]+`` regex did. Keeping
+    ``_`` also aligns these boundaries with static-search.js's ``highlight()``
+    (Task 5's static highlighter), whose ``tokenize()``
+    (``/[\\p{L}\\p{N}_]+/gu``) likewise keeps ``_``; the two share this exact
+    entity-safe match-on-raw → escape-per-segment ALGORITHM.
+
+    Scope: this reconciles the underscore/word-boundary handling only.
+    ``_highlight`` applies the ``\\w+`` regex plus a ``>=2``-char filter and
+    nothing else — it does NOT run the backend's full ``tokenize()`` pipeline —
+    so live vs static ``<mark>`` placement can still differ where a tokenizer
+    does more than split on word boundaries: (1) a query with a ``>=2``-char
+    STOPWORD (e.g. ``the`` in ``the users``) — the static page highlights
+    ``tokenize(query)`` output, which DROPS stopwords, while ``_highlight``
+    marks them; and (2) a pure-CJK query — static splits such runs per
+    character. Both are separate, pre-existing differences, independent of this
+    underscore reconciliation.
     """
     s = str(text or "")[:limit]
     terms = [t for t in _HIGHLIGHT_WORD_RE.findall((query or "").lower()) if len(t) >= 2]

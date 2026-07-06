@@ -232,19 +232,19 @@
     // eligibleTokens) and sorted longest-first here so overlapping terms
     // don't half-wrap one another.
     //
-    // Phase-3 final-review parity note: `tokens` here comes from this
-    // file's tokenize() (`/[\p{L}\p{N}_]+/gu`, which KEEPS `_`), while
-    // render.py's _highlight() tokenizes the query with
-    // `_HIGHLIGHT_WORD_RE` (`[^\W_]+`, which SPLITS on `_`). The shared
-    // algorithm above therefore produces IDENTICAL <mark> boundaries to
-    // the live highlighter only for single alphanumeric-token queries. For
-    // an underscore/multi-part identifier query (e.g. "user_role") this
-    // marks "user_role" as one run while the server-side highlighter marks
-    // "user"+"role" separately; for a query like "a_b" (sub-2-char parts)
-    // this marks the whole "a_b" token while the server-side version marks
-    // nothing (no eligible >=2-char term). Not a correctness/security
-    // issue — both stay entity-safe and match-visible — just a
-    // <mark>-boundary difference.
+    // Tokenizer parity note: `tokens` here comes from this file's tokenize()
+    // (`/[\p{L}\p{N}_]+/gu` — which KEEPS `_`, and also DROPS stopwords and
+    // splits CJK runs per character). render.py's _highlight() now tokenizes
+    // the query with the same underscore-keeping `\w+` word regex (its
+    // `_HIGHLIGHT_WORD_RE`, aligned to the live search backend's `_WORD_RE`),
+    // so the shared match-on-raw → escape-per-segment algorithm above marks an
+    // underscore/multi-part identifier like "user_role" as ONE run on both
+    // sides (and an "a_b"-style token whole on both) — the divergence this
+    // reconciliation fixed. The two can still differ where tokenize() does more
+    // than the `\w+` split _highlight() shares: a query with a >=2-char
+    // STOPWORD (dropped here, marked live) or a pure-CJK query (split per
+    // character here, marked as a whole run live). Both are separate,
+    // pre-existing differences, independent of the underscore reconciliation.
     var s = String(text == null ? "" : text);
     var uniq = eligibleTokens(tokens);
     if (!s || !uniq.length) return escapeHtml(s);

@@ -1808,16 +1808,21 @@ def test_p3_3_live_search_tolerates_missing_fields(tiny_good_bundle):
 
 def test_p3_3_live_search_does_not_shatter_entities(tiny_good_bundle):
     """Round 2 §6.3: query terms are matched against the RAW text, so a term
-    that collides with an HTML entity NAME — "gt"/"amp", which an identifier
-    query like ``gt_flag``/``amp_events`` tokenizes to — must NOT land inside
+    that collides with an HTML entity NAME ("gt"/"amp") must NOT land inside
     an escaped ``&gt;``/``&amp;`` and shatter it. Data-catalog docs routinely
     carry ``<`` / ``>`` / ``&`` (SQL comparisons, ``Q&A``, ``AT&T``). RED
-    against the entity-splitting bug (matching on the escaped string) that
-    Task 5's static highlighter would otherwise inherit."""
+    against the entity-splitting bug (matching on the escaped string).
+
+    The query is a plain multi-word ``"gt amp"`` (not an underscored
+    identifier): ``_HIGHLIGHT_WORD_RE`` now keeps ``_`` (``\\w+``, aligned to
+    the live search backend's ``_WORD_RE``), so ``gt_flag`` would stay ONE
+    token and never reach the highlighter as a bare ``"gt"`` — the same reason
+    the parallel static test (``..._static_search_highlight_does_not_shatter_
+    entities``) uses ``"gt amp"``."""
     from okf_loom.render import _render_search_page
     b = Bundle.load(tiny_good_bundle)
     html = _render_search_page(
-        b, mode="serve", name=b.name, config={}, query="gt_flag amp_events",
+        b, mode="serve", name=b.name, config={}, query="gt amp",
         results=[{"title": "Cmp", "concept_id": "c", "id": "c",
                   "description": "cost > 50, A & B"}])
     snippet = html.split('class="okf-search-snippet">', 1)[1].split("</div>", 1)[0]
@@ -1942,13 +1947,13 @@ def test_p3_3_static_search_highlight_does_not_shatter_entities():
     escape-then-match) algorithm.
 
     Note: static-search.js's own ``tokenize()`` keeps ``_`` as a word
-    character (unlike Python's ``_HIGHLIGHT_WORD_RE``), so an identifier
-    like ``amp_events`` stays ONE token there and never reaches the
-    highlighter as a bare ``"amp"``. The JS-native reproduction of the
-    entity-splitting bug is therefore a plain multi-word query ("gt amp")
-    rather than Task 4's underscored-identifier query — same bug class
+    character — and Python's ``_HIGHLIGHT_WORD_RE`` now does too (``\\w+``,
+    aligned to the search backend's ``_WORD_RE``) — so an identifier like
+    ``amp_events`` stays ONE token in BOTH and never reaches either
+    highlighter as a bare ``"amp"``. The reproduction of the entity-splitting
+    bug is therefore a plain multi-word query ("gt amp") — same bug class
     (a token colliding with an HTML entity NAME), reached via the query
-    shape that actually produces a bare "gt"/"amp" token in EACH tokenizer.
+    shape that actually produces a bare "gt"/"amp" token in each tokenizer.
     """
     from okf_loom.render import _highlight
     text = "cost > 50, A & B"
@@ -1959,6 +1964,29 @@ def test_p3_3_static_search_highlight_does_not_shatter_entities():
     # Cross-language proof: same (text, terms) -> byte-identical output.
     py_out = _highlight(text, "gt amp")
     assert js_out == py_out, f"static/live highlight diverge: {js_out!r} != {py_out!r}"
+
+
+def test_p3_3_live_highlight_keeps_underscore_identifier_whole():
+    """Round 2 deferred-item fix (live↔static ``<mark>`` tokenizer
+    reconciliation): the live ``_highlight`` tokenizes the query with the SAME
+    ``\\w+`` word regex the live LEXICAL search backend uses (``search.py``
+    ``_WORD_RE``), so an underscore/identifier query is marked as ONE run —
+    consistent with how the live search actually matched it (a whole ``\\w+``
+    token) and byte-identical to the static highlighter (whose ``tokenize()``
+    also keeps ``_``). Before the fix ``_highlight`` used ``[^\\W_]+`` and
+    shattered ``user_role`` into ``user``/``role`` fragments that did not
+    reflect the match. RED against a regression to the ``_``-splitting
+    tokenizer."""
+    from okf_loom.render import _highlight
+    text = "the user_role column governs access"
+    out = _highlight(text, "user_role")
+    assert "<mark>user_role</mark>" in out, f"identifier not marked as one run: {out!r}"
+    assert "<mark>user</mark>" not in out, f"identifier shattered into fragments: {out!r}"
+    # live↔static parity for identifier queries: static ``tokenize('user_role')``
+    # yields the single token ``['user_role']``, and both highlighters now share
+    # the same ``\\w+`` tokenization + match-on-raw algorithm, so bytes match.
+    js_out = _run_static_highlight(text, ["user_role"])
+    assert js_out == out, f"live/static identifier highlight diverge: {js_out!r} != {out!r}"
 
 
 # --- Round 2 §6.3 fix: static makeSnippet must centre on a token highlight()
