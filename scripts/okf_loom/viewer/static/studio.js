@@ -4185,7 +4185,7 @@
     conflictState._retryArgs = null;
   }
 
-  // ---- sidebar panel system (user-requested: collapsible, reorderable, resizable) ----
+  // ---- sidebar rail: nav + flat Related ----
   // Editorial Workbench §3.2: the persistent Diátaxis nav is the primary rail;
   // the in-page heading list moved to the pop-over Outline tab, so "sections"
   // is retired here. Related (local graph) + Quick Actions stack below the nav.

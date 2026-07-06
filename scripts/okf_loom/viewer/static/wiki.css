@@ -1512,64 +1512,6 @@ sup.okf-footnote-ref { line-height: 0; }
   font-weight: 600;
 }
 
-/* Sections TOC panel */
-.okf-sidebar-toc { list-style: none; padding: 0; margin: 0; }
-.okf-sidebar-toc li { padding: 2px 0; }
-.okf-sidebar-toc a {
-  color: var(--okf-fg-muted);
-  text-decoration: none;
-  font-size: var(--okf-text-sm);
-  display: block;
-  padding: 1px 0 1px var(--okf-space-2);
-  border-left: 2px solid transparent;
-}
-.okf-sidebar-toc a:hover { color: var(--okf-accent); }
-/* Phase 2 scroll-spy: the on-screen section's entry gets an accent rail. */
-.okf-sidebar-toc a.is-active {
-  color: var(--okf-accent);
-  border-left-color: var(--okf-accent);
-  font-weight: 600;
-}
-.okf-sidebar-toc .toc-h1 { font-weight: 600; }
-.okf-sidebar-toc .toc-h2 { padding-left: var(--okf-space-2); }
-.okf-sidebar-toc .toc-h3 { padding-left: calc(var(--okf-space-2) * 2); }
-
-/* Quick intents panel. Phase 1: these are BUTTONS — they used to render
- * as what looked like empty text inputs (white fill, thin border). The
- * inset fill + chevron + hover accent make the affordance unmistakable. */
-.okf-sidebar-intents { display: flex; flex-direction: column; gap: var(--okf-space-1); }
-.okf-sidebar-intent {
-  display: flex;
-  align-items: center;
-  gap: var(--okf-space-2);
-  padding: var(--okf-space-2) var(--okf-space-3);
-  background: var(--okf-bg-inset);
-  border: 1px solid var(--okf-border);
-  border-radius: var(--okf-radius-sm);
-  cursor: pointer;
-  font-size: var(--okf-text-sm);
-  font-weight: 500;
-  color: var(--okf-fg);
-  text-align: left;
-  width: 100%;
-  transition: border-color 0.12s ease, background 0.12s ease;
-}
-.okf-sidebar-intent::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-right: 2px solid var(--okf-fg-muted);
-  border-top: 2px solid var(--okf-fg-muted);
-  transform: rotate(45deg);
-  transition: border-color 0.12s ease;
-}
-.okf-sidebar-intent:hover {
-  border-color: var(--okf-accent);
-  background: var(--okf-accent-bg);
-  color: var(--okf-accent);
-}
-.okf-sidebar-intent:hover::before { border-color: var(--okf-accent); }
 /* P2-62: local graph widget is now a labelled pill list, not unlabeled
  * SVG dots. Each pill shows a colour swatch + truncated neighbour title.
  * Round 2 Task 5: flattened — no card border/bg/padding; the widget sits
