@@ -194,14 +194,65 @@
       .replace(/'/g, "&#39;");
   }
 
-  function makeSnippet(entry) {
-    // Prefer the curated description; fall back to the build-time body
-    // excerpt. Truncate to 200 chars to match the live search page.
-    var desc = entry.description || "";
-    if (desc) return String(desc).slice(0, 200);
-    var body = entry.body_excerpt || "";
-    if (body) return String(body).slice(0, 200);
-    return "";
+  function highlight(text, tokens) {
+    // Round 2 §6.3: wrap query-term matches in <mark>. Mirrors the
+    // CORRECTED render.py _highlight() (scripts/okf_loom/render.py) — terms
+    // are matched against the RAW (pre-escape) text, then EVERY segment
+    // (the gaps AND each matched run) is escaped independently via
+    // escapeHtml, splicing a LITERAL <mark> around the escaped match.
+    // Matching the ALREADY-escaped string instead (escape-then-match) would
+    // let a token equal to an HTML entity name ("gt"/"amp"/"lt"/"quot")
+    // land inside an escaped "&gt;"/"&amp;" and shatter it — data-catalog
+    // text routinely carries "<"/">"/"&" (SQL comparisons, "Q&A", "AT&T").
+    // Because every token is word-chars only (>=2 chars, from tokenize()),
+    // a match can never straddle the "&"/";" of an entity sitting in a gap,
+    // so gaps always escape atomically. Terms are deduped and sorted
+    // longest-first so overlapping terms don't half-wrap one another.
+    var s = String(text == null ? "" : text);
+    var uniq = [];
+    if (tokens) {
+      for (var i = 0; i < tokens.length; i++) {
+        var t = tokens[i];
+        if (t && t.length >= 2 && uniq.indexOf(t) < 0) uniq.push(t);
+      }
+    }
+    if (!s || !uniq.length) return escapeHtml(s);
+    uniq.sort(function (a, b) { return b.length - a.length; });
+    var special = /[.*+?^${}()|[\]\\]/g;
+    var pattern = new RegExp(
+      uniq.map(function (tok) { return tok.replace(special, "\\$&"); }).join("|"),
+      "gi"
+    );
+    var out = "";
+    var last = 0;
+    var m;
+    while ((m = pattern.exec(s)) !== null) {
+      out += escapeHtml(s.slice(last, m.index));       // escape the gap
+      out += "<mark>" + escapeHtml(m[0]) + "</mark>";  // escape+wrap the RAW match
+      last = m.index + m[0].length;
+    }
+    out += escapeHtml(s.slice(last));                  // escape the tail
+    return out;
+  }
+
+  function makeSnippet(entry, tokens) {
+    // §6.3: window around the first query-term match so the highlighted
+    // term is visible; fall back to the leading slice. Prefers the
+    // build-time body excerpt (more likely to contain the term) then the
+    // curated description, mirroring the live renderer's preference for
+    // its backend-computed match-centred `snippets` excerpt over
+    // `description` (render.py _render_search_page).
+    var src = String(entry.body_excerpt || entry.description || "");
+    if (!src) return "";
+    if (tokens && tokens.length) {
+      var low = src.toLowerCase(), best = -1, i, p;
+      for (i = 0; i < tokens.length; i++) {
+        p = low.indexOf(tokens[i]);
+        if (p >= 0 && (best < 0 || p < best)) best = p;
+      }
+      if (best > 40) return "\u2026" + src.slice(best - 40, best - 40 + 200);
+    }
+    return src.slice(0, 200);
   }
 
   function setStatus(count, query) {
@@ -222,9 +273,13 @@
   }
 
   // ---------------------------------------------------------------------
-  // Renderers. The result shape mirrors the live search page
-  // (`<article class="okf-search-result"><h3><a>title</a> <span>id</span></h3>
-  //   <div class="okf-search-snippet">…</div></article>`).
+  // Renderers. Round 2 §6.3: the result shape now reaches parity with the
+  // live search page's markup (render.py _render_search_page) —
+  // `<article class="okf-search-result">
+  //   <h3><a class="okf-internal">title (highlighted)</a></h3>
+  //   <div class="okf-search-result__meta okf-muted">type cid</div>
+  //   <div class="okf-search-snippet">excerpt (highlighted)</div>
+  // </article>` — including the type label and <mark> match highlighting.
   // ---------------------------------------------------------------------
   function renderResults(query, entries) {
     var tokens = tokenize(query);
@@ -257,13 +312,16 @@
       var cid = e.id || "";
       // Static concept pages live at <id>.html at the bundle root.
       var url = cid + ".html";
-      var snippet = makeSnippet(e);
+      var snippet = makeSnippet(e, tokens);
+      var typeMeta = e.type
+        ? '<span class="okf-search-result__type">' + escapeHtml(e.type) + '</span> '
+        : "";
       html +=
         '<article class="okf-search-result">' +
         '<h3><a href="' + escapeHtml(url) + '" class="okf-internal">' +
-        escapeHtml(e.title || cid) + '</a>' +
-        ' <span class="okf-muted">' + escapeHtml(cid) + '</span></h3>' +
-        '<div class="okf-search-snippet">' + escapeHtml(snippet) + '</div>' +
+        highlight(e.title || cid, tokens) + '</a></h3>' +
+        '<div class="okf-search-result__meta okf-muted">' + typeMeta + escapeHtml(cid) + '</div>' +
+        '<div class="okf-search-snippet">' + highlight(snippet, tokens) + '</div>' +
         '</article>';
     }
     resultsContainer.innerHTML = html;

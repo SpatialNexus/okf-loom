@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -1805,3 +1806,91 @@ def test_p3_3_live_search_prefers_snippet_over_description(tiny_good_bundle):
     snippet = html.split('class="okf-search-snippet">', 1)[1].split("</div>", 1)[0]
     assert "The users table." not in snippet, "fell back to description, not snippet"
     assert "<mark>keyed</mark>" in snippet, "match-centred snippet term not highlighted"
+
+
+# --- Round 2 §6.3: search quality — static renderer -------------------------
+
+
+def test_p3_3_static_search_renderer_has_meta_and_highlight():
+    """Round 2 §6.3: the static search renderer matches the live markup
+    (result meta + type) and highlights matches (<mark>)."""
+    js = _runtime_file("viewer", "static", "static-search.js").read_text(encoding="utf-8")
+    assert "okf-search-result__meta" in js, "static must reach live meta parity"
+    assert "okf-search-result__type" in js, "static must show the type label"
+    assert "function highlight(" in js and "<mark>" in js, "static must highlight matches"
+
+
+def _run_static_highlight(text: str, tokens: list) -> str:
+    """Execute the ACTUAL shipped ``highlight()`` from static-search.js in
+    Node and return ``highlight(text, tokens)``'s output.
+
+    static-search.js is a browser IIFE gated on ``document``/``fetch``
+    globals that don't exist under plain Node — but ``highlight``/
+    ``escapeHtml`` are pure string functions with no DOM dependency, and
+    because they are ``function`` DECLARATIONS they are hoisted to the top
+    of the IIFE's scope before any statement runs. We splice one line right
+    after the literal ``"use strict";`` (the very first statement, before
+    the module's own ``document.body`` access) that stashes a live
+    reference to ``highlight`` on ``globalThis``. The rest of the IIFE then
+    throws under plain Node (no ``document``), which an outer try/catch
+    swallows — the stash already ran by then. This runs the REAL shipped
+    source, not a hand-reimplementation of it.
+    """
+    js_source = _runtime_file("viewer", "static", "static-search.js").read_text(encoding="utf-8")
+    marker = '"use strict";'
+    assert js_source.count(marker) == 1, "splice anchor moved/duplicated in static-search.js"
+    hook = marker + "\n  globalThis.__OKF_TEST__ = { highlight: highlight };"
+    patched = js_source.replace(marker, hook, 1)
+    driver = (
+        "try {\n" + patched + "\n"
+        "} catch (e) { /* expected: no `document` global under plain Node */ }\n"
+        "try {\n"
+        "  process.stdout.write(String(globalThis.__OKF_TEST__.highlight("
+        + json.dumps(text) + ", " + json.dumps(tokens) + ")));\n"
+        "} catch (e) {\n"
+        "  process.stdout.write('__ERROR__:' + e);\n"
+        "}\n"
+    )
+    result = subprocess.run(
+        ["node", "-e", driver], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, f"node driver failed: {result.stderr}"
+    assert not result.stdout.startswith("__ERROR__:"), f"highlight() threw: {result.stdout}"
+    return result.stdout
+
+
+def test_p3_3_static_search_highlight_wraps_matches_case_preserved():
+    """Round 2 §6.3: the static ``highlight()`` wraps the ACTUAL matched
+    substring in ``<mark>``, preserving the source's original case (mirrors
+    ``render.py _highlight``). Also guards against the harness/algorithm
+    being a silent no-op, which would make the entity-safety test below
+    vacuously pass for the wrong reason."""
+    out = _run_static_highlight("Users list", ["users"])
+    assert out == "<mark>Users</mark> list"
+
+
+def test_p3_3_static_search_highlight_does_not_shatter_entities():
+    """Round 2 §6.3: mirrors ``test_p3_3_live_search_does_not_shatter_entities``
+    for the STATIC renderer, and cross-checks the static JS output is
+    BYTE-IDENTICAL to the live Python ``_highlight()`` for the same input —
+    direct evidence the JS mirrors the CORRECTED (raw-match, not
+    escape-then-match) algorithm.
+
+    Note: static-search.js's own ``tokenize()`` keeps ``_`` as a word
+    character (unlike Python's ``_HIGHLIGHT_WORD_RE``), so an identifier
+    like ``amp_events`` stays ONE token there and never reaches the
+    highlighter as a bare ``"amp"``. The JS-native reproduction of the
+    entity-splitting bug is therefore a plain multi-word query ("gt amp")
+    rather than Task 4's underscored-identifier query — same bug class
+    (a token colliding with an HTML entity NAME), reached via the query
+    shape that actually produces a bare "gt"/"amp" token in EACH tokenizer.
+    """
+    from okf_loom.render import _highlight
+    text = "cost > 50, A & B"
+    js_out = _run_static_highlight(text, ["gt", "amp"])
+    assert "&gt;" in js_out, f"&gt; entity shattered: {js_out!r}"
+    assert "&amp;" in js_out, f"&amp; entity shattered: {js_out!r}"
+    assert "&<mark>" not in js_out, f"<mark> spliced inside an entity: {js_out!r}"
+    # Cross-language proof: same (text, terms) -> byte-identical output.
+    py_out = _highlight(text, "gt amp")
+    assert js_out == py_out, f"static/live highlight diverge: {js_out!r} != {py_out!r}"
