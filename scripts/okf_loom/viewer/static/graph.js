@@ -29,6 +29,11 @@
   // stand alone in the single-file viewer, which has no wiki.js.
   var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
   var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
+  // Map a returning user's retired theme choice to the nearest new theme.
+  var LEGACY_THEMES = {
+    light: "technical-light", dark: "technical-dark",
+    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
+  };
 
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
@@ -394,6 +399,7 @@
   }
   function apMode() {
     var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
     if (!s || THEMES.indexOf(s) < 0) return "auto";
     return s.indexOf("dark") >= 0 ? "dark" : "light";
   }
