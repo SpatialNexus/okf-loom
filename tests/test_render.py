@@ -1688,3 +1688,17 @@ def test_p3_1_toc_absent_for_short_concept(tiny_good_bundle: _Path) -> None:
         "# Only Section\n\nText.\n", encoding="utf-8")
     html = _render_concept_html(tiny_good_bundle, "references/shortprobe")
     assert 'class="okf-toc"' not in html
+
+
+def test_p3_1_toc_escapes_heading_entities_once(tiny_good_bundle: _Path) -> None:
+    """Round 2 §6.1: ToC text is escaped exactly once (headings come from
+    already-escaped body HTML — no double-escaping of &, <, > etc.)."""
+    doc = tiny_good_bundle / "references" / "tocamp.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: TocAmp\ndescription: Amp probe.\n---\n\n"
+        "# Rendering & Feature Showcase\n\nA.\n\n# Second & Third\n\nB.\n\n# Fourth\n\nC.\n",
+        encoding="utf-8")
+    html = _render_concept_html(tiny_good_bundle, "references/tocamp")
+    toc = html.split('<nav class="okf-toc"', 1)[1].split("</nav>", 1)[0]
+    assert "Rendering &amp; Feature Showcase" in toc      # single-escaped
+    assert "&amp;amp;" not in toc, "double-escaped ampersand in ToC"
