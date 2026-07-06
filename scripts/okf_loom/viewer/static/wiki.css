@@ -372,6 +372,24 @@
   --okf-page-bg: #050607;
 }
 
+/* ============ Appearance modifiers (Round 2 §5.1) ====================
+ * Orthogonal, persisted runtime modifiers applied on <html> AFTER the theme
+ * blocks. :root[data-*] specificity (0,2,0) beats [data-theme] (0,1,0), so
+ * these win on any theme. Defaults = attribute ABSENT (today's contrasty
+ * look). The border block is placed AFTER the contrast block so
+ * border="off" (transparent) wins over contrast="soft" (--okf-border) on the
+ * shared --okf-border-strong; border="muted" and contrast="soft" agree. */
+:root[data-okf-contrast="soft"] {
+  --okf-fg:            var(--okf-fg-soft);
+  --okf-border-strong: var(--okf-border);          /* softer frames */
+  --okf-active-fill:   var(--okf-active-fill-soft);
+  --okf-active-fg:     var(--okf-active-fg-soft);
+  --okf-active-border: var(--okf-active-border-soft);
+  --okf-page-bg:       var(--okf-page-bg-soft);
+}
+:root[data-okf-border="muted"] { --okf-border-strong: var(--okf-border); }
+:root[data-okf-border="off"]   { --okf-border-strong: transparent; }
+
 /* ---- Reset / base ------------------------------------------------------ */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }

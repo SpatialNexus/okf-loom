@@ -1278,6 +1278,27 @@ def test_theme_blocks_override_full_token_set() -> None:
             )
 
 
+def test_appearance_contrast_and_border_modifier_blocks() -> None:
+    """Round 2 §5.1: soft-contrast + border modifiers are orthogonal root
+    data-attr blocks placed AFTER the theme blocks, border after contrast."""
+    css = _runtime_file("viewer", "static", "wiki.css").read_text(encoding="utf-8")
+    assert '[data-okf-contrast="soft"]' in css
+    assert '[data-okf-border="muted"]' in css
+    assert '[data-okf-border="off"]' in css
+    # Border block AFTER contrast block (so off's transparent wins on --okf-border-strong).
+    assert css.index('[data-okf-contrast="soft"]') < css.index('[data-okf-border="off"]')
+    # Contrast=soft remaps the six documented tokens to their soft variants.
+    # Split on the FULL selector (with `:root` + brace) so a stray mention of
+    # the bare attribute in a comment can't shadow the real block.
+    soft = css.split(':root[data-okf-contrast="soft"] {', 1)[1].split("}", 1)[0]
+    for token in ("--okf-fg:", "--okf-border-strong:", "--okf-active-fill:",
+                  "--okf-active-fg:", "--okf-active-border:", "--okf-page-bg:"):
+        assert token in soft, f"contrast=soft must remap {token}"
+    # Border modifiers drive --okf-border-strong.
+    off = css.split('[data-okf-border="off"]', 1)[1].split("}", 1)[0]
+    assert "--okf-border-strong: transparent" in off
+
+
 # ===========================================================================
 # iter-3 frontend fixes:
 #   P2-8  aliases render ONCE (subtitle is canonical, pills removed)
