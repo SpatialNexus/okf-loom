@@ -2418,6 +2418,12 @@ def test_footer_studio_button_opens_panel_on_non_concept_page(server_url, page):
     btn = page.wait_for_selector(".okf-studio-bar--status .okf-studio-open-btn", timeout=15000)
     btn.click()
     page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    # Non-concept page → the ternary opens CHANGES (the global feed), not Comments.
+    # openPanel() marks the active tab aria-selected="true"; only .okf-panel__tab
+    # carries aria-selected (rail buttons use aria-pressed), so this is unambiguous.
+    active = page.wait_for_selector('.okf-panel__tab[aria-selected="true"]', timeout=5000)
+    assert active.text_content() == "Changes"
+
 
 def test_no_footer_studio_button_on_desktop_concept(server_url, page):
     """Desktop concept pages have the rail, so NO duplicate footer Studio button."""
@@ -2426,3 +2432,18 @@ def test_no_footer_studio_button_on_desktop_concept(server_url, page):
     _wait_for_studio(page)
     page.wait_for_selector(".okf-rail", timeout=10000)
     assert page.query_selector(".okf-studio-open-btn") is None
+
+
+def test_footer_studio_button_on_mobile_concept_opens_comments(server_url, page):
+    """Mobile concept pages (rail hidden) get the Studio button; it opens Comments."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    btn = page.wait_for_selector(".okf-studio-bar--status .okf-studio-open-btn", timeout=15000)
+    btn.click()
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    # concept page → the Studio button opens the COMMENTS panel (not Changes).
+    # openPanel() marks the active tab aria-selected="true"; only .okf-panel__tab
+    # carries aria-selected (rail buttons use aria-pressed), so this is unambiguous.
+    active = page.wait_for_selector('.okf-panel__tab[aria-selected="true"]', timeout=5000)
+    assert active.text_content() == "Comments"

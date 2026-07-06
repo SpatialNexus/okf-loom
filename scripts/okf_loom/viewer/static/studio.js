@@ -378,7 +378,7 @@
   // rail. Opens Comments on a concept page (mobile), Changes elsewhere (the
   // global feed; a non-concept page has no per-concept comments).
   const studioBtn = el("button", { type: "button", class: "okf-studiobtn okf-studio-open-btn",
-    "aria-haspopup": "dialog", title: "Open the studio panel", "aria-label": "Open studio panel" },
+    "aria-controls": "okf-panel", title: "Open the studio panel", "aria-label": "Open studio panel" },
     [document.createTextNode("Studio")]);
   studioBtn.addEventListener("click", function () {
     openPanel(isConceptPage() ? "comments" : "changes");
