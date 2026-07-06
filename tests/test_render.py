@@ -1702,3 +1702,28 @@ def test_p3_1_toc_escapes_heading_entities_once(tiny_good_bundle: _Path) -> None
     toc = html.split('<nav class="okf-toc"', 1)[1].split("</nav>", 1)[0]
     assert "Rendering &amp; Feature Showcase" in toc      # single-escaped
     assert "&amp;amp;" not in toc, "double-escaped ampersand in ToC"
+
+
+# --- Round 2 §6.2: index dashboard data-okf-* attrs ------------------------
+
+
+def _render_index_html(bundle_root: _Path) -> str:
+    """Static-build the bundle and return its root index.html (mirror of
+    _render_concept_html — same imports/target, different output file)."""
+    from okf_loom import Bundle
+    from okf_loom.render import build_site
+    b = Bundle.load(bundle_root)
+    out = bundle_root / "_site_index"
+    build_site(b, out, target="static")
+    return (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_p3_2_index_cards_carry_filter_data_attrs(tiny_good_bundle):
+    """Round 2 §6.2: index cards + sections carry data-okf-* so wiki.js can
+    filter/sort/search without refetching; the server still renders the groups."""
+    html = _render_index_html(tiny_good_bundle)
+    assert 'class="okf-section"' in html and 'data-okf-type=' in html  # groups + type
+    assert 'data-okf-title=' in html
+    assert 'data-okf-search=' in html
+    # the type attr appears on BOTH the section and its cards
+    assert html.count('data-okf-type=') >= 2
