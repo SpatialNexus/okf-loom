@@ -1211,6 +1211,47 @@ def _search_corpus_json(bundle: Bundle) -> list[dict[str, Any]]:
 # Page rendering (shared with server.py via _render_* helpers)
 # ---------------------------------------------------------------------------
 
+# Editorial Workbench §6.1: on-page ToC (reader-facing, server-rendered).
+_TOC_HEADING_RE = re.compile(r'<h([23])\s+id="([^"]+)"[^>]*>(.*?)</h\1>', re.DOTALL)
+_TOC_TAG_RE = re.compile(r"<[^>]+>")
+_TOC_MIN_HEADINGS = 3
+
+
+def _build_toc_html(body_html: str) -> str:
+    """Server-rendered on-page Table of Contents (§6.1).
+
+    Scans the FINAL reading-column HTML (after link-rewrite + heading
+    demotion) for the ``<h2>``/``<h3>`` anchors the markdown renderer already
+    emitted (viewer/markdown.py assigns id slugs; ``_demote_headings`` keeps
+    them). Extracting from the rendered HTML — NOT parse.extract_headings —
+    keeps the ``#anchors`` byte-identical to the real ids (the two module
+    ``_slugify()``s diverge on ``_`` + empty titles) and uses the demoted
+    levels the reader sees, matching the studio Outline's ``h2,h3`` set.
+    Returns "" for docs with fewer than ``_TOC_MIN_HEADINGS`` headings so
+    trivially short pages get no ToC. Works with no JS (plain ``<a href``)
+    and is DISTINCT from the JS-only studio Outline overlay (``.okf-outline``).
+    """
+    heads = _TOC_HEADING_RE.findall(body_html)
+    items: list[str] = []
+    for level, slug, inner in heads:
+        text = _TOC_TAG_RE.sub("", inner).strip()  # strip inline tags (<code> …)
+        if not text:
+            continue
+        items.append(
+            f'<li class="okf-toc__item">'
+            f'<a class="okf-toc__link okf-toc__link--h{level}" '
+            f'href="#{_esc_attr_qs(slug)}">{_esc(text)}</a></li>'
+        )
+    if len(items) < _TOC_MIN_HEADINGS:
+        return ""
+    return (
+        '<nav class="okf-toc" aria-label="On this page">'
+        '<p class="okf-toc__title">On this page</p>'
+        f'<ul class="okf-toc__list">{"".join(items)}</ul>'
+        '</nav>'
+    )
+
+
 def _demote_headings(html: str) -> str:
     """Demote all HTML headings in ``html`` by one level (h1→h2, h2→h3, … h6→h6).
 
@@ -1416,6 +1457,10 @@ def _render_concept_page(
     # body becomes <h2>, `## Subsection` becomes <h3>, etc. h6 stays h6.
     body_html = _demote_headings(body_html)
 
+    # Editorial Workbench §6.1: on-page ToC from the FINAL body_html so its
+    # #anchors match the ids the renderer emitted (gated to >=3 headings).
+    toc_html = _build_toc_html(body_html)
+
     palette_for = palette
     type_color = palette_for.get(concept.type or "", "#94a3b8")
 
@@ -1592,6 +1637,7 @@ def _render_concept_page(
         .replace("__CONCEPT_DESCRIPTION__", _esc(concept.description))
         .replace("__CONCEPT_RESOURCE__", resource_html)
         .replace("__CONCEPT_TAGS__", tags_html)
+        .replace("__TOC_HTML__", toc_html)
         .replace("__CONCEPT_BODY__", body_html)
         .replace("__BACKLINKS_HTML__", backlinks_html)
         .replace("__OUTGOING_HTML__", outgoing_html)

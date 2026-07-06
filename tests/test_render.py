@@ -1657,3 +1657,34 @@ def test_iter3_all_fields_header_keys_actually_rendered(tmp_path: _Path) -> None
     assert '<span class="okf-tag">revenue</span>' in html, (
         "tag 'revenue' not rendered in header tags row"
     )
+
+
+# --- Round 2 §6.1: server-rendered on-page ToC -----------------------------
+
+
+def test_p3_1_toc_rendered_for_multi_heading_concept(tiny_good_bundle: _Path) -> None:
+    """Round 2 §6.1: a concept with >=3 rendered headings gets a server ToC
+    (no-JS), placed OUTSIDE .okf-page__body, with anchors matching the ids."""
+    doc = tiny_good_bundle / "references" / "tocprobe.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: TocProbe\n"
+        "description: Probe doc with several sections.\n---\n\n"
+        "# First Section\n\nAlpha.\n\n# Second Section\n\nBeta.\n\n"
+        "# Third Section\n\nGamma.\n", encoding="utf-8")
+    html = _render_concept_html(tiny_good_bundle, "references/tocprobe")
+    assert '<nav class="okf-toc"' in html
+    for slug in ("first-section", "second-section", "third-section"):
+        assert f'href="#{slug}"' in html, f"ToC missing #{slug}"
+        assert f'id="{slug}"' in html, f"body missing id {slug} (anchors must resolve)"
+    # ToC sits OUTSIDE the prose body (studio child-index/comment-mark tests).
+    assert html.index('class="okf-toc"') < html.index("okf-page__body")
+
+
+def test_p3_1_toc_absent_for_short_concept(tiny_good_bundle: _Path) -> None:
+    """Round 2 §6.1: docs with <3 headings get NO ToC (skip trivial pages)."""
+    doc = tiny_good_bundle / "references" / "shortprobe.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: ShortProbe\ndescription: One section.\n---\n\n"
+        "# Only Section\n\nText.\n", encoding="utf-8")
+    html = _render_concept_html(tiny_good_bundle, "references/shortprobe")
+    assert 'class="okf-toc"' not in html

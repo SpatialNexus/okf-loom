@@ -1519,6 +1519,30 @@ sup.okf-footnote-ref { line-height: 0; }
   font-weight: 600;
 }
 
+/* ---- On-page ToC (Round 2 §6.1) — server-rendered, no-JS, flat like nav.
+ * Namespaced .okf-toc* so it never collides with the JS-only studio Outline
+ * (.okf-outline in studio.css). */
+.okf-toc {
+  margin: 0 0 var(--okf-space-5);
+  padding: var(--okf-space-3) var(--okf-space-4);
+  border-left: 2px solid var(--okf-border-strong);
+  background: var(--okf-bg-elev);
+}
+.okf-toc__title {
+  margin: 0 0 var(--okf-space-2);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--okf-fg-muted);
+}
+.okf-toc__list { list-style: none; margin: 0; padding: 0; }
+.okf-toc__item { margin: 0; }
+.okf-toc__link {
+  display: block; padding: 3px 0;
+  text-decoration: none; color: var(--okf-fg-muted);
+  font-size: var(--okf-text-sm); line-height: 1.4;
+}
+.okf-toc__link:hover { color: var(--okf-accent); }
+.okf-toc__link--h3 { padding-left: var(--okf-space-4); }
+
 /* P2-62: local graph widget is now a labelled pill list, not unlabeled
  * SVG dots. Each pill shows a colour swatch + truncated neighbour title.
  * Round 2 Task 5: flattened — no card border/bg/padding; the widget sits
