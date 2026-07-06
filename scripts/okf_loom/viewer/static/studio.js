@@ -374,6 +374,16 @@
      el("kbd", { class: "okf-kbd", "aria-hidden": "true", text: paletteHint })]);
   paletteBtn.addEventListener("click", openPalette);
 
+  // Round 2 carryover: a direct studio opener for pages/viewports without the
+  // rail. Opens Comments on a concept page (mobile), Changes elsewhere (the
+  // global feed; a non-concept page has no per-concept comments).
+  const studioBtn = el("button", { type: "button", class: "okf-studiobtn okf-studio-open-btn",
+    "aria-haspopup": "dialog", title: "Open the studio panel", "aria-label": "Open studio panel" },
+    [document.createTextNode("Studio")]);
+  studioBtn.addEventListener("click", function () {
+    openPanel(isConceptPage() ? "comments" : "changes");
+  });
+
   // Round 2: Focus toggle (Workbench <-> Focus reading mode). Assigns the
   // module-scope `focusBtn` (declared further below, alongside setFocus/
   // toggleFocus) so setFocus can sync its aria-pressed; wired straight to
@@ -404,6 +414,14 @@
     // Bottom status strip: append as the last in-flow child of the flex-column
     // body so it pins to the viewport bottom (sticky, see studio.css).
     document.body.appendChild(bar);
+    // Round 2 carryover: show the direct Studio opener wherever the rail is
+    // ABSENT — non-concept pages (any width) OR concept pages on mobile
+    // (<=900). Desktop concept pages have the rail, so no footer duplication.
+    // (mountBar runs before body.okf-has-rail is set, so test the predicate
+    // directly.) Placed before the concept-only view controls so order reads
+    // Watch · Commands · Studio · [Rendered/Source/Split · Focus].
+    var railPresent = isConceptPage() && window.innerWidth > 900;
+    if (!railPresent) leftGroup.appendChild(studioBtn);
     if (isConceptPage()) {
       leftGroup.appendChild(viewSwitch);
       leftGroup.appendChild(focusBtn);

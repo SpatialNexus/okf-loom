@@ -2408,3 +2408,21 @@ def test_appearance_menu_sets_contrast_border_and_theme(server_url, page):
     page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="high"]')
     assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") is None
     assert page.evaluate("localStorage.getItem('okf-contrast')") is None
+
+
+def test_footer_studio_button_opens_panel_on_non_concept_page(server_url, page):
+    """Round 2 carryover: off-rail pages get a direct footer Studio opener."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/", wait_until="load")   # index — non-concept, no rail
+    # The button only appears once studio has booted + mountBar ran.
+    btn = page.wait_for_selector(".okf-studio-bar--status .okf-studio-open-btn", timeout=15000)
+    btn.click()
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+
+def test_no_footer_studio_button_on_desktop_concept(server_url, page):
+    """Desktop concept pages have the rail, so NO duplicate footer Studio button."""
+    page.set_viewport_size({"width": 1200, "height": 900})   # >900 → rail builds at boot
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-rail", timeout=10000)
+    assert page.query_selector(".okf-studio-open-btn") is None
