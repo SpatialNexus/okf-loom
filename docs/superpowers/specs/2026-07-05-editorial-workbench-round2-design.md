@@ -223,6 +223,8 @@ defines them** — intended (each family owns its soft look).
   canvas still reads acceptable — the canvas mirrors accent/select which soft leaves largely
   intact; document any needed mirror.
 
+> **Build reconciliation (2026-07-06, Phase-2 plan):** machinery mapping found there is **no** inline pre-paint boot script to extend, and 4 of 5 templates forbid inline `<script>` (CSP `script-src 'self'`). So `data-okf-contrast`/`data-okf-border` are read from localStorage and applied **post-paint** by the existing `wiki.js` (concept/index/search) and `graph.js` (graph/single-file) IIFEs — the same mechanism theme already uses. Defaults (today's look) stay attribute-absent, so only an opted-in `soft`/`muted`/`off` user sees a brief load flash, identical to the existing theme flash. Separately, the Cytoscape **graph canvas** mirrors tokens via hardcoded `GRAPH_COLORS` literals keyed by `data-theme`, so contrast/border do not reach the canvas in Phase 2 (documented limitation; the graph *chrome* still reflects them).
+
 ---
 
 ## 6. Phase 3 — Missing features (item 3, all four)
