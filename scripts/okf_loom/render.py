@@ -547,13 +547,15 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # Theme button (P2-74) + shared topbar nav fragment (P2-61)
 # ---------------------------------------------------------------------------
 
-# Valid data-theme values. wiki.css defines a token block per theme; the
-# button cycles them in this order. KEEP IN SYNC with the THEMES /
-# THEME_GLYPHS copies in wiki.js:27-28, graph.js:30-31 and studio.js:219-220
-# (each JS context loads without the others). Four Editorial-Workbench
-# themes: technical/swiss families in light + dark.
-# Swiss is the primary family (user preference) \u2014 listed first so the theme
-# cycle starts on Swiss and `auto` resolves into it.
+# The set of valid ``data-theme`` values. wiki.css defines a token block per
+# theme. KEEP IN SYNC with the THEMES / THEME_GLYPHS copies in wiki.js:27-28,
+# graph.js:30-31 and studio.js:219-220 (each JS context loads without the
+# others). Four Editorial-Workbench themes: technical/swiss families in
+# light + dark. `_theme_button_html` no longer cycles this tuple; it only
+# membership-tests `initial_theme` against it and hyphen-partitions the match
+# into family/mode. The order is retained solely for (a) the JS-mirror sync
+# contract and (b) auto resolving into Swiss (the primary family), which is
+# why Swiss stays listed first.
 _THEMES: tuple[str, ...] = (
     "swiss-light", "swiss-dark", "technical-light", "technical-dark",
 )

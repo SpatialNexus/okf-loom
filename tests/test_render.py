@@ -292,6 +292,7 @@ from okf_loom.render import (  # noqa: E402
     _render_subtitle,
     _strip_body_citations_section,
     _is_typed_relation_target_raw,
+    _theme_button_html,
 )
 
 
@@ -643,6 +644,37 @@ def test_appearance_menu_replaces_theme_cycle_button(tiny_good_bundle: _Path) ->
     # P1-3 topbar contract survives.
     assert 'role="search"' in html
     assert ">Graph<" in html
+
+
+def test_appearance_menu_reflects_initial_theme() -> None:
+    """The server reflects the initial theme into the popover's aria-checked
+    state (later tasks read it to seed the client). Family/mode come from the
+    hyphen-split of ``initial_theme``; contrast/border default high/on. A value
+    outside ``_THEMES`` (e.g. ``auto``) falls back to the swiss + auto default."""
+    def opt(setk: str, val: str, checked: bool) -> str:
+        return (
+            f'data-okf-set="{setk}" data-okf-val="{val}" '
+            f'aria-checked="{"true" if checked else "false"}"'
+        )
+
+    # swiss-light -> family=swiss, mode=light, contrast=high, border=on checked.
+    html = _theme_button_html("swiss-light")
+    for setk, val in (("family", "swiss"), ("mode", "light"),
+                      ("contrast", "high"), ("border", "on")):
+        assert opt(setk, val, True) in html, f"{setk}={val} should be checked"
+    for setk, val in (("family", "technical"), ("mode", "dark"),
+                      ("mode", "auto"), ("contrast", "soft"),
+                      ("border", "muted"), ("border", "off")):
+        assert opt(setk, val, False) in html, f"{setk}={val} should be unchecked"
+
+    # A non-_THEMES value falls back to the documented default: swiss + auto.
+    html_auto = _theme_button_html("auto")
+    assert opt("mode", "auto", True) in html_auto, "auto should select mode=auto"
+    assert opt("family", "swiss", True) in html_auto, (
+        "auto should default family=swiss"
+    )
+    assert opt("mode", "light", False) in html_auto
+    assert opt("family", "technical", False) in html_auto
 
 
 def test_p1_3_spa_concept_nav_urls_extensionless(
