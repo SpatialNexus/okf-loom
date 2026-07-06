@@ -256,6 +256,8 @@ Larger and partly server-dependent — firm up each sub-plan when Phase 3 starts
   (`showConflictModal` ~3816) for a Changes-tab diff (today it's an event feed,
   `renderChangeList` ~2548).
 
+> **Build reconciliation (2026-07-06, Phase-3 plan):** machinery mapping fixed line refs and firmed the sub-plans. **6.1** the ToC keys on the *rendered* reading-column `<h2>`/`<h3>` (the renderer demotes source `#`→`<h2>`; `reference/cli.md` is all `#` so a source-level ToC would be empty), extracted by regex over the final `body_html` so `#anchors` match the emitted ids (the two `_slugify()`s diverge); gate ≥3 headings; new `.okf-toc*` in `wiki.css` (no-JS), distinct from the JS-only studio Outline. **6.2** the real index renderer is `_render_index_page` (render.py ~2002, both serve+static); the card grid is already responsive so "underuses horizontal space" is the `--okf-maxw` cap — widen via a new `--okf-index-maxw`; add `data-okf-*` to cards and enhance in `wiki.js` (studio.js is serve-only). **6.3** relevance sort is already satisfied on all three paths; the deltas are match-highlighting (escape-then-`<mark>`, both search-page renderers) + static result-meta parity + match-centred snippets (a prerequisite for meaningful highlighting); the live-suggest dropdown is left as-is (its a11y contract). **6.4** RUN posts the intent as a `/__comment` directive (the existing studio→agent channel — no new endpoint); the Changes diff reuses `/__diff` via an extracted `renderDiffInto()` (change events already carry `detail.before` + `rev`); the validation count is a read-only, token-gated GET `/__validate` cached on `studio.current_rev()`, completing SPEC §3.5's status-strip element.
+
 ---
 
 ## 7. Verification (per phase, before "done")
