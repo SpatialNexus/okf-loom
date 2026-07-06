@@ -543,7 +543,14 @@
     if (!root || !document.body.classList.contains("okf-viewer--index")) return;
     var sections = Array.prototype.slice.call(root.querySelectorAll(".okf-section"));
     if (!sections.length) return;
-    var cards = Array.prototype.slice.call(root.querySelectorAll(".okf-card"));
+    // Snapshot each section's ORIGINAL (server-rendered) card order once. A
+    // fresh sort has no memory of that order, so returning to "Grouped"
+    // (default) must re-append these exact <li> nodes in their captured order
+    // — moving whole nodes only, never touching their internals, so the
+    // .okf-concept-list li first-anchor contract holds.
+    var origCards = sections.map(function (s) {
+      return Array.prototype.slice.call(s.querySelectorAll(".okf-card"));
+    });
     var types = [];
     sections.forEach(function (s) {
       var t = s.getAttribute("data-okf-type");
@@ -613,17 +620,23 @@
           cs[i].getAttribute("data-okf-type") === uiState.type ? "true" : "false");
       }
       var anyShown = false;
-      sections.forEach(function (s) {
+      sections.forEach(function (s, idx) {
         var lis = s.querySelectorAll(".okf-card"), shown = 0, j;
         for (j = 0; j < lis.length; j++) {
           var vis = cardMatches(lis[j]);
           lis[j].hidden = !vis;
           if (vis) { shown++; anyShown = true; }
         }
-        if (uiState.sort !== "default") {
-          var ul = s.querySelector(".okf-concept-list");
-          if (ul) {
-            var arr = Array.prototype.slice.call(ul.querySelectorAll(".okf-card"));
+        // Reorder whole <li> nodes only (never their internals — first-anchor
+        // contract): sort by title, or RESTORE the snapshotted server order
+        // when back on "Grouped" (default) so the reset is not a no-op.
+        var ul = s.querySelector(".okf-concept-list");
+        if (ul) {
+          var arr;
+          if (uiState.sort === "default") {
+            arr = origCards[idx];   // restore original server-rendered order
+          } else {
+            arr = Array.prototype.slice.call(ul.querySelectorAll(".okf-card"));
             arr.sort(function (a, b) {
               var at = (a.getAttribute("data-okf-title") || "").toLowerCase();
               var bt = (b.getAttribute("data-okf-title") || "").toLowerCase();
@@ -631,8 +644,8 @@
               var lt = at < bt ? -1 : 1;
               return uiState.sort === "title-desc" ? -lt : lt;
             });
-            arr.forEach(function (n) { ul.appendChild(n); });  // reorder <li> nodes only
           }
+          arr.forEach(function (n) { ul.appendChild(n); });  // reorder <li> nodes only
         }
         s.hidden = (shown === 0);
       });

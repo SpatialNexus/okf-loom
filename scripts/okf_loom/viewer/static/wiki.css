@@ -1368,6 +1368,11 @@ sup.okf-footnote-ref { line-height: 0; }
   box-shadow: var(--okf-shadow);
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
+/* Round 2 §6.2: enhanceIndex() filters by setting [hidden] on cards. The
+ * author .okf-card { display:flex } above beats the UA [hidden] rule by
+ * cascade ORIGIN, so hidden cards would stay visible — restate display:none
+ * here (mirrors .okf-appearance__menu[hidden] above). */
+.okf-card[hidden] { display: none; }
 .okf-card:hover {
   border-color: var(--okf-type-accent, var(--okf-border-strong));
   transform: translateY(-1px);

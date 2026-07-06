@@ -2458,19 +2458,76 @@ def test_topbar_controls_right_aligned_on_index(server_url, page):
 
 
 def test_index_dashboard_filters_sorts_and_searches(server_url, page):
-    """Round 2 §6.2: the index gains a client toolbar; chips filter by type,
-    search-within narrows, and the empty-state shows when nothing matches."""
+    """Round 2 §6.2: the index client toolbar filters by type (hiding whole
+    non-matching sections), search-within RENDER-hides non-matching cards
+    (display:none, not merely the [hidden] attribute), sort reorders whole
+    <li> nodes and "Grouped" restores the original server order, and the
+    empty-state shows when nothing matches. The render-visibility and
+    sort/restore assertions are deliberately strict: asserting only the
+    [hidden] attribute (or never exercising sort) is what let two functional
+    defects ship — a card that stayed display:flex despite [hidden], and a
+    "Grouped" reset that was a silent no-op after any sort."""
+    # JS reader: current DOM order of the multi-card Table section's titles.
+    read_table = (
+        "() => Array.from(document.querySelectorAll("
+        "'.okf-section[data-okf-type=\"Table\"] .okf-card'"
+        ")).map(c => c.getAttribute('data-okf-title'))"
+    )
     page.set_viewport_size({"width": 1200, "height": 900})
     page.goto(f"{server_url}/", wait_until="load")
     page.wait_for_selector(".okf-index-toolbar", timeout=15000)
     chips = page.query_selector_all(".okf-index-chip")
     assert len(chips) >= 2, "expected an All chip + >=1 type chip"
-    # Filtering to one type hides at least one section (multi-type bundle).
+
+    # --- Type chip filters by hiding whole (non-matching-type) sections. ---
     total_sections = len(page.query_selector_all(".okf-section"))
     page.click('.okf-index-chip:not([data-okf-type=""])')
     page.wait_for_function(
         "() => Array.from(document.querySelectorAll('.okf-section'))"
         ".filter(s => s.hidden).length >= 1", timeout=5000)
-    # Search-within with no match shows the empty state.
+    # Reset to All so the sort/search assertions run on the full index.
+    page.click('.okf-index-chip[data-okf-type=""]')
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.okf-section'))"
+        ".filter(s => s.hidden).length === 0", timeout=5000)
+
+    # --- Sort reorders whole <li> nodes; "Grouped" restores original order. ---
+    # The demo's Table section is the only multi-card group and its server
+    # order is already A-Z, so Z-A is the discriminating sort that actually
+    # MOVES nodes — proving both the reorder and (the shipped bug) the restore.
+    original = page.evaluate(read_table)
+    assert len(original) >= 2, f"need a multi-card section to test sort; got {original}"
+    reversed_expected = list(reversed(sorted(original, key=str.lower)))
+    assert reversed_expected != original, (
+        f"Table order {original} is symmetric; pick a section where Z-A moves nodes")
+    page.select_option(".okf-index-toolbar__sort", "title-desc")
+    page.wait_for_function(
+        "(exp) => JSON.stringify((" + read_table + ")()) === JSON.stringify(exp)",
+        arg=reversed_expected, timeout=5000)
+    assert page.evaluate(read_table) == reversed_expected, "Z-A sort did not reorder"
+    # Back to Grouped MUST restore the original server order (locks the reset bug).
+    page.select_option(".okf-index-toolbar__sort", "default")
+    page.wait_for_function(
+        "(exp) => JSON.stringify((" + read_table + ")()) === JSON.stringify(exp)",
+        arg=original, timeout=5000)
+    assert page.evaluate(read_table) == original, "Grouped did not restore original order"
+
+    # --- Search-within RENDER-hides non-matching cards (locks the display bug). ---
+    # "revenue" is in the Orders card's data-okf-search but not Customers'.
+    orders_card = ('.okf-section[data-okf-type="Table"] '
+                   '.okf-card[data-okf-title="Orders"]')
+    customers_card = ('.okf-section[data-okf-type="Table"] '
+                      '.okf-card[data-okf-title="Customers"]')
+    page.fill(".okf-index-toolbar__search", "revenue")
+    # The non-matching card must be RENDER-hidden (display:none), not merely
+    # carry [hidden] (which the .okf-card display:flex rule overrode pre-fix).
+    page.wait_for_function(
+        "(sel) => getComputedStyle(document.querySelector(sel)).display === 'none'",
+        arg=customers_card, timeout=5000)
+    assert page.eval_on_selector(
+        orders_card, "el => getComputedStyle(el).display") != "none", (
+        "matching card should stay visible under search-within")
+
+    # --- Search-within with no match shows the empty state. ---
     page.fill(".okf-index-toolbar__search", "zzzznomatchxyzzy")
     page.wait_for_selector(".okf-index-empty:not([hidden])", timeout=5000)
