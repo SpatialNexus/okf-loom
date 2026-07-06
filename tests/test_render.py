@@ -1735,3 +1735,31 @@ def test_p3_2_index_cards_carry_filter_data_attrs(tiny_good_bundle):
     card_tag = re.search(r'<li class="okf-card"[^>]*>', html)
     assert card_tag and 'data-okf-type=' in card_tag.group(0), \
         "card <li> opening tag must carry data-okf-type"
+
+
+# --- Round 2 §6.3: search quality — live renderer ---------------------------
+
+
+def test_p3_3_live_search_highlights_query_terms(tiny_good_bundle):
+    """Round 2 §6.3: the live search renderer wraps query-term matches in
+    <mark> and keeps the result meta (type/path). `Bundle` is already
+    module-imported at test_render.py:19."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="serve", name=b.name, config={}, query="users",
+        results=[{"title": "Users", "concept_id": "tables/users", "id": "tables/users",
+                  "description": "The users table stores users.", "type": "BigQuery Table"}])
+    assert "<mark>" in html, "query terms must be highlighted"
+    assert 'class="okf-search-result__meta' in html, "live meta must survive"
+
+
+def test_p3_3_live_search_tolerates_missing_fields(tiny_good_bundle):
+    """Round 2 §6.3: a result with no type/description/snippets still renders
+    (the iter2 h1 test uses exactly this shape)."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="static", name=b.name, config={}, query="orders",
+        results=[{"title": "Orders", "concept_id": "c", "id": "c"}])
+    assert 'class="okf-search-result"' in html  # no crash on missing fields

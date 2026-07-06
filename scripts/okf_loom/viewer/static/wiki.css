@@ -1850,6 +1850,18 @@ details.okf-frontmatter th { background: var(--okf-bg-inset); }
 }
 .okf-search-empty { color: var(--okf-fg-muted); padding: var(--okf-space-7) 0; text-align: center; }
 
+/* ---- Search match highlight + static type parity (Round 2 §6.3) ------ */
+.okf-search-result mark, .okf-search-snippet mark {
+  background: var(--okf-accent-bg);
+  color: inherit;
+  font-weight: 600;
+  border-radius: var(--okf-radius-sm);
+  padding: 0 2px;
+}
+/* The live renderer sets an inline per-type colour; the static renderer has
+ * no palette, so give the type label a token default it can fall back to. */
+.okf-search-result__type { color: var(--okf-accent); }
+
 /* ---- Hover popover (P2-70: role=tooltip, focus + hover) --------------- */
 .okf-popover {
   position: fixed;

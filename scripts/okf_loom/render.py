@@ -2286,6 +2286,30 @@ def _render_index_page(
     )
 
 
+_HIGHLIGHT_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _highlight(text: str, query: str, *, limit: int = 200) -> str:
+    """Escape ``text``, truncate to ``limit``, and wrap query-term occurrences
+    in ``<mark>`` (Round 2 §6.3). Escaping happens FIRST; ``<mark>`` tags are
+    inserted around the already-escaped runs, so no user text can break out of
+    the markup (CSP-safe; mirrors the static-search.js ``highlight()``). Terms
+    are the query's word tokens (>=2 chars), matched case-insensitively."""
+    s = str(text or "")[:limit]
+    esc = _esc(s)
+    terms = {m.group(0).lower() for m in _HIGHLIGHT_WORD_RE.finditer(query or "")}
+    terms = [t for t in terms if len(t) >= 2]
+    if not terms or not esc:
+        return esc
+    # Match on the escaped string; word tokens escape to themselves, so this is
+    # exact. Longest-first so overlapping terms don't half-wrap.
+    pat = re.compile(
+        "(" + "|".join(re.escape(_esc(t)) for t in sorted(terms, key=len, reverse=True)) + ")",
+        re.IGNORECASE,
+    )
+    return pat.sub(r"<mark>\1</mark>", esc)
+
+
 def _render_search_page(
     bundle: Bundle,
     *,
@@ -2309,7 +2333,10 @@ def _render_search_page(
     for r in results:
         cid = r.get("concept_id") or r.get("id") or ""
         title = r.get("title") or cid
-        desc = r.get("description") or (r.get("snippets") or [""])[0]
+        # §6.3: prefer the match-centred snippet the backend computed
+        # (_extract_snippets) so the highlighted term is actually visible;
+        # fall back to the curated description, then empty.
+        desc = (r.get("snippets") or [None])[0] or r.get("description") or ""
         url = ("/" + cid) if mode in ("serve", "spa") else (cid + ".html")
         ctype = r.get("type") or ""
         if not ctype:
@@ -2327,12 +2354,12 @@ def _render_search_page(
         )
         result_parts.append(
             f'<article class="okf-search-result" style="--okf-type-accent:{_esc(color)}">'
-            f'<h3><a href="{_esc(url)}" class="okf-internal">{_esc(title)}</a></h3>'
+            f'<h3><a href="{_esc(url)}" class="okf-internal">{_highlight(title, query)}</a></h3>'
             # iter1 P3-13: concept-id moved OUT of the <h3> so the heading
             # outline announces only the title (screen-reader heading-list
             # navigation no longer reads "title concept/id" as one string).
             f'<div class="okf-search-result__meta okf-muted">{type_chip} {_esc(cid)}</div>'
-            f'<div class="okf-search-snippet">{_esc(str(desc)[:200])}</div>'
+            f'<div class="okf-search-snippet">{_highlight(desc, query)}</div>'
             f'</article>'
         )
     results_html = "\n".join(result_parts) or '<p class="okf-search-empty">No results.</p>'
