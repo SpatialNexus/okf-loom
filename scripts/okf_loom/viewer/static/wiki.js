@@ -531,16 +531,140 @@
     });
   }
 
+  // ---- Index dashboard (Round 2 §6.2) ---------------------------------
+  // Progressive enhancement over the server-rendered type-groups: type-filter
+  // chips + sort + search-within. No-JS users keep the full server groups (we
+  // only ADD a toolbar + toggle visibility; we never remove server content).
+  // Filtering hides <li>/<section> nodes (never reorders their internals) so
+  // the .okf-concept-list li first-anchor contract (studio stampConceptIds)
+  // holds. Gated on the index page (.okf-index + body.okf-viewer--index).
+  function enhanceIndex() {
+    var root = document.querySelector(".okf-index");
+    if (!root || !document.body.classList.contains("okf-viewer--index")) return;
+    var sections = Array.prototype.slice.call(root.querySelectorAll(".okf-section"));
+    if (!sections.length) return;
+    var cards = Array.prototype.slice.call(root.querySelectorAll(".okf-card"));
+    var types = [];
+    sections.forEach(function (s) {
+      var t = s.getAttribute("data-okf-type");
+      if (t && types.indexOf(t) < 0) types.push(t);   // document (group) order
+    });
+
+    var uiState = { type: "", sort: "default", q: "" };
+
+    var toolbar = document.createElement("div");
+    toolbar.className = "okf-index-toolbar";
+    var chips = document.createElement("div");
+    chips.className = "okf-index-toolbar__chips";
+    chips.setAttribute("role", "group");
+    chips.setAttribute("aria-label", "Filter by type");
+    function makeChip(val, label) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "okf-index-chip";
+      b.textContent = label;
+      b.setAttribute("data-okf-type", val);
+      b.setAttribute("aria-pressed", val === uiState.type ? "true" : "false");
+      b.addEventListener("click", function () {
+        uiState.type = (uiState.type === val) ? "" : val;   // toggle off if re-clicked
+        apply();
+      });
+      return b;
+    }
+    chips.appendChild(makeChip("", "All"));
+    types.forEach(function (t) { chips.appendChild(makeChip(t, t)); });
+
+    var controls = document.createElement("div");
+    controls.className = "okf-index-toolbar__controls";
+    var search = document.createElement("input");
+    search.type = "search";
+    search.className = "okf-index-toolbar__search";
+    search.setAttribute("aria-label", "Filter concepts on this page");
+    search.placeholder = "Filter this index…";
+    var sort = document.createElement("select");
+    sort.className = "okf-index-toolbar__sort";
+    sort.setAttribute("aria-label", "Sort concepts");
+    [["default", "Sort: Grouped"], ["title", "Sort: Title A–Z"],
+     ["title-desc", "Sort: Title Z–A"]].forEach(function (o) {
+      var opt = document.createElement("option");
+      opt.value = o[0]; opt.textContent = o[1];
+      sort.appendChild(opt);
+    });
+    controls.appendChild(search);
+    controls.appendChild(sort);
+    toolbar.appendChild(chips);
+    toolbar.appendChild(controls);
+
+    var emptyMsg = document.createElement("p");
+    emptyMsg.className = "okf-index-empty";
+    emptyMsg.setAttribute("role", "status");
+    emptyMsg.textContent = "No concepts match your filter.";
+    emptyMsg.hidden = true;
+
+    function cardMatches(card) {
+      if (uiState.type && card.getAttribute("data-okf-type") !== uiState.type) return false;
+      if (uiState.q && (card.getAttribute("data-okf-search") || "").indexOf(uiState.q) < 0) return false;
+      return true;
+    }
+    function apply() {
+      var cs = chips.querySelectorAll(".okf-index-chip"), i;
+      for (i = 0; i < cs.length; i++) {
+        cs[i].setAttribute("aria-pressed",
+          cs[i].getAttribute("data-okf-type") === uiState.type ? "true" : "false");
+      }
+      var anyShown = false;
+      sections.forEach(function (s) {
+        var lis = s.querySelectorAll(".okf-card"), shown = 0, j;
+        for (j = 0; j < lis.length; j++) {
+          var vis = cardMatches(lis[j]);
+          lis[j].hidden = !vis;
+          if (vis) { shown++; anyShown = true; }
+        }
+        if (uiState.sort !== "default") {
+          var ul = s.querySelector(".okf-concept-list");
+          if (ul) {
+            var arr = Array.prototype.slice.call(ul.querySelectorAll(".okf-card"));
+            arr.sort(function (a, b) {
+              var at = (a.getAttribute("data-okf-title") || "").toLowerCase();
+              var bt = (b.getAttribute("data-okf-title") || "").toLowerCase();
+              if (at === bt) return 0;
+              var lt = at < bt ? -1 : 1;
+              return uiState.sort === "title-desc" ? -lt : lt;
+            });
+            arr.forEach(function (n) { ul.appendChild(n); });  // reorder <li> nodes only
+          }
+        }
+        s.hidden = (shown === 0);
+      });
+      emptyMsg.hidden = anyShown;
+    }
+
+    search.addEventListener("input", debounce(function () {
+      uiState.q = search.value.trim().toLowerCase(); apply();
+    }, 120));
+    sort.addEventListener("change", function () { uiState.sort = sort.value; apply(); });
+
+    // Insert the toolbar after the hero (if present), else at the top; the
+    // empty-state message follows the toolbar.
+    var hero = root.querySelector(".okf-hero");
+    if (hero && hero.nextSibling) root.insertBefore(toolbar, hero.nextSibling);
+    else root.insertBefore(toolbar, root.firstChild);
+    if (toolbar.nextSibling) root.insertBefore(emptyMsg, toolbar.nextSibling);
+    else root.appendChild(emptyMsg);
+  }
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
       bindLinkHovers();
       renderLocalGraph();
       bindHeadingAnchors();
+      enhanceIndex();
     });
   } else {
     bindLinkHovers();
     renderLocalGraph();
     bindHeadingAnchors();
+    enhanceIndex();
   }
   // Re-apply after live SSE body patches (studio dispatches this event).
   window.addEventListener("okf-loom:bodyPatched", bindHeadingAnchors);

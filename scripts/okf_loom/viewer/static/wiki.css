@@ -122,6 +122,7 @@
    * within --okf-page-maxw so ultra-wide monitors get margins, not
    * mile-long lines. */
   --okf-maxw: 1200px;          /* index/search shell */
+  --okf-index-maxw: 1440px;    /* Round 2 §6.2 — index dashboard uses more width */
   --okf-prose-maxw: 76ch;      /* body text measure */
   --okf-page-maxw: 1200px;     /* concept page shell (sidebar + article) */
   --okf-topbar-h: 52px;
@@ -1453,6 +1454,41 @@ sup.okf-footnote-ref { line-height: 0; }
 .okf-subdirs a:hover { border-color: var(--okf-border-strong); text-decoration: none; }
 .okf-subdirs strong { display: block; }
 .okf-subdirs .okf-muted { display: block; margin-top: 2px; }
+
+/* Round 2 §6.2: the index dashboard uses more horizontal width than the
+ * reading/search shell (its card grid is already responsive auto-fill). */
+.okf-index { max-width: var(--okf-index-maxw); }
+
+/* ---- Index dashboard toolbar (Round 2 §6.2) ------------------------- */
+.okf-index-toolbar {
+  display: flex; flex-wrap: wrap; gap: var(--okf-space-3);
+  align-items: center; justify-content: space-between;
+  margin: 0 0 var(--okf-space-4);
+  padding-bottom: var(--okf-space-3);
+  border-bottom: var(--okf-border-w) solid var(--okf-border);
+}
+.okf-index-toolbar__chips { display: flex; flex-wrap: wrap; gap: var(--okf-space-1); }
+.okf-index-toolbar__controls { display: flex; flex-wrap: wrap; gap: var(--okf-space-2); }
+.okf-index-chip {
+  padding: 3px 12px; font: inherit; font-size: var(--okf-text-sm);
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-pill);
+  background: transparent; color: var(--okf-fg-muted); cursor: pointer;
+}
+.okf-index-chip:hover { color: var(--okf-fg); border-color: var(--okf-border-strong); }
+.okf-index-chip[aria-pressed="true"] {
+  color: var(--okf-active-fg);
+  background: var(--okf-active-fill);
+  border-color: var(--okf-active-border);
+}
+.okf-index-chip:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+.okf-index-toolbar__search, .okf-index-toolbar__sort {
+  padding: 4px 10px; font: inherit; font-size: var(--okf-text-sm);
+  border: var(--okf-border-w) solid var(--okf-border-strong);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-elev); color: var(--okf-fg);
+}
+.okf-index-empty { color: var(--okf-fg-muted); padding: var(--okf-space-5) 0; }
 
 /* ---- Page (concept) layout -------------------------------------------- */
 .okf-page {

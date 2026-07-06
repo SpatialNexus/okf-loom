@@ -2455,3 +2455,22 @@ def test_topbar_controls_right_aligned_on_index(server_url, page):
     page.goto(f"{server_url}/", wait_until="load")
     left = page.eval_on_selector(".okf-topbar__controls", "el => el.getBoundingClientRect().left")
     assert left > 720, f"topbar controls should be right-aligned on index (left>720 of 1440), got {left}"
+
+
+def test_index_dashboard_filters_sorts_and_searches(server_url, page):
+    """Round 2 §6.2: the index gains a client toolbar; chips filter by type,
+    search-within narrows, and the empty-state shows when nothing matches."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/", wait_until="load")
+    page.wait_for_selector(".okf-index-toolbar", timeout=15000)
+    chips = page.query_selector_all(".okf-index-chip")
+    assert len(chips) >= 2, "expected an All chip + >=1 type chip"
+    # Filtering to one type hides at least one section (multi-type bundle).
+    total_sections = len(page.query_selector_all(".okf-section"))
+    page.click('.okf-index-chip:not([data-okf-type=""])')
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.okf-section'))"
+        ".filter(s => s.hidden).length >= 1", timeout=5000)
+    # Search-within with no match shows the empty state.
+    page.fill(".okf-index-toolbar__search", "zzzznomatchxyzzy")
+    page.wait_for_selector(".okf-index-empty:not([hidden])", timeout=5000)
