@@ -564,7 +564,12 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
   border-bottom: var(--okf-border-w) solid var(--okf-border);
   position: sticky;
   top: 0;
-  z-index: 10;
+  /* Above the graph page's overlay tiers (signal bar z21, legend/detail ≤z40)
+   * so the Aa ▾ Appearance popover — which lives inside the topbar's stacking
+   * context — is visible + clickable over them; still below the studio
+   * modal/palette tiers (z70+). (Was z10, which trapped the popover under the
+   * graph signal bar once Fix A moved the controls right.) */
+  z-index: 50;
   flex-shrink: 0;
 }
 /* Nav-collapse toggle (Editorial Workbench §3.2), injected into the top bar
