@@ -73,7 +73,9 @@
    * (below) so actions+divider hug together on the left. */
   justify-content: flex-start;
 }
-.okf-studio-bar--status .okf-studio-bar__group--right {
+/* Round 2: push the divider (and the ambient group after it) to the right so
+ * the divider sits BESIDE the ambient readouts, not hugging the actions. */
+.okf-studio-bar--status .okf-studio-bar__divider {
   margin-left: auto;
 }
 /* Actions read as bordered .okf-studiobtn (the base rule already provides the
@@ -1213,7 +1215,7 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   border: var(--okf-border-w) solid transparent;
   border-radius: var(--okf-radius-sm);
   background: transparent;
-  color: var(--okf-fg-muted);
+  color: var(--okf-fg);      /* Round 2: rail icons read clearly at rest (was --okf-fg-muted) */
   cursor: pointer;
 }
 .okf-rail__btn:hover { color: var(--okf-fg); background: var(--okf-bg-inset); }
