@@ -10,7 +10,6 @@
  *
  * Optional window flags:
  *   - OKF_LOOM_INITIAL_LAYOUT (default "cose")
- *   - OKF_LOOM_INITIAL_THEME  (default "light")
  *   - OKF_CONCEPT_PAGE_PREFIX (default "/") - base URL for opening a concept
  *     page when "Open page" is clicked (graph view only).
  *
@@ -92,12 +91,10 @@
   // The graph_page.html template passes config via data-* attributes on
   // #okf-graph instead of window.* globals, so the server's CSP
   // (script-src 'self' - no 'unsafe-inline') doesn't block initialisation.
-  // MUST be read before the theme block below uses INITIAL_THEME.
   var graphEl = document.getElementById("okf-graph");
   var DATA_URL = (graphEl && graphEl.getAttribute("data-graph-url")) || window.OKF_LOOM_GRAPH_DATA_URL || null;
   var CONCEPT_PREFIX = (graphEl && graphEl.getAttribute("data-concept-prefix")) || window.OKF_CONCEPT_PAGE_PREFIX || "/";
   var INITIAL_LAYOUT = (graphEl && graphEl.getAttribute("data-initial-layout")) || window.OKF_LOOM_INITIAL_LAYOUT || "cose";
-  var INITIAL_THEME = (graphEl && graphEl.getAttribute("data-initial-theme")) || window.OKF_LOOM_INITIAL_THEME || "light";
   // P1-3: build mode (serve|spa|static) is emitted on <body data-okf-mode>
   // by the graph_page template. In static mode the Open-page href needs a
   // .html suffix (concept pages are emitted as <id>.html; the bare path
@@ -230,7 +227,7 @@
 
   var onThemeApplied = null;   // registered by init() → syncLabelColour (canvas re-sync)
   function applyTheme(t, persist) {
-    if (THEMES.indexOf(t) < 0) t = "light";
+    if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
     if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
     // (Round 2) The trigger is the Appearance popover ("Aa ▾") — no glyph to
@@ -358,16 +355,21 @@
     function lin(v) { return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   }
-  // Honour saved preference on load; fall back to OS pref, then INITIAL_THEME.
+  // Swiss-first OS resolution — IDENTICAL to wiki.js resolveAuto, so the graph /
+  // single-file viewer resolves the SAME theme as the reading pages (no legacy
+  // "light"/"dark" names, no INITIAL_THEME divergence). Consistency fix.
+  function resolveAutoTheme() {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return dark ? "swiss-dark" : "swiss-light";
+  }
+  // Honour a saved preference (migrating a retired name); else follow OS within
+  // the Swiss family — same logic as wiki.js currentTheme/resolveAuto boot.
   try {
     var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];
     if (saved && THEMES.indexOf(saved) >= 0) applyTheme(saved);
-    else {
-      var mq = window.matchMedia("(prefers-color-scheme: dark)");
-      if (mq && mq.matches) applyTheme("dark");
-      else applyTheme(INITIAL_THEME);
-    }
-  } catch (e) { applyTheme(INITIAL_THEME); }
+    else applyTheme(resolveAutoTheme(), false);
+  } catch (e) { applyTheme("swiss-light"); }
   // ---- Appearance menu (Round 2 §5.3) --------------------------------
   // Same popover as wiki.js, wired here for the graph + single-file viewers
   // (graph.js is inlined into single_file). Reuses graph's applyTheme (which
@@ -1279,7 +1281,7 @@
           var saved = localStorage.getItem(STORAGE_KEY);
           if (saved && THEMES.indexOf(saved) >= 0) return;
         } catch (err) {}
-        applyTheme(e.matches ? "dark" : "light");
+        applyTheme(resolveAutoTheme());
         syncLabelColour();
       };
       if (colourSchemeMq.addEventListener) {
