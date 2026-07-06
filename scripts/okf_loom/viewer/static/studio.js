@@ -1394,7 +1394,7 @@
     hint.appendChild(el("kbd", { class: "okf-composer__kbd", text: "Esc" }));
     hint.appendChild(document.createTextNode(" clears selection anchor"));
     const cancel = el("button", { type: "button", class: "okf-iconbtn", text: "Cancel" });
-    const submit = el("button", { type: "button", class: "okf-studiobtn", text: "Send" });
+    const submit = el("button", { type: "button", class: "okf-studiobtn okf-composer__submit", text: "Send" });
     function refreshAnchor() {
       const a = state.draftAnchor || { kind: "concept", ref: state.conceptId };
       anchorRef.textContent = a.kind === "text" ? ("“" + (a.ref || "") + "”" + (a.section ? "  § " + a.section : "")) : (a.ref || state.conceptId);
@@ -4193,10 +4193,14 @@
   // the studio dock (buildIntentsToolbar) — so the left column stays a clean
   // Diátaxis nav and the action buttons sit where they pre-fill the composer.
   var INTENTS = [
-    { id: "add-section", label: "Add section", prompt: "Add a new section about" },
-    { id: "split-doc", label: "Split document", prompt: "Split this document into" },
-    { id: "add-links", label: "Add links", prompt: "Add links from this concept to" },
-    { id: "enrich", label: "Enrich content", prompt: "Enrich this page with" },
+    { id: "add-section", label: "Add section", prompt: "Add a new section about",
+      runPrompt: "Add a new section covering an important aspect of this concept that isn't documented yet." },
+    { id: "split-doc", label: "Split document", prompt: "Split this document into",
+      runPrompt: "Split this document into focused sub-concepts if it covers multiple distinct topics." },
+    { id: "add-links", label: "Add links", prompt: "Add links from this concept to",
+      runPrompt: "Review this concept and add typed links to the closely related concepts in the bundle." },
+    { id: "enrich", label: "Enrich content", prompt: "Enrich this page with",
+      runPrompt: "Enrich this page with additional detail, concrete examples, and cross-links where helpful." },
   ];
 
   function buildSidebarPanels() {
@@ -4238,15 +4242,14 @@
   function buildIntentsToolbar() {
     var wrap = el("div", { class: "okf-panel__intents", role: "group", "aria-label": "Quick actions" });
     INTENTS.forEach(function (intent) {
+      var group = el("div", { class: "okf-panel__intent-group" });
       var btn = el("button", {
         class: "okf-panel__intent", type: "button", text: intent.label,
-        title: intent.prompt + "…",
+        title: intent.prompt + "… (fills the composer)",
       });
       btn.addEventListener("click", function () {
         state.draftBody = intent.prompt + " ";
         state.draftAnchor = { kind: "concept", ref: state.conceptId, concept: state.conceptId };
-        // We're already in the Comments tab — fill the live composer directly
-        // (renderCommentsPanel preserves the textarea node) and focus it.
         var ta = panelBodyEl() && panelBodyEl().querySelector(".okf-composer__textarea");
         if (ta) {
           ta.value = state.draftBody;
@@ -4255,7 +4258,29 @@
           openPanel("comments", { focusComposer: true });
         }
       });
-      wrap.appendChild(btn);
+      // Round 2 §6.4: RUN posts the directive to the agent. A comment IS an
+      // open directive the watching agent runs (post_comment → directives.jsonl
+      // → wait/comment-claim). Reuse the composer's Send path (optimistic insert
+      // + POST /__comment + toast) by filling a COMPLETE directive when the
+      // composer is empty (respecting any text the user typed) and clicking Send.
+      var run = el("button", {
+        class: "okf-panel__intent-run", type: "button", text: "▶",
+        title: "Run: send this directive to the agent now",
+        "aria-label": "Run: " + intent.label,
+      });
+      run.addEventListener("click", function () {
+        var pb = panelBodyEl();
+        var ta = pb && pb.querySelector(".okf-composer__textarea");
+        var submit = pb && pb.querySelector(".okf-composer__submit");
+        if (!ta || !submit) { openPanel("comments", { focusComposer: true }); return; }
+        if (!ta.value.trim()) ta.value = intent.runPrompt;   // complete directive when empty
+        state.draftBody = ta.value;
+        state.draftAnchor = { kind: "concept", ref: state.conceptId, concept: state.conceptId };
+        submit.click();   // → postCommentFromComposer → POST /__comment
+      });
+      group.appendChild(btn);
+      group.appendChild(run);
+      wrap.appendChild(group);
     });
     return wrap;
   }

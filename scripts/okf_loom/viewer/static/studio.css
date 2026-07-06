@@ -1283,6 +1283,25 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
 }
 .okf-panel__intent:hover::before { color: var(--okf-active-fg); }
 
+/* Round 2 §6.4: intent = pre-fill button + a Run (▶) button that posts the
+ * directive to the agent. */
+.okf-panel__intent-group { display: inline-flex; }
+.okf-panel__intent-run {
+  padding: 0 8px; font: inherit; font-size: var(--okf-text-sm);
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-left: 0;
+  border-radius: 0 var(--okf-radius-sm) var(--okf-radius-sm) 0;
+  background: var(--okf-bg-elev); color: var(--okf-accent); cursor: pointer;
+}
+.okf-panel__intent-run:hover {
+  background: var(--okf-active-fill); color: var(--okf-active-fg);
+  border-color: var(--okf-active-border);
+}
+.okf-panel__intent-run:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+/* square the pre-fill button's right edge inside the group so the pair reads
+ * as one control. */
+.okf-panel__intent-group .okf-panel__intent { border-radius: var(--okf-radius-sm) 0 0 var(--okf-radius-sm); }
+
 @media (max-width: 900px) {
   /* Narrow screens: no rail reserve; the overlay covers the full width and
    * lifts above the chrome. The rail is hidden and the footer no longer

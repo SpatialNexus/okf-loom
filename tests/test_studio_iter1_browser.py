@@ -2531,3 +2531,23 @@ def test_index_dashboard_filters_sorts_and_searches(server_url, page):
     # --- Search-within with no match shows the empty state. ---
     page.fill(".okf-index-toolbar__search", "zzzznomatchxyzzy")
     page.wait_for_selector(".okf-index-empty:not([hidden])", timeout=5000)
+
+
+# ---------------------------------------------------------------------------
+# Round 2 §6.4 - quick-action RUN posts a directive via the comment channel
+# ---------------------------------------------------------------------------
+
+
+def test_quick_action_run_posts_directive(server_url, page) -> None:
+    """Round 2 §6.4: an intent's Run button POSTs a directive to /__comment
+    (reuses the composer Send path)."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.click('.okf-rail__btn[data-rail-id="comments"]')  # open Comments overlay
+    page.wait_for_selector(".okf-panel__intent-run", timeout=8000)
+    with page.expect_request(
+        lambda r: "/__comment" in r.url and r.method == "POST"
+    ) as req:
+        page.query_selector(".okf-panel__intent-run").click()
+    assert req.value is not None
