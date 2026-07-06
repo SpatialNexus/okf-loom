@@ -1725,5 +1725,13 @@ def test_p3_2_index_cards_carry_filter_data_attrs(tiny_good_bundle):
     assert 'class="okf-section"' in html and 'data-okf-type=' in html  # groups + type
     assert 'data-okf-title=' in html
     assert 'data-okf-search=' in html
-    # the type attr appears on BOTH the section and its cards
-    assert html.count('data-okf-type=') >= 2
+    # data-okf-type must appear on BOTH surfaces: the <section> (section-level
+    # filtering) AND a card <li> (card-level filtering). Pin each opening tag
+    # directly — an aggregate count is satisfied by the multiple cards alone,
+    # so dropping the section attr would slip past a `>= 2` check.
+    section_tag = re.search(r'<section class="okf-section"[^>]*>', html)
+    assert section_tag and 'data-okf-type=' in section_tag.group(0), \
+        "section opening tag must carry data-okf-type"
+    card_tag = re.search(r'<li class="okf-card"[^>]*>', html)
+    assert card_tag and 'data-okf-type=' in card_tag.group(0), \
+        "card <li> opening tag must carry data-okf-type"
