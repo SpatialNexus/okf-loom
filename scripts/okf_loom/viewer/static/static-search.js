@@ -194,6 +194,27 @@
       .replace(/'/g, "&#39;");
   }
 
+  function eligibleTokens(tokens) {
+    // Shared by highlight() and makeSnippet() (Round 2 §6.3 fix): the ONE
+    // definition of which query tokens are eligible to match, so the two
+    // functions can't drift apart again — that drift is exactly what let a
+    // makeSnippet defect ship (see the comment there). A token is eligible
+    // when it is truthy and >= 2 chars: tokenize()'s `/[\p{L}\p{N}_]+/gu`
+    // CAN emit 1-char tokens (e.g. a query like "a protocols" tokenizes to
+    // ["a","protocols"]); 1-char tokens are noisy/low-signal, so highlight()
+    // has always excluded them here. Also dedupes, preserving first-seen
+    // order (callers decide any further ordering, e.g. highlight()'s
+    // longest-first sort below).
+    var uniq = [];
+    if (tokens) {
+      for (var i = 0; i < tokens.length; i++) {
+        var t = tokens[i];
+        if (t && t.length >= 2 && uniq.indexOf(t) < 0) uniq.push(t);
+      }
+    }
+    return uniq;
+  }
+
   function highlight(text, tokens) {
     // Round 2 §6.3: wrap query-term matches in <mark>. Mirrors the
     // CORRECTED render.py _highlight() (scripts/okf_loom/render.py) — terms
@@ -204,18 +225,13 @@
     // let a token equal to an HTML entity name ("gt"/"amp"/"lt"/"quot")
     // land inside an escaped "&gt;"/"&amp;" and shatter it — data-catalog
     // text routinely carries "<"/">"/"&" (SQL comparisons, "Q&A", "AT&T").
-    // Because every token is word-chars only (>=2 chars, from tokenize()),
-    // a match can never straddle the "&"/";" of an entity sitting in a gap,
-    // so gaps always escape atomically. Terms are deduped and sorted
-    // longest-first so overlapping terms don't half-wrap one another.
+    // Because eligibleTokens() only lets word-chars-only, >=2-char tokens
+    // through, a match can never straddle the "&"/";" of an entity sitting
+    // in a gap, so gaps always escape atomically. Terms are deduped (by
+    // eligibleTokens) and sorted longest-first here so overlapping terms
+    // don't half-wrap one another.
     var s = String(text == null ? "" : text);
-    var uniq = [];
-    if (tokens) {
-      for (var i = 0; i < tokens.length; i++) {
-        var t = tokens[i];
-        if (t && t.length >= 2 && uniq.indexOf(t) < 0) uniq.push(t);
-      }
-    }
+    var uniq = eligibleTokens(tokens);
     if (!s || !uniq.length) return escapeHtml(s);
     uniq.sort(function (a, b) { return b.length - a.length; });
     var special = /[.*+?^${}()|[\]\\]/g;
@@ -242,12 +258,27 @@
     // curated description, mirroring the live renderer's preference for
     // its backend-computed match-centred `snippets` excerpt over
     // `description` (render.py _render_search_page).
+    //
+    // Round 2 P3-fix: the centre position (`best`) is now scanned over
+    // eligibleTokens(tokens) - the SAME >=2-char eligibility filter that
+    // highlight() applies - instead of the raw `tokens` array. Before this
+    // fix, a sub-2-char token (e.g. "a") could win the earliest-match race
+    // (its position is always <= any longer token's) and centre the window
+    // somewhere highlight() would never mark, pushing a genuine
+    // highlightable match outside the 200-char window entirely; the
+    // excerpt then showed no <mark> at all, defeating this function's
+    // purpose. Using eligibleTokens() also fixes a related bug for free:
+    // the old loop had no truthiness guard, so a falsy tokens[i] entry
+    // (e.g. an empty string) reached `low.indexOf(...)` directly, and an
+    // empty-string needle always matches at position 0, so a stray empty
+    // token would unconditionally "win" the race with best=0.
     var src = String(entry.body_excerpt || entry.description || "");
     if (!src) return "";
-    if (tokens && tokens.length) {
+    var elig = eligibleTokens(tokens);
+    if (elig.length) {
       var low = src.toLowerCase(), best = -1, i, p;
-      for (i = 0; i < tokens.length; i++) {
-        p = low.indexOf(tokens[i]);
+      for (i = 0; i < elig.length; i++) {
+        p = low.indexOf(elig[i]);
         if (p >= 0 && (best < 0 || p < best)) best = p;
       }
       if (best > 40) return "\u2026" + src.slice(best - 40, best - 40 + 200);

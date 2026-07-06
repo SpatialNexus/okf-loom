@@ -1820,33 +1820,36 @@ def test_p3_3_static_search_renderer_has_meta_and_highlight():
     assert "function highlight(" in js and "<mark>" in js, "static must highlight matches"
 
 
-def _run_static_highlight(text: str, tokens: list) -> str:
-    """Execute the ACTUAL shipped ``highlight()`` from static-search.js in
-    Node and return ``highlight(text, tokens)``'s output.
+def _run_static_js(js_call: str) -> str:
+    """Splice ``highlight``/``makeSnippet`` (both hoisted ``function``
+    declarations in the static-search.js IIFE) onto ``globalThis`` right
+    after the literal ``"use strict";`` (the very first statement, before
+    the module's own ``document.body`` access), then evaluate ``js_call`` —
+    a JS expression referencing ``globalThis.__OKF_TEST__`` — and print its
+    ``String()`` form.
 
     static-search.js is a browser IIFE gated on ``document``/``fetch``
     globals that don't exist under plain Node — but ``highlight``/
-    ``escapeHtml`` are pure string functions with no DOM dependency, and
-    because they are ``function`` DECLARATIONS they are hoisted to the top
-    of the IIFE's scope before any statement runs. We splice one line right
-    after the literal ``"use strict";`` (the very first statement, before
-    the module's own ``document.body`` access) that stashes a live
-    reference to ``highlight`` on ``globalThis``. The rest of the IIFE then
-    throws under plain Node (no ``document``), which an outer try/catch
-    swallows — the stash already ran by then. This runs the REAL shipped
-    source, not a hand-reimplementation of it.
+    ``makeSnippet``/``escapeHtml`` are pure string functions with no DOM
+    dependency, and because they are ``function`` DECLARATIONS they are
+    hoisted to the top of the IIFE's scope before any statement runs. The
+    rest of the IIFE throws under plain Node (no ``document``), which an
+    outer try/catch swallows — the stash already ran by then. This runs the
+    REAL shipped source, not a hand-reimplementation of it.
     """
     js_source = _runtime_file("viewer", "static", "static-search.js").read_text(encoding="utf-8")
     marker = '"use strict";'
     assert js_source.count(marker) == 1, "splice anchor moved/duplicated in static-search.js"
-    hook = marker + "\n  globalThis.__OKF_TEST__ = { highlight: highlight };"
+    hook = (
+        marker
+        + "\n  globalThis.__OKF_TEST__ = { highlight: highlight, makeSnippet: makeSnippet };"
+    )
     patched = js_source.replace(marker, hook, 1)
     driver = (
         "try {\n" + patched + "\n"
         "} catch (e) { /* expected: no `document` global under plain Node */ }\n"
         "try {\n"
-        "  process.stdout.write(String(globalThis.__OKF_TEST__.highlight("
-        + json.dumps(text) + ", " + json.dumps(tokens) + ")));\n"
+        "  process.stdout.write(String(" + js_call + "));\n"
         "} catch (e) {\n"
         "  process.stdout.write('__ERROR__:' + e);\n"
         "}\n"
@@ -1855,8 +1858,33 @@ def _run_static_highlight(text: str, tokens: list) -> str:
         ["node", "-e", driver], capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == 0, f"node driver failed: {result.stderr}"
-    assert not result.stdout.startswith("__ERROR__:"), f"highlight() threw: {result.stdout}"
+    assert not result.stdout.startswith("__ERROR__:"), f"call threw: {result.stdout}"
     return result.stdout
+
+
+def _run_static_highlight(text: str, tokens: list) -> str:
+    """Execute the ACTUAL shipped ``highlight(text, tokens)`` from
+    static-search.js in Node (see ``_run_static_js``) and return its output.
+    """
+    call = (
+        "globalThis.__OKF_TEST__.highlight("
+        + json.dumps(text) + ", " + json.dumps(tokens) + ")"
+    )
+    return _run_static_js(call)
+
+
+def _run_static_make_snippet(entry: dict, tokens: list) -> str:
+    """Execute the ACTUAL shipped ``makeSnippet(entry, tokens)`` from
+    static-search.js in Node (see ``_run_static_js``) and return its output.
+    ``makeSnippet`` is a sibling hoisted ``function`` declaration in the
+    same IIFE scope as ``highlight``, so the same splice/stash technique
+    exposes it too.
+    """
+    call = (
+        "globalThis.__OKF_TEST__.makeSnippet("
+        + json.dumps(entry) + ", " + json.dumps(tokens) + ")"
+    )
+    return _run_static_js(call)
 
 
 def test_p3_3_static_search_highlight_wraps_matches_case_preserved():
@@ -1894,3 +1922,111 @@ def test_p3_3_static_search_highlight_does_not_shatter_entities():
     # Cross-language proof: same (text, terms) -> byte-identical output.
     py_out = _highlight(text, "gt amp")
     assert js_out == py_out, f"static/live highlight diverge: {js_out!r} != {py_out!r}"
+
+
+# --- Round 2 §6.3 fix: static makeSnippet must centre on a token highlight()
+# will actually mark (>= 2 chars) ------------------------------------------
+
+
+def test_p3_3_static_make_snippet_centres_on_highlight_eligible_token():
+    """RED-proving discriminator (reviewer's exact repro): ``makeSnippet``'s
+    centre-position scan (``best``) must consider ONLY tokens that
+    ``highlight()`` will actually mark — i.e. the SAME ``t && t.length >= 2``
+    eligibility predicate ``highlight()`` applies at static-search.js:216 (now
+    shared via ``eligibleTokens()``).
+
+    Before the fix, ``best`` was chosen by scanning EVERY token with no
+    length filter. ``tokenize()``'s ``/[\\p{L}\\p{N}_]+/gu`` happily emits
+    1-char tokens (a query like "a protocols" tokenizes to
+    ``["a", "protocols"]``), and a 1-char token sitting earlier in the text
+    always "wins" the earliest-match race — centring the 200-char window on
+    a spot ``highlight()`` will never mark, and pushing the genuine, longer,
+    highlightable match outside the window entirely. The excerpt then shows
+    NO ``<mark>`` at all, defeating ``makeSnippet``'s stated purpose (line
+    239: window around the match so the highlighted term is visible).
+
+    RED (current shipped code): "a" sits at offset 51 and has no length
+    filter applied, so it wins; the resulting window [11, 211) excludes
+    "protocols" at offset ~354 entirely — neither assertion below holds.
+    GREEN (fixed code): "a" is filtered out (length 1 < 2, same predicate
+    highlight() uses), so "protocols" (the only eligible token) wins and
+    centres the window on itself.
+    """
+    body = ("1" * 50) + " a " + ("2" * 300) + " protocols " + ("3" * 10)
+    entry = {"body_excerpt": body}
+    tokens = ["a", "protocols"]
+    snippet = _run_static_make_snippet(entry, tokens)
+    assert "protocols" in snippet, (
+        f"'protocols' (the only highlight-eligible token) must be inside "
+        f"the returned window: {snippet!r}"
+    )
+    marked = _run_static_highlight(snippet, tokens)
+    assert "<mark>protocols</mark>" in marked, (
+        f"highlight() must find a 'protocols' match inside the snippet "
+        f"window: {marked!r}"
+    )
+
+
+def test_p3_3_static_make_snippet_ignores_falsy_token_entries():
+    """Fix also subsumes a related minor finding: the old scan loop had no
+    truthiness guard on ``tokens[i]``, so a falsy entry (e.g. ``""``) reached
+    ``low.indexOf(...)`` directly — and ``"x".indexOf("")`` always returns
+    ``0`` in JS, so a stray empty-string token would unconditionally "win"
+    the earliest-match race with ``best = 0``. ``eligibleTokens()``'s
+    ``t && ...`` guard (``""`` is falsy) now excludes it, same as
+    ``highlight()`` always has.
+
+    Padding is long enough (300 chars before "protocols") that the old
+    best=0 bug's leading-200-char slice would be all filler with no
+    "protocols" in it; the fix must still find and window on "protocols".
+    """
+    body = ("z" * 300) + " protocols " + ("z" * 100)
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["", "protocols"])
+    assert "protocols" in snippet, f"falsy token entry corrupted the window: {snippet!r}"
+
+
+def test_p3_3_static_make_snippet_no_match_falls_back_to_leading_slice():
+    """Edge case: no eligible token appears anywhere in ``src`` -> ``best``
+    stays -1 and the function falls back to today's leading-slice
+    ``src.slice(0, 200)`` (no "…" prefix)."""
+    body = "y" * 300
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["protocols", "a"])
+    assert snippet == body[:200]
+    assert not snippet.startswith("…")
+
+
+def test_p3_3_static_make_snippet_match_near_start_uses_leading_slice():
+    """Edge case: the earliest eligible match sits at ``best <= 40`` -> the
+    function takes the plain leading slice (no windowing/"…" prefix), same
+    as the no-match fallback, and the match is naturally still present."""
+    body = "intro protocols " + ("x" * 300)
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["protocols"])
+    assert snippet == body[:200]
+    assert not snippet.startswith("…")
+    assert "protocols" in snippet
+
+
+def test_p3_3_static_make_snippet_match_near_end_clamps_without_crash():
+    """Edge case: the match sits near the end of a long body, so the
+    window's upper bound (``best - 40 + 200``) exceeds the text length.
+    ``slice()`` clamps silently (no crash/padding) and the match stays
+    inside the shorter-than-200-char, "…"-prefixed result."""
+    body = ("z" * 300) + " protocols"
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["protocols"])
+    assert snippet.startswith("…")
+    assert "protocols" in snippet
+    assert len(snippet) - 1 < 200, f"clamped slice must be shorter than the window: {snippet!r}"
+
+
+def test_p3_3_static_make_snippet_short_text_returned_in_full():
+    """Edge case: a ``body_excerpt`` shorter than the 200-char window comes
+    back intact — a realistic-sized description, distinct from the
+    deliberately-long synthetic bodies the other edge-case tests use to hit
+    the windowing math."""
+    entry = {"body_excerpt": "Stores one row per user, keyed by user_id."}
+    snippet = _run_static_make_snippet(entry, ["user"])
+    assert snippet == entry["body_excerpt"]
