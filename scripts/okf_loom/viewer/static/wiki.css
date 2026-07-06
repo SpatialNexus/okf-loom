@@ -22,6 +22,15 @@
 
 /* ---- Theme tokens ------------------------------------------------------ */
 :root {
+  /* Round 2 §5.2 — soft-contrast variants (consumed when the soft-contrast
+   * modifier is active). :root carries the Swiss-light fallback so a themeless
+   * soft page still resolves. (Do NOT write the literal modifier selector in
+   * this comment — the Task 2 test split()s the file on it.) */
+  --okf-fg-soft: #2a2f36;
+  --okf-active-fill-soft: var(--okf-accent-bg);
+  --okf-active-fg-soft: var(--okf-accent);
+  --okf-active-border-soft: transparent;
+  --okf-page-bg-soft: #eef1f5;
   --okf-bg: #f8fafc;
   --okf-bg-elev: #ffffff;
   --okf-bg-inset: #f1f5f9;
@@ -159,6 +168,12 @@
  *   (active-fill = accent, active-fg = accent-on). */
 
 [data-theme="technical-light"] {
+  /* Round 2 §5.2 soft-contrast variants (Technical's active is already tinted). */
+  --okf-fg-soft: #2b333f;
+  --okf-active-fill-soft: var(--okf-accent-bg);
+  --okf-active-fg-soft: var(--okf-accent);
+  --okf-active-border-soft: transparent;
+  --okf-page-bg-soft: #eef1f5;
   --okf-bg: #f6f8fa;
   --okf-bg-elev: #ffffff;
   --okf-bg-inset: #eef1f4;
@@ -204,6 +219,12 @@
   --okf-page-bg: #e6eaef;
 }
 [data-theme="technical-dark"] {
+  /* Round 2 §5.2 soft-contrast variants. */
+  --okf-fg-soft: #cdd6df;
+  --okf-active-fill-soft: var(--okf-accent-bg);
+  --okf-active-fg-soft: var(--okf-accent);
+  --okf-active-border-soft: transparent;
+  --okf-page-bg-soft: #0b0e13;
   --okf-bg: #0f1319;
   --okf-bg-elev: #161b22;
   --okf-bg-inset: #0b0e13;
@@ -249,6 +270,12 @@
   --okf-page-bg: #05070a;
 }
 [data-theme="swiss-light"] {
+  /* Round 2 §5.2 — soft makes Swiss's solid active tinted (like Technical) + softer fg. */
+  --okf-fg-soft: #2a2f36;
+  --okf-active-fill-soft: var(--okf-accent-bg);
+  --okf-active-fg-soft: var(--okf-accent);
+  --okf-active-border-soft: transparent;
+  --okf-page-bg-soft: #eef0f3;
   --okf-bg: #ffffff;
   --okf-bg-elev: #ffffff;
   --okf-bg-inset: #f2f3f5;
@@ -294,6 +321,12 @@
   --okf-page-bg: #e6eaef;
 }
 [data-theme="swiss-dark"] {
+  /* Round 2 §5.2 soft-contrast variants. */
+  --okf-fg-soft: #d6dade;
+  --okf-active-fill-soft: var(--okf-accent-bg);
+  --okf-active-fg-soft: var(--okf-accent);
+  --okf-active-border-soft: transparent;
+  --okf-page-bg-soft: #0c0e10;
   --okf-bg: #121417;
   --okf-bg-elev: #181b1f;
   --okf-bg-inset: #0c0e10;

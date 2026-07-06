@@ -1265,6 +1265,9 @@ def test_theme_blocks_override_full_token_set() -> None:
         "okf-font-display", "okf-font-body", "okf-font-mono",
         "okf-border-w", "okf-tag-transform", "okf-tag-weight", "okf-tag-spacing",
         "okf-title-weight", "okf-title-spacing", "okf-pop-shadow", "okf-page-bg",
+        # Round 2 §5.2 soft-contrast variants — every theme owns its soft look:
+        "okf-fg-soft", "okf-active-fill-soft", "okf-active-fg-soft",
+        "okf-active-border-soft", "okf-page-bg-soft",
     )
     for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
         assert f'[data-theme="{theme}"]' in css, f"{theme} theme block missing"
