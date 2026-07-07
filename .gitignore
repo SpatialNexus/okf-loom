@@ -33,11 +33,21 @@ okf-site/
 **/.okf-loom/session/
 
 # Local agent/runtime workspace state
-.aic/
 .pi/
 .playwright-mcp/
 workspace/
+.superpowers/
 
 # OS
 .DS_Store
 Thumbs.db
+.aic/overlay/
+.aic/overlay*/
+.aic/history/
+.aic/job_memory/
+.aic/pi/
+.aic/telemetry/
+.aic/tmp/
+.aic/.gitignore
+.aic/run_defaults
+.aic/git-identity.conf

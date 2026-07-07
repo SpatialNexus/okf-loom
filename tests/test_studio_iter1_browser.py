@@ -445,6 +445,110 @@ def test_claimed_comment_has_no_sidestripe(server_url: str, page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 - thin rail + overlay panels (replaces the docked reflow dock)
+# ---------------------------------------------------------------------------
+
+
+def test_rail_present_and_overlay_does_not_reflow(server_url: str, page) -> None:
+    """Round 2: a thin rail is docked; opening a panel overlays (no reflow)."""
+    # Above the 900px breakpoint so the rail mounts (buildRail is desktop-only).
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-rail", timeout=10000)
+    # Rail has the four tab icons + quick-actions.
+    ids = page.eval_on_selector_all(
+        ".okf-rail__btn[data-rail-id]", "els => els.map(e => e.dataset.railId)"
+    )
+    assert set(ids) >= {"comments", "changes", "outline", "metadata"}
+    # Body must NOT reserve 380px (no docked reflow), only the slim rail gutter.
+    # The reserve slides in over a 0.2s boot transition; let it settle before
+    # measuring so we compare steady states around the open (not mid-animation).
+    # to_have_css is the right tool here: a web-first assertion that auto-retries
+    # until the computed value settles, which a one-shot page.evaluate cannot.
+    expect(page.locator("body")).to_have_css("padding-right", "48px")
+    pad_before = page.evaluate("getComputedStyle(document.body).paddingRight")
+    page.click('.okf-rail__btn[data-rail-id="comments"]')
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    pad_after = page.evaluate("getComputedStyle(document.body).paddingRight")
+    assert pad_before == pad_after, "opening a panel must not reflow the body"
+    # Slim reserve == rail width (48px), never the 380px dock width.
+    assert pad_after.startswith("48"), f"expected 48px rail reserve, got {pad_after}"
+
+
+def test_overlay_closes_on_scrim_and_esc(server_url: str, page) -> None:
+    """Round 2: the overlay panel dismisses on scrim click-away and on Esc."""
+    # Above the 900px breakpoint so the rail mounts (buildRail is desktop-only).
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-rail", timeout=10000)
+    page.click('.okf-rail__btn[data-rail-id="comments"]')
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    # click-away on the scrim closes. (state="hidden": the panel gets [hidden];
+    # a plain wait_for_selector defaults to state="visible" and would hang.)
+    page.eval_on_selector(".okf-panel-overlay", "el => el.click()")
+    page.wait_for_selector(".okf-panel", state="hidden", timeout=5000)
+    # re-open, then Esc closes.
+    page.click('.okf-rail__btn[data-rail-id="comments"]')
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".okf-panel", state="hidden", timeout=5000)
+
+
+# ---------------------------------------------------------------------------
+# Round 2 - functional comment pin (click jumps + opens thread at the card)
+# ---------------------------------------------------------------------------
+
+
+def test_comment_pin_opens_thread_at_card(server_url: str, page) -> None:
+    """Clicking an inline pin jumps to the prose mark AND opens the Comments
+    overlay scrolled+pulsed to that comment's card (Round 2 §3.3: the pin is
+    functional, not just decorative).
+
+    Seeds a comment anchored to a real text snippet then drives applyDoc so
+    the mark (+ margin marker) render — same recipe as
+    test_comment_mark_reapplied_after_patch and
+    test_comment_marker_target_size_and_label — then clicks the rendered
+    mark and asserts the overlay opens with a matching data-comment-id card.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    setup = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const firstP = body.querySelector('p');
+            if (!firstP || !firstP.firstChild) return { error: 'no para' };
+            const snippet = firstP.firstChild.nodeValue.slice(0, 24);
+            window.okfLoomStudio.state.comments.unshift({
+                id: 'pin-test-1', concept: 'tables/orders',
+                anchor: { kind: 'text', ref: snippet, block_id: '', concept: 'tables/orders' },
+                body: 'pin test', state: 'open', resolved_activity: [],
+                ts: new Date().toISOString(),
+            });
+            // Force mark (+ margin marker) re-application via applyDoc with
+            // the SAME html so the anchor resolves against unchanged text.
+            const html = body.innerHTML;
+            window.okfLoomStudio.applyDoc(
+                { html, title: '', description: '', raw: '', rev: 2001 },
+                { pulse: false }
+            );
+            return { ok: true, snippet };
+        }"""
+    )
+    assert "error" not in setup, setup
+    cid = "pin-test-1"
+    mark = page.locator(f'.okf-page__body mark.okf-comment-mark[data-comment-id="{cid}"]')
+    expect(mark).to_be_visible(timeout=4000)
+    mark.click()
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    card = page.wait_for_selector(
+        f'.okf-panel__body .okf-comment[data-comment-id="{cid}"]', timeout=5000
+    )
+    assert card is not None
+
+
+# ---------------------------------------------------------------------------
 # B5 - focus trap in palette + panel (CRI-016)
 # ---------------------------------------------------------------------------
 
@@ -1671,6 +1775,193 @@ def test_split_view_divider_and_synced_scroll(server_url: str, page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Round 2 — Workbench <-> Focus reading mode + split fix (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_split_view_auto_enters_focus(server_url: str, page) -> None:
+    """Round 2: switching to Split auto-enters Focus, dropping the .okf-page__main
+    cap so the panes fill the width (the real split fix); leaving Split exits it.
+    """
+    # Above 900px so the rail mounts + Focus width behaviour is meaningful.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-viewswitch__btn[data-mode='split']", timeout=10000)
+    assert (
+        page.evaluate("document.documentElement.hasAttribute('data-okf-focus')")
+        is False
+    ), "Focus must be off before entering Split"
+    page.click(".okf-viewswitch__btn[data-mode='split']")
+    page.wait_for_function(
+        "document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+    # In Focus the reading column is uncapped, so the source pane is wide — far
+    # past half of the old ~740px trapped measure (panes were ~402|268px).
+    w = page.eval_on_selector(
+        ".okf-view[data-okf-view='split'] > .okf-source",
+        "el => el.getBoundingClientRect().width",
+    )
+    assert w > 400, f"source pane should be wide in focus/split, got {w}"
+    # Leaving Split exits the auto-focus (Split was what turned it on).
+    page.click(".okf-viewswitch__btn[data-mode='rendered']")
+    page.wait_for_function(
+        "!document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+
+
+def test_split_divider_resizes_visually(server_url: str, page) -> None:
+    """Round 2: the divider drag now drives --okf-split-pct, which the split grid
+    consumes as a percentage (was a no-op before the reconcile)."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders?view=split", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-split__divider", timeout=10000)
+    before = page.eval_on_selector(
+        ".okf-view[data-okf-view='split']",
+        "el => getComputedStyle(el).gridTemplateColumns",
+    )
+    divider = page.locator(".okf-split__divider")
+    divider.focus()
+    divider.press("ArrowRight")
+    after = page.eval_on_selector(
+        ".okf-view[data-okf-view='split']",
+        "el => getComputedStyle(el).gridTemplateColumns",
+    )
+    assert before != after, (
+        f"divider should change the grid tracks (before={before!r}, after={after!r})"
+    )
+
+
+def test_focus_off_in_split_drops_to_rendered(server_url: str, page) -> None:
+    """Round 2 invariant: view=="split" <=> Focus on. Toggling Focus OFF while in
+    split must drop the view to Rendered, so split is never left re-trapped by
+    the .okf-page__main cap (the exact bug Task 3 fixes). Task 4 wires a footer
+    Focus button into this state machine, so the invariant must hold now."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders?view=split", wait_until="load")
+    _wait_for_studio(page)
+    # Split auto-enters Focus.
+    page.wait_for_function(
+        "document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+    # Manually toggle Focus OFF (as Task 4's footer button will) while in split.
+    page.evaluate("window.okfLoomStudio.toggleFocus()")
+    page.wait_for_function(
+        "!document.documentElement.hasAttribute('data-okf-focus')", timeout=5000
+    )
+    # Focus is off AND the view dropped to Rendered (not left in a capped split).
+    view = page.eval_on_selector(".okf-view", "el => el.dataset.okfView")
+    assert view == "rendered", (
+        f"toggling Focus off in split must drop to Rendered, got {view!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round 2 — Footer button toolbar (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_footer_has_focus_button_and_bordered_actions(server_url: str, page) -> None:
+    """The footer reorganises into actions-left / ambient-right + a divider
+    (Task 4), with a new Focus button wired to toggleFocus (Task 3's state
+    machine already implements the split coupling — the button does not
+    reimplement it). Comments/Changes must not be duplicated in the footer —
+    they live in the rail (Task 1)."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    fbtn = page.wait_for_selector(".okf-studio-bar--status .okf-focus-btn", timeout=10000)
+    # Focus button toggles data-okf-focus.
+    assert page.evaluate("document.documentElement.hasAttribute('data-okf-focus')") is False
+    fbtn.click()
+    page.wait_for_function("document.documentElement.hasAttribute('data-okf-focus')", timeout=5000)
+    assert page.get_attribute(".okf-focus-btn", "aria-pressed") == "true"
+    # Comments/Changes are NOT duplicated in the footer (they live in the rail).
+    n = page.eval_on_selector_all(
+        ".okf-studio-bar--status .okf-studiobtn",
+        "els => els.filter(e => /Comments|Changes/.test(e.textContent)).length")
+    assert n == 0, "Comments/Changes must not be duplicated in the footer"
+    # Structural reorg: actions cluster left (Watching/Commands/view-switch/
+    # Focus), ambient clusters right (presence/◆N concepts/●Live), divided.
+    layout = page.evaluate(
+        """() => {
+            const bar = document.querySelector('.okf-studio-bar--status');
+            const left = bar.querySelector('.okf-studio-bar__group:not(.okf-studio-bar__group--right)');
+            const right = bar.querySelector('.okf-studio-bar__group--right');
+            return {
+                hasDivider: !!bar.querySelector('.okf-studio-bar__divider'),
+                watchInLeft: !!(left && left.querySelector('.okf-watch-toggle')),
+                paletteInLeft: !!(left && left.querySelector('.okf-palettebtn')),
+                viewSwitchInLeft: !!(left && left.querySelector('.okf-viewswitch')),
+                focusInLeft: !!(left && left.querySelector('.okf-focus-btn')),
+                presenceInRight: !!(right && right.querySelector('.okf-presence')),
+                connInRight: !!(right && right.querySelector('.okf-conn')),
+            };
+        }"""
+    )
+    assert layout["hasDivider"], "footer missing .okf-studio-bar__divider"
+    assert (
+        layout["watchInLeft"] and layout["paletteInLeft"]
+        and layout["viewSwitchInLeft"] and layout["focusInLeft"]
+    ), f"actions must cluster in the left group: {layout}"
+    assert layout["presenceInRight"] and layout["connInRight"], (
+        f"ambient state must cluster in the right group: {layout}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round 2 — Related flattened into the nav rail (Task 5)
+# ---------------------------------------------------------------------------
+
+
+def test_related_section_is_flat_not_a_sidebar_panel_card(server_url: str, page) -> None:
+    """Round 2 Task 5: Related drops its card chrome and reads as flat nav
+    rows. After studio boot, the sidebar must hold the Diátaxis nav (still
+    labeled/classed exactly as before — Task 5 does not touch it) followed
+    by a flat `.okf-related` section (an `.okf-nav__group`-style "Related"
+    label + the neighbour list) — NOT a draggable `.okf-sidebar-panel` card."""
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-related", timeout=10000)
+    result = page.evaluate(
+        """() => {
+            const sidebar = document.querySelector('.okf-page__sidebar');
+            const related = sidebar.querySelector('.okf-related');
+            const graph = related && related.querySelector('.okf-local-graph');
+            const innerTitle = graph && graph.querySelector('.okf-local-graph__title');
+            return {
+                sidebarAriaLabel: sidebar.getAttribute('aria-label'),
+                navPresent: !!sidebar.querySelector('.okf-nav'),
+                hasSidebarPanelCard: !!sidebar.querySelector('.okf-sidebar-panel'),
+                relatedTag: related ? related.tagName : null,
+                relatedGroupLabel: related
+                    ? (related.querySelector('.okf-nav__group') || {}).textContent
+                    : null,
+                graphInsideRelated: !!graph,
+                innerTitleHidden: innerTitle
+                    ? getComputedStyle(innerTitle).display === 'none'
+                    : null,
+            };
+        }"""
+    )
+    # Task 5 must NOT touch the server-rendered Diátaxis nav's hard contract.
+    assert result["sidebarAriaLabel"] == "Navigation"
+    assert result["navPresent"] is True
+    # Related is flat: no .okf-sidebar-panel card anywhere in the sidebar.
+    assert result["hasSidebarPanelCard"] is False, (
+        "Related must not be wrapped in a .okf-sidebar-panel card"
+    )
+    assert result["relatedTag"] == "SECTION"
+    assert result["relatedGroupLabel"] == "Related"
+    assert result["graphInsideRelated"] is True
+    # The widget's own title is suppressed inside .okf-related so the label
+    # isn't doubled (the section's .okf-nav__group already says "Related").
+    assert result["innerTitleHidden"] is True
+
+
+# ---------------------------------------------------------------------------
 # iter2 G9 — change-list virtualization (only the visible window in the DOM)
 # iter2 G10 — 1000-row cap messaging shown UP FRONT
 # ---------------------------------------------------------------------------
@@ -2094,4 +2385,344 @@ def test_agent_activity_panel_has_unique_sections(server_url: str, page) -> None
     assert result["hasChangesLink"], (
         "CRI3-007 'View full history in Changes' link missing from the "
         "agent-activity panel's recent-writes section"
+    )
+
+
+def test_appearance_menu_sets_contrast_border_and_theme(server_url, page):
+    """Round 2 §5.3: the Appearance popover drives contrast/border/theme + persists."""
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector("#okf-theme", timeout=10000).click()
+    page.wait_for_selector(".okf-appearance__menu:not([hidden])", timeout=5000)
+    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") == "soft"
+    assert page.evaluate("localStorage.getItem('okf-contrast')") == "soft"
+    page.click('.okf-appearance__opt[data-okf-set="border"][data-okf-val="off"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-border')") == "off"
+    assert page.evaluate("localStorage.getItem('okf-border')") == "off"
+    page.click('.okf-appearance__opt[data-okf-set="family"][data-okf-val="technical"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')").startswith("technical")
+    assert page.get_attribute(
+        '.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]', "aria-checked") == "true"
+    # Back to defaults removes the attr + key (default = absent).
+    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="high"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") is None
+    assert page.evaluate("localStorage.getItem('okf-contrast')") is None
+
+
+def test_footer_studio_button_opens_panel_on_non_concept_page(server_url, page):
+    """Round 2 carryover: off-rail pages get a direct footer Studio opener."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/", wait_until="load")   # index — non-concept, no rail
+    # The button only appears once studio has booted + mountBar ran.
+    btn = page.wait_for_selector(".okf-studio-bar--status .okf-studio-open-btn", timeout=15000)
+    btn.click()
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    # Non-concept page → the ternary opens CHANGES (the global feed), not Comments.
+    # openPanel() marks the active tab aria-selected="true"; only .okf-panel__tab
+    # carries aria-selected (rail buttons use aria-pressed), so this is unambiguous.
+    active = page.wait_for_selector('.okf-panel__tab[aria-selected="true"]', timeout=5000)
+    assert active.text_content() == "Changes"
+
+
+def test_no_footer_studio_button_on_desktop_concept(server_url, page):
+    """Desktop concept pages have the rail, so NO duplicate footer Studio button."""
+    page.set_viewport_size({"width": 1200, "height": 900})   # >900 → rail builds at boot
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-rail", timeout=10000)
+    assert page.query_selector(".okf-studio-open-btn") is None
+
+
+def test_footer_studio_button_on_mobile_concept_opens_comments(server_url, page):
+    """Mobile concept pages (rail hidden) get the Studio button; it opens Comments."""
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    btn = page.wait_for_selector(".okf-studio-bar--status .okf-studio-open-btn", timeout=15000)
+    btn.click()
+    page.wait_for_selector(".okf-panel:not([hidden])", timeout=5000)
+    # concept page → the Studio button opens the COMMENTS panel (not Changes).
+    # openPanel() marks the active tab aria-selected="true"; only .okf-panel__tab
+    # carries aria-selected (rail buttons use aria-pressed), so this is unambiguous.
+    active = page.wait_for_selector('.okf-panel__tab[aria-selected="true"]', timeout=5000)
+    assert active.text_content() == "Comments"
+
+
+def test_topbar_controls_right_aligned_on_index(server_url, page):
+    """Consistency: search/Graph/Index/Aa sit top-RIGHT on the index, matching concept pages."""
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{server_url}/", wait_until="load")
+    left = page.eval_on_selector(".okf-topbar__controls", "el => el.getBoundingClientRect().left")
+    assert left > 720, f"topbar controls should be right-aligned on index (left>720 of 1440), got {left}"
+
+
+def test_index_dashboard_filters_sorts_and_searches(server_url, page):
+    """Round 2 §6.2: the index client toolbar filters by type (hiding whole
+    non-matching sections), search-within RENDER-hides non-matching cards
+    (display:none, not merely the [hidden] attribute), sort reorders whole
+    <li> nodes and "Grouped" restores the original server order, and the
+    empty-state shows when nothing matches. The render-visibility and
+    sort/restore assertions are deliberately strict: asserting only the
+    [hidden] attribute (or never exercising sort) is what let two functional
+    defects ship — a card that stayed display:flex despite [hidden], and a
+    "Grouped" reset that was a silent no-op after any sort."""
+    # JS reader: current DOM order of the multi-card Table section's titles.
+    read_table = (
+        "() => Array.from(document.querySelectorAll("
+        "'.okf-section[data-okf-type=\"Table\"] .okf-card'"
+        ")).map(c => c.getAttribute('data-okf-title'))"
+    )
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/", wait_until="load")
+    page.wait_for_selector(".okf-index-toolbar", timeout=15000)
+    chips = page.query_selector_all(".okf-index-chip")
+    assert len(chips) >= 2, "expected an All chip + >=1 type chip"
+
+    # --- Type chip filters by hiding whole (non-matching-type) sections. ---
+    total_sections = len(page.query_selector_all(".okf-section"))
+    page.click('.okf-index-chip:not([data-okf-type=""])')
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.okf-section'))"
+        ".filter(s => s.hidden).length >= 1", timeout=5000)
+    # Reset to All so the sort/search assertions run on the full index.
+    page.click('.okf-index-chip[data-okf-type=""]')
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.okf-section'))"
+        ".filter(s => s.hidden).length === 0", timeout=5000)
+
+    # --- Sort reorders whole <li> nodes; "Grouped" restores original order. ---
+    # The demo's Table section is the only multi-card group and its server
+    # order is already A-Z, so Z-A is the discriminating sort that actually
+    # MOVES nodes — proving both the reorder and (the shipped bug) the restore.
+    original = page.evaluate(read_table)
+    assert len(original) >= 2, f"need a multi-card section to test sort; got {original}"
+    reversed_expected = list(reversed(sorted(original, key=str.lower)))
+    assert reversed_expected != original, (
+        f"Table order {original} is symmetric; pick a section where Z-A moves nodes")
+    page.select_option(".okf-index-toolbar__sort", "title-desc")
+    page.wait_for_function(
+        "(exp) => JSON.stringify((" + read_table + ")()) === JSON.stringify(exp)",
+        arg=reversed_expected, timeout=5000)
+    assert page.evaluate(read_table) == reversed_expected, "Z-A sort did not reorder"
+    # Back to Grouped MUST restore the original server order (locks the reset bug).
+    page.select_option(".okf-index-toolbar__sort", "default")
+    page.wait_for_function(
+        "(exp) => JSON.stringify((" + read_table + ")()) === JSON.stringify(exp)",
+        arg=original, timeout=5000)
+    assert page.evaluate(read_table) == original, "Grouped did not restore original order"
+
+    # --- Search-within RENDER-hides non-matching cards (locks the display bug). ---
+    # "revenue" is in the Orders card's data-okf-search but not Customers'.
+    orders_card = ('.okf-section[data-okf-type="Table"] '
+                   '.okf-card[data-okf-title="Orders"]')
+    customers_card = ('.okf-section[data-okf-type="Table"] '
+                      '.okf-card[data-okf-title="Customers"]')
+    page.fill(".okf-index-toolbar__search", "revenue")
+    # The non-matching card must be RENDER-hidden (display:none), not merely
+    # carry [hidden] (which the .okf-card display:flex rule overrode pre-fix).
+    page.wait_for_function(
+        "(sel) => getComputedStyle(document.querySelector(sel)).display === 'none'",
+        arg=customers_card, timeout=5000)
+    assert page.eval_on_selector(
+        orders_card, "el => getComputedStyle(el).display") != "none", (
+        "matching card should stay visible under search-within")
+
+    # --- Search-within with no match shows the empty state. ---
+    page.fill(".okf-index-toolbar__search", "zzzznomatchxyzzy")
+    page.wait_for_selector(".okf-index-empty:not([hidden])", timeout=5000)
+
+
+# ---------------------------------------------------------------------------
+# Round 2 §6.4 - quick-action RUN posts a directive via the comment channel
+# ---------------------------------------------------------------------------
+
+
+def test_quick_action_run_posts_directive(server_url, page) -> None:
+    """Round 2 §6.4: an intent's Run button POSTs a directive to /__comment
+    (reuses the composer Send path)."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.click('.okf-rail__btn[data-rail-id="comments"]')  # open Comments overlay
+    page.wait_for_selector(".okf-panel__intent-run", timeout=8000)
+    with page.expect_request(
+        lambda r: "/__comment" in r.url and r.method == "POST"
+    ) as req:
+        page.query_selector(".okf-panel__intent-run").click()
+    assert req.value is not None
+
+
+# ---------------------------------------------------------------------------
+# Round 2 §6.4b - on-demand doc diff in the Changes tab
+# ---------------------------------------------------------------------------
+
+
+def test_changes_row_offers_view_diff_when_revs_resolvable(server_url, page) -> None:
+    """Round 2 §6.4: a change row with detail.before + rev exposes a View diff
+    button wired to the shared /__diff renderer."""
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    has_btn = page.evaluate("""() => {
+      const s = window.okfLoomStudio;
+      if (!s || typeof s._changeRow !== 'function') return null;
+      const row = s._changeRow({
+        type: 'changed', ids: ['tables/orders'], rev: 'newrev0000',
+        detail: { before: 'oldrev0000', before_concept: 'tables/orders' },
+        actor: 'agent', ts: new Date().toISOString(),
+      });
+      return !!(row && row.querySelector('.okf-change__diffbtn'));
+    }""")
+    assert has_btn is True
+
+
+def test_changes_row_view_diff_toggles_and_guards_reentrant_click(server_url, page) -> None:
+    """Round 2 review-gate fix (§6.4b Finding 1 + 2): drive the REAL changeRow
+    click -> toggle -> renderDiffInto wiring (the presence-only test above
+    never clicks). Mounts a synthetic change row via the ``_changeRow`` seam
+    into the live DOM, then proves:
+
+    1. Toggle wiring: clicking ``.okf-change__diffbtn`` reveals
+       ``.okf-change__diff`` + flips ``aria-expanded`` to "true", and fires a
+       request to ``/__diff`` scoped to THIS row's own concept/from/to
+       (``detail.before`` -> ``rev``). A second click (after the button
+       re-enables) collapses it again.
+    2. The re-entrancy guard: the button must be ``disabled`` for the
+       duration of the in-flight ``/__diff`` fetch. ``page.route`` holds the
+       response deliberately unfulfilled so the in-flight window is fully
+       controlled (not a wall-clock guess), then releases it explicitly; the
+       button must re-enable once the response lands. Before the fix,
+       ``diffBtn`` never disabled, so this assertion fails against the
+       unfixed code (RED for the right reason); the modal's ``viewBtn``
+       already has this guard (studio.js ~4122/4132) -- this mirrors it for
+       the Changes-tab button.
+
+    The synthetic row's revs are fake, so /__diff (mocked here) can't return
+    a real table -- rendered diff CONTENT is the conflict-modal tests' job
+    (test_conflict_modal_view_diff_fetches_diff_endpoint et al.); this test
+    only asserts the toggle, the scoped request, and the disable/re-enable.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+
+    # Hold the /__diff response pending (don't fulfill yet) so the in-flight
+    # window is fully deterministic -- we control exactly when it resolves,
+    # rather than racing a wall-clock guess against Playwright's sync-API
+    # dispatcher (a blocking time.sleep() *inside* the route handler was
+    # tried first and found to stall that single dispatcher thread, which
+    # also delays delivery of expect_request/locator polls to the test until
+    # the handler returns -- masking the very state transition under test).
+    pending: dict = {}
+
+    def _capture_diff(route) -> None:
+        pending["route"] = route
+
+    page.route("**/__diff*", _capture_diff)
+
+    # The _changeRow seam returns a DETACHED node -- mount it into the live
+    # DOM so Playwright can actually click it.
+    page.evaluate("""() => {
+      const s = window.okfLoomStudio;
+      const row = s._changeRow({
+        type: 'changed', ids: ['tables/orders'], rev: 'newrev0000',
+        detail: { before: 'oldrev0000', before_concept: 'tables/orders' },
+        actor: 'agent', ts: new Date().toISOString(),
+      });
+      row.id = 'okf-test-change-row';
+      document.body.appendChild(row);
+    }""")
+
+    btn = page.locator("#okf-test-change-row .okf-change__diffbtn")
+    diff_wrap = page.locator("#okf-test-change-row .okf-change__diff")
+
+    def _is_this_rows_diff_request(request) -> bool:
+        # Pin the path AND the (concept, from, to) query params to THIS
+        # row's own detail.before/rev -- not just any /__diff call.
+        return (
+            "/__diff" in request.url
+            and "concept=tables%2Forders" in request.url
+            and "from=oldrev0000" in request.url
+            and "to=newrev0000" in request.url
+        )
+
+    # --- expand: toggle wiring + the scoped request ------------------------
+    with page.expect_request(_is_this_rows_diff_request, timeout=4000):
+        btn.click()
+
+    expect(diff_wrap).to_be_visible()
+    expect(btn).to_have_attribute("aria-expanded", "true")
+
+    # --- Finding-1 guard: disabled while the fetch is in flight -------------
+    # The route is captured but deliberately NOT fulfilled yet, so the
+    # request is still genuinely in flight from the browser's perspective.
+    expect(btn).to_be_disabled(timeout=1000)
+    # Hold it a while longer to prove the guard isn't a one-tick flash --
+    # still disabled well after the click, as long as the response hasn't
+    # landed.
+    time.sleep(0.3)
+    expect(btn).to_be_disabled()
+
+    # --- release the held response; the button re-enables -------------------
+    pending["route"].fulfill(status=200, json={"ok": True, "diff": []})
+    expect(btn).to_be_enabled(timeout=4000)
+
+    # --- collapse: second click, now that it's enabled again ----------------
+    btn.click()
+    expect(diff_wrap).to_be_hidden()
+    expect(btn).to_have_attribute("aria-expanded", "false")
+
+
+def test_footer_shows_validation_count(server_url, page):
+    """Round 2 §6.4 / SPEC §3.5: the footer shows a validation-count chip fed
+    by the read-only /__validate endpoint."""
+    page.set_viewport_size({"width": 1200, "height": 900})
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    seg = page.wait_for_selector(".okf-statseg--validation:not([hidden])", timeout=10000)
+    assert seg is not None
+    # Round 2 §6.4 review (Finding 2): prove the fetch->render actually
+    # populated a real validation state, not just that [hidden] was removed.
+    # Assert set-membership (not a specific value) -- do not assume the demo
+    # bundle validates clean.
+    state = seg.get_attribute("data-state")
+    assert state in {"ok", "warn", "error"}, f"unexpected data-state: {state!r}"
+
+
+def test_validation_statseg_stays_hidden_pre_fetch(server_url: str, page) -> None:
+    """Round 2 §6.4 review (Finding 1): a hidden .okf-statseg must compute
+    display:none, not just carry the [hidden] attribute.
+
+    validationStatseg (studio.js) is created with the HTML `hidden` attribute
+    so it stays invisible until the /__validate fetch resolves. But
+    `.okf-statseg { display: inline-flex }` (studio.css) is an author-normal
+    rule that beats the UA `[hidden] { display: none }` rule by cascade
+    ORIGIN -- the exact cascade Task 3 already hit for `.okf-card`
+    (wiki.css). This test is deterministic and does NOT depend on the async
+    /__validate fetch's timing: it builds the chip's worst-case cascade
+    context directly -- a `.okf-studio-bar.okf-studio-bar--status` container
+    (specificity ties against this exact grouped selector) holding a hidden
+    `.okf-statseg.okf-statseg--validation` span -- and reads the computed
+    style. If the fix wins here, it wins everywhere.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    display = page.evaluate(
+        """() => {
+            const bar = document.createElement('div');
+            bar.className = 'okf-studio-bar okf-studio-bar--status';
+            const span = document.createElement('span');
+            span.className = 'okf-statseg okf-statseg--validation';
+            span.setAttribute('hidden', '');
+            span.textContent = 'validating…';
+            bar.appendChild(span);
+            document.body.appendChild(bar);
+            const display = getComputedStyle(span).display;
+            bar.remove();
+            return display;
+        }"""
+    )
+    assert display == "none", (
+        f"hidden .okf-statseg computed display:{display!r}, expected 'none' "
+        "(.okf-statseg{display:inline-flex} is beating [hidden] -- "
+        "add .okf-statseg[hidden]{display:none} to studio.css)"
     )

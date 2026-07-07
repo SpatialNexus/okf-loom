@@ -241,6 +241,35 @@ def test_graph_renders(server_url: str, page) -> None:
     )
 
 
+def test_graph_appearance_menu_sets_contrast_and_theme(server_url, page):
+    """Round 2: the graph page's Appearance popover drives contrast + theme."""
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    page.wait_for_selector("#okf-graph", timeout=15000)
+    page.wait_for_selector("#okf-theme", timeout=10000).click()
+    page.wait_for_selector(".okf-appearance__menu:not([hidden])", timeout=5000)
+    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") == "soft"
+    page.click('.okf-appearance__opt[data-okf-set="mode"][data-okf-val="dark"]')
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')").endswith("-dark")
+
+
+def test_graph_theme_resolves_swiss_first(server_url, page):
+    """Consistency: the graph page resolves swiss-first (like the reading pages), not a legacy theme."""
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    page.wait_for_selector("#okf-graph", timeout=15000)
+    t = page.evaluate("document.documentElement.getAttribute('data-theme')")
+    assert t and t.startswith("swiss"), f"graph should resolve swiss-first, got {t!r}"
+
+
+def test_graph_theme_respects_saved(server_url, page):
+    """The graph honors a saved theme (swiss-dark), same as the reading pages."""
+    page.context.add_init_script("try{localStorage.setItem('okf-theme','swiss-dark');}catch(e){}")
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    page.wait_for_selector("#okf-graph", timeout=15000)
+    t = page.evaluate("document.documentElement.getAttribute('data-theme')")
+    assert t == "swiss-dark", f"graph should honor saved swiss-dark, got {t!r}"
+
+
 def test_concept_page_loads(server_url: str, page) -> None:
     """A concept page renders its H1 title and a non-empty body."""
     page.goto(f"{server_url}/tables/orders", wait_until="domcontentloaded")

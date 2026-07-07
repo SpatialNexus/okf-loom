@@ -511,13 +511,15 @@ def resolve_palette(bundle: Bundle) -> dict[str, str]:
 _DEFAULT_CONFIG: dict[str, Any] = {
     "name": None,
     "default_layout": "cose",
-    "theme": "light",
+    "theme": "technical-light",
     "cdn": True,
 }
 
 
 _ALLOWED_LAYOUTS = frozenset({"cose", "concentric", "breadthfirst", "circle", "grid"})
-_ALLOWED_THEMES = frozenset({"light", "dark", "pastel", "sepia", "midnight"})
+_ALLOWED_THEMES = frozenset(
+    {"technical-light", "technical-dark", "swiss-light", "swiss-dark"}
+)
 
 
 def load_config(bundle: Bundle) -> dict[str, Any]:
@@ -529,7 +531,8 @@ def load_config(bundle: Bundle) -> dict[str, Any]:
         default_layout (str): one of cose, concentric, breadthfirst, circle,
             grid. Used as the initial Cytoscape layout in the single-file and
             full-page graph views.
-        theme (str): one of "light", "dark", "pastel", "sepia", "midnight" —
+        theme (str): one of "technical-light", "technical-dark",
+            "swiss-light", "swiss-dark" —
             initial theme for the single-file viewer. Page-served views
             honour ``localStorage['okf-theme']`` if set; otherwise this
             value.

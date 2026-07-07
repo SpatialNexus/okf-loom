@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swiss theme · Editorial Workbench</title>
+<style>
+/* =====================================================================
+   SWISS THEME — SAME theme-agnostic skeleton as technical-v1.html.
+   The product CSS below is byte-identical to the Technical file; ONLY the
+   token blocks in :root/[data-theme] change. That is the decoupling proof:
+   swap the tokens, get a different aesthetic on one layout.
+   Swiss token set (grid/utilitarian: Helvetica, radius 0, hairline grid
+   borders, SOLID "boxed" accent fills for active states).
+   ===================================================================== */
+
+/* ---- shared / mode-agnostic tokens (Swiss family) ---- */
+:root{
+  --okf-font-display:"Helvetica Neue",Arial,"Liberation Sans",system-ui,sans-serif;
+  --okf-font-body:"Helvetica Neue",Arial,"Liberation Sans",system-ui,sans-serif;
+  --okf-font-mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+  --okf-radius:0; --okf-radius-sm:0; --okf-radius-pill:0; --okf-border-w:1px;
+  --okf-tag-transform:uppercase; --okf-tag-weight:700; --okf-tag-spacing:.09em;
+  --okf-title-weight:800; --okf-title-spacing:-.02em;
+  --okf-space-2:8px; --okf-space-3:12px; --okf-space-4:16px; --okf-space-5:24px; --okf-space-6:32px;
+  --okf-topbar-h:52px; --okf-status-h:30px;
+}
+/* ---- DARK (default) ---- */
+[data-theme="dark"]{
+  --okf-bg:#121417; --okf-bg-elev:#181b1f; --okf-bg-inset:#0c0e10;
+  --okf-fg:#f0f2f4; --okf-fg-muted:#9aa1a9;
+  --okf-border:#2b2f34; --okf-border-strong:#f0f2f4;
+  --okf-accent:#2dd4bf; --okf-accent-on:#04211f; --okf-accent-bg:rgba(45,212,191,.16);
+  --okf-shadow:none;
+  --okf-pop-shadow:-14px 0 40px rgba(0,0,0,.5);
+  /* the theme's active-state signature: SOLID boxed accent fill */
+  --okf-active-fill:var(--okf-accent); --okf-active-fg:var(--okf-accent-on);
+  --okf-active-border:var(--okf-accent);
+  --okf-page-bg:#050607;
+}
+/* ---- LIGHT ---- */
+[data-theme="light"]{
+  --okf-bg:#ffffff; --okf-bg-elev:#ffffff; --okf-bg-inset:#f2f3f5;
+  --okf-fg:#111418; --okf-fg-muted:#5b636e;
+  --okf-border:#dfe2e6; --okf-border-strong:#111418;
+  --okf-accent:#0c7373; --okf-accent-on:#ffffff; --okf-accent-bg:#dbeeee;
+  --okf-shadow:none;
+  --okf-pop-shadow:-14px 0 40px rgba(17,20,24,.22);
+  --okf-active-fill:var(--okf-accent); --okf-active-fg:var(--okf-accent-on);
+  --okf-active-border:var(--okf-accent);
+  --okf-page-bg:#e6eaef;
+}
+
+/* =====================================================================
+   demo chrome (NOT part of the product — just the review harness)
+   ===================================================================== */
+*{box-sizing:border-box} html,body{margin:0}
+body{background:#0b0e13;font-family:Inter,system-ui,sans-serif;color:#e6edf3;
+  -webkit-font-smoothing:antialiased;}
+.demobar{position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:12px 22px;background:#0b0e13;border-bottom:1px solid #222a33;}
+.demobar h1{font-size:14px;margin:0;font-weight:700;letter-spacing:-.01em;color:#e6edf3;}
+.demobar h1 .tag{color:#2dd4bf;}
+.demobar .grp{display:flex;gap:6px;align-items:center;}
+.demobar .lab{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:#6a7280;}
+.demobar button{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;
+  padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
+.demobar button.on{background:#2dd4bf;color:#04211f;border-color:#2dd4bf;}
+.demobar .note{margin-left:auto;font-size:11.5px;color:#6a7280;max-width:360px;}
+
+/* =====================================================================
+   PRODUCT — everything below references var(--okf-*) only
+   ===================================================================== */
+.stage{background:var(--okf-page-bg);padding:26px 22px 40px;transition:background .18s;}
+.app{position:relative;max-width:1240px;margin:0 auto;background:var(--okf-bg);color:var(--okf-fg);
+  font-family:var(--okf-font-body);font-size:15px;line-height:1.6;
+  border:var(--okf-border-w) solid var(--okf-border-strong);border-radius:var(--okf-radius);
+  overflow:hidden;display:grid;grid-template-rows:auto 1fr auto;min-height:640px;
+  box-shadow:0 22px 60px rgba(0,0,0,.34);transition:background .18s,color .18s,border-color .18s;}
+
+/* ---- top bar ---- */
+.topbar{display:flex;align-items:center;gap:16px;padding:0 var(--okf-space-4);height:var(--okf-topbar-h);
+  background:var(--okf-bg-elev);border-bottom:var(--okf-border-w) solid var(--okf-border);}
+.navtoggle{display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;
+  background:none;border:var(--okf-border-w) solid var(--okf-border);border-radius:var(--okf-radius-sm);
+  color:var(--okf-fg-muted);cursor:pointer;font-size:15px;}
+.brand{font-family:var(--okf-font-display);font-weight:800;letter-spacing:-.02em;
+  display:flex;align-items:center;gap:8px;font-size:15px;}
+.brand .mk{width:15px;height:15px;background:var(--okf-accent);border-radius:var(--okf-radius-pill);}
+.crumb{color:var(--okf-fg-muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.crumb b{color:var(--okf-fg);font-weight:600;}
+.search{margin-left:auto;display:flex;align-items:center;gap:9px;color:var(--okf-fg-muted);font-size:13px;
+  background:var(--okf-bg-inset);border:var(--okf-border-w) solid var(--okf-border);
+  border-radius:var(--okf-radius-sm);padding:7px 11px;min-width:250px;cursor:text;}
+.search .keycap{margin-left:auto;}
+.keycap{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;
+  font-size:11px;font-weight:700;line-height:1;font-family:var(--okf-font-mono);
+  color:var(--okf-fg-muted);background:var(--okf-bg);
+  border:var(--okf-border-w) solid var(--okf-border-strong);border-radius:var(--okf-radius-sm);}
+.tnav{display:flex;gap:4px;}
+.tnav button{font-family:inherit;font-size:12.5px;color:var(--okf-fg-muted);padding:6px 13px;cursor:pointer;
+  background:none;border:var(--okf-border-w) solid transparent;border-radius:var(--okf-radius-sm);}
+.tnav button.on{color:var(--okf-active-fg);background:var(--okf-active-fill);border-color:var(--okf-active-border);}
+.themeswitch{display:flex;gap:3px;padding:3px;background:var(--okf-bg-inset);
+  border:var(--okf-border-w) solid var(--okf-border);border-radius:var(--okf-radius-sm);}
+.themeswitch button{font-family:inherit;font-size:12px;color:var(--okf-fg-muted);cursor:pointer;
+  background:none;border:none;border-radius:calc(var(--okf-radius-sm) - 1px);padding:4px 9px;}
+.themeswitch button.on{color:var(--okf-active-fg);background:var(--okf-active-fill);}
+
+/* ---- body grid: nav | reading (2-col). Pop-over is an overlay, not a column. ---- */
+.body{display:grid;grid-template-columns:216px 1fr;min-height:0;transition:grid-template-columns .2s;}
+.app.navcollapsed .body{grid-template-columns:0 1fr;}
+.nav{border-right:var(--okf-border-w) solid var(--okf-border);padding:var(--okf-space-4) var(--okf-space-3);
+  background:var(--okf-bg-elev);overflow:auto;min-width:0;}
+.app.navcollapsed .nav{opacity:0;pointer-events:none;}
+.navgroup{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--okf-fg-muted);
+  font-weight:700;margin:var(--okf-space-4) 6px var(--okf-space-2);}
+.navgroup:first-child{margin-top:2px;}
+.nav a{display:block;font-size:13px;color:var(--okf-fg-muted);padding:6px 9px;text-decoration:none;
+  border-radius:var(--okf-radius-sm);margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.nav a:hover{color:var(--okf-fg);background:var(--okf-bg-inset);}
+.nav a.on{color:var(--okf-active-fg);background:var(--okf-active-fill);font-weight:600;}
+
+/* ---- reading column: full-width prose measure; comments anchor as inline pins ---- */
+.reading{overflow:auto;padding:var(--okf-space-6) var(--okf-space-6) 60px;}
+.readwrap{max-width:780px;margin:0 auto;}
+.prose{min-width:0;}
+.tband{display:inline-flex;align-items:center;gap:6px;font-family:var(--okf-font-display);
+  font-size:11px;font-weight:var(--okf-tag-weight);letter-spacing:var(--okf-tag-spacing);
+  text-transform:var(--okf-tag-transform);color:var(--okf-active-fg);background:var(--okf-active-fill);
+  border:var(--okf-border-w) solid var(--okf-active-border);padding:4px 10px;border-radius:var(--okf-radius-pill);}
+.title{font-family:var(--okf-font-display);font-size:34px;line-height:1.12;font-weight:var(--okf-title-weight);
+  letter-spacing:var(--okf-title-spacing);margin:14px 0 6px;}
+.aliases{color:var(--okf-fg-muted);font-size:14px;margin:0 0 16px;}
+.aliases code{font-family:var(--okf-font-mono);font-size:12.5px;}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 26px;}
+.chip{font-size:11.5px;padding:3px 9px;background:var(--okf-bg-elev);
+  border:var(--okf-border-w) solid var(--okf-border);border-radius:var(--okf-radius-pill);color:var(--okf-fg-muted);}
+.chip.rel{color:var(--okf-accent);border-color:var(--okf-accent-bg);font-family:var(--okf-font-mono);font-size:11px;}
+.lead{font-size:17px;color:var(--okf-fg);margin:0 0 20px;}
+.prose p{margin:0 0 18px;}
+.prose h3{font-family:var(--okf-font-display);font-size:20px;margin:30px 0 10px;font-weight:var(--okf-title-weight);
+  letter-spacing:var(--okf-title-spacing);}
+.pre{background:var(--okf-bg-inset);border:var(--okf-border-w) solid var(--okf-border);
+  border-radius:var(--okf-radius-sm);padding:13px 15px;font-family:var(--okf-font-mono);
+  font-size:12.5px;margin:18px 0;color:var(--okf-fg);overflow:auto;}
+.pre .k{color:var(--okf-accent);font-weight:600;}
+.commented{background:var(--okf-accent-bg);border-radius:2px;padding:1px 2px;
+  box-shadow:0 1px 0 var(--okf-accent);cursor:pointer;}
+/* comment anchor: a small inline pin marks a commented span; click → pop-over.
+   No reserved gutter — the reading column stays full width when the pop-over is closed. */
+.cpin{display:inline-flex;align-items:center;gap:3px;position:relative;top:-2px;margin-left:4px;
+  padding:2px 6px;font-family:var(--okf-font-mono);font-size:10px;font-weight:700;line-height:1.4;cursor:pointer;
+  border-radius:var(--okf-radius-pill);color:var(--okf-active-fg);background:var(--okf-active-fill);
+  border:var(--okf-border-w) solid var(--okf-active-border);}
+@media(max-width:720px){.reading{padding:var(--okf-space-5) var(--okf-space-4) 40px;}}
+
+/* ---- bottom status strip ---- */
+.status{display:flex;align-items:center;gap:16px;padding:0 var(--okf-space-4);height:var(--okf-status-h);
+  font-size:11.5px;background:var(--okf-bg-elev);border-top:var(--okf-border-w) solid var(--okf-border);
+  color:var(--okf-fg-muted);font-family:var(--okf-font-mono);}
+.status .ok{color:var(--okf-accent);display:flex;align-items:center;gap:6px;}
+.status .dot{width:7px;height:7px;border-radius:50%;background:var(--okf-accent);}
+.status .sp{flex:1;}
+.status .seg{display:flex;align-items:center;gap:6px;}
+.cmdbtn{font-family:var(--okf-font-body);font-size:11.5px;font-weight:600;cursor:pointer;
+  color:var(--okf-fg-muted);background:var(--okf-bg-inset);border:var(--okf-border-w) solid var(--okf-border);
+  border-radius:var(--okf-radius-sm);padding:3px 10px;}
+.cmdbtn:hover{color:var(--okf-fg);}
+
+/* ---- pop-over comment loop (right slide-over overlay) ---- */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.32);opacity:0;pointer-events:none;transition:opacity .2s;z-index:40;}
+.app.popopen .scrim{opacity:1;pointer-events:auto;}
+.popover{position:absolute;top:0;right:0;bottom:0;width:340px;z-index:50;display:flex;flex-direction:column;
+  background:var(--okf-bg-elev);border-left:var(--okf-border-w) solid var(--okf-border);
+  box-shadow:var(--okf-pop-shadow);transform:translateX(100%);transition:transform .22s ease;}
+.app.popopen .popover{transform:none;}
+.pophead{display:flex;align-items:center;gap:8px;padding:12px var(--okf-space-4);
+  border-bottom:var(--okf-border-w) solid var(--okf-border);}
+.pophead .t{font-family:var(--okf-font-display);font-weight:700;font-size:14px;}
+.popclose{margin-left:auto;background:none;border:none;color:var(--okf-fg-muted);cursor:pointer;font-size:18px;line-height:1;}
+.ptabs{display:flex;gap:3px;padding:8px var(--okf-space-4) 0;}
+.ptabs button{flex:1;font-family:inherit;font-size:11px;font-weight:600;padding:7px 4px;cursor:pointer;
+  color:var(--okf-fg-muted);background:none;border:none;border-bottom:2px solid transparent;}
+.ptabs button.on{color:var(--okf-accent);border-bottom-color:var(--okf-accent);}
+.popbody{padding:14px var(--okf-space-4);overflow:auto;flex:1;}
+.pcount{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--okf-fg-muted);
+  font-weight:700;margin:2px 0 10px;}
+.cmt{border:var(--okf-border-w) solid var(--okf-border);border-radius:var(--okf-radius-sm);
+  padding:11px;margin-bottom:10px;background:var(--okf-bg);}
+.cmt .who{font-family:var(--okf-font-mono);font-size:11px;font-weight:700;color:var(--okf-accent);}
+.cmt .txt{font-size:13px;color:var(--okf-fg);margin-top:4px;line-height:1.5;}
+.cmt .quote{font-size:11.5px;color:var(--okf-fg-muted);border-left:2px solid var(--okf-accent);
+  padding-left:8px;margin-top:8px;}
+.cmt .acts{display:flex;gap:6px;margin-top:9px;}
+.cmt .acts button{font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;
+  padding:4px 9px;border-radius:var(--okf-radius-sm);border:var(--okf-border-w) solid var(--okf-border);
+  background:var(--okf-bg-inset);color:var(--okf-fg-muted);}
+.cmt .acts button.prim{color:var(--okf-active-fg);background:var(--okf-active-fill);border-color:var(--okf-active-border);}
+.metarow{display:flex;justify-content:space-between;font-size:12.5px;padding:7px 0;
+  border-bottom:var(--okf-border-w) solid var(--okf-border);}
+.metarow .mk{color:var(--okf-fg-muted);font-family:var(--okf-font-mono);font-size:11px;}
+</style>
+</head>
+<body>
+<div class="demobar">
+  <h1><span class="tag">Swiss</span> theme — Editorial Workbench</h1>
+  <div class="grp"><span class="lab">Mode</span>
+    <button data-mode="dark" class="on">Dark</button>
+    <button data-mode="light">Light</button>
+  </div>
+  <div class="grp">
+    <button id="btn-nav">Toggle nav</button>
+    <button id="btn-pop">Toggle comments pop-over</button>
+  </div>
+  <p class="note">Same skeleton as Technical — only the token block changed. Note the <b>solid boxed</b> active fills, radius&nbsp;0, and hairline grid.</p>
+</div>
+
+<div class="stage">
+<div class="app" id="app">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <button class="navtoggle" id="navtoggle" title="Collapse navigation">☰</button>
+    <span class="brand"><span class="mk"></span>okf-loom</span>
+    <span class="crumb">docs-bundle&nbsp; ›&nbsp; Demo&nbsp; ›&nbsp; <b>Rendering &amp; Feature Showcase</b></span>
+    <span class="search" id="search">🔍 Search concepts <span class="keycap">/</span></span>
+    <nav class="tnav"><button class="on">Index</button><button>Graph</button></nav>
+    <div class="themeswitch">
+      <button data-mode="dark" class="on">Dark</button>
+      <button data-mode="light">Light</button>
+    </div>
+  </header>
+
+  <!-- BODY: nav | reading -->
+  <div class="body">
+    <nav class="nav">
+      <div class="navgroup">Demo</div>
+      <a class="on">Rendering &amp; Feature Showcase</a>
+      <div class="navgroup">Explanation</div>
+      <a>okf-loom architecture</a><a>What OKF is for</a><a>Why Diátaxis</a><a>The live studio</a>
+      <div class="navgroup">How-to</div>
+      <a>Archive comment threads</a><a>Author via CLI verbs</a><a>Serve a bundle publicly</a>
+      <div class="navgroup">Reference</div>
+      <a>CLI verbs</a><a>Frontmatter schema</a><a>OKF spec</a>
+    </nav>
+
+    <section class="reading">
+      <div class="readwrap">
+        <article class="prose">
+          <span class="tband">◆ Demo</span>
+          <h1 class="title">Rendering &amp; Feature Showcase</h1>
+          <p class="aliases">also known as <code>demo</code> · <code>kitchen-sink</code> · <code>render-demo</code></p>
+          <div class="chips">
+            <span class="chip">Mermaid</span><span class="chip">KaTeX</span><span class="chip">highlight.js</span>
+            <span class="chip rel">→ references · cli-verbs</span>
+            <span class="chip rel">← explained-by · what-is-okf</span>
+          </div>
+          <p class="lead">This page exists to be looked at. Everything okf-loom can render lives below — and because you're reading it in the live studio, the type band, aliases, entity chips and typed relations above all came straight from the concept's frontmatter.</p>
+          <h3>Code, math &amp; diagrams</h3>
+          <p>Fenced blocks are highlighted; <span class="commented" data-note="1">math renders with KaTeX</span><span class="cpin" data-note="1" title="1 comment — open thread">◆&nbsp;1</span> from server-side markup; Mermaid diagrams render inline. The reading column keeps a comfortable measure no matter how wide the window gets.</p>
+          <div class="pre"><span class="k">scripts/okf-loom</span> serve docs-bundle --no-open</div>
+          <p>Relations resolve to real concepts, so <span class="commented" data-note="2">every link is checked at build time</span><span class="cpin" data-note="2" title="1 comment — open thread">◆&nbsp;1</span> — a dangling reference fails validation instead of shipping a broken page.</p>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <!-- STATUS STRIP -->
+  <footer class="status">
+    <span class="ok"><span class="dot"></span>connected</span>
+    <span class="seg">◉ agent watching</span>
+    <span class="sp"></span>
+    <span class="seg">✓ 28 concepts valid</span>
+    <button class="cmdbtn" id="cmdbtn">Commands</button>
+  </footer>
+
+  <!-- POP-OVER COMMENT LOOP (overlay) -->
+  <div class="scrim" id="scrim"></div>
+  <aside class="popover" id="popover" aria-label="Comment loop">
+    <div class="pophead">
+      <span class="t">Comment loop</span>
+      <button class="popclose" id="popclose" title="Close">×</button>
+    </div>
+    <div class="ptabs">
+      <button class="on">Comments</button><button>Changes</button><button>Outline</button><button>Metadata</button>
+    </div>
+    <div class="popbody">
+      <div class="pcount">2 open threads</div>
+      <div class="cmt">
+        <div class="who">◆ agent</div>
+        <div class="txt">Should this mention the KaTeX macro allow-list? The showcase renders <code>\\frac</code> but the allow-list is defined in the bundle config.</div>
+        <div class="quote">“math renders with KaTeX”</div>
+        <div class="acts"><button class="prim">Reply</button><button>Resolve</button></div>
+      </div>
+      <div class="cmt">
+        <div class="who">david</div>
+        <div class="txt">Good — resolve once the reference link is added.</div>
+        <div class="quote">“every link is checked at build time”</div>
+        <div class="acts"><button class="prim">Reply</button><button>Resolve</button></div>
+      </div>
+      <div class="pcount" style="margin-top:20px">Metadata</div>
+      <div class="metarow"><span class="mk">type</span><span>Demo</span></div>
+      <div class="metarow"><span class="mk">tags</span><span>demo, showcase</span></div>
+      <div class="metarow"><span class="mk">provenance</span><span>hand-authored</span></div>
+    </div>
+  </aside>
+
+</div>
+</div>
+
+<script>
+  const root=document.documentElement, app=document.getElementById('app');
+  function setMode(m){root.setAttribute('data-theme',m);
+    document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));}
+  document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+  const navToggle=()=>app.classList.toggle('navcollapsed');
+  document.getElementById('btn-nav').onclick=navToggle;
+  document.getElementById('navtoggle').onclick=navToggle;
+  const openPop=()=>app.classList.add('popopen'), closePop=()=>app.classList.remove('popopen');
+  document.getElementById('btn-pop').onclick=()=>app.classList.toggle('popopen');
+  document.getElementById('cmdbtn').onclick=openPop;
+  document.getElementById('popclose').onclick=closePop;
+  document.getElementById('scrim').onclick=closePop;
+  document.querySelectorAll('[data-note]').forEach(n=>n.addEventListener('click',openPop));
+  const search=document.getElementById('search');
+  document.addEventListener('keydown',e=>{
+    if(e.key==='/'&&!/input|textarea/i.test(e.target.tagName)){e.preventDefault();
+      search.style.outline='2px solid var(--okf-accent)';search.style.outlineOffset='1px';
+      setTimeout(()=>search.style.outline='',700);}
+    if(e.key==='Escape')closePop();
+  });
+</script>
+</body>
+</html>

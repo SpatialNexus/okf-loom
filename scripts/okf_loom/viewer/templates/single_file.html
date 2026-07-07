@@ -10,7 +10,7 @@
                           types, palette, backlinks, external}
       /*__VIEWER_CSS__*/ → wiki.css + graph.css contents (inlined)
       /*__VIEWER_JS__*/  → graph.js (the full viewer logic, inlined)
-      __INITIAL_THEME__  → theme name — light|dark|pastel|sepia|midnight (may be overridden
+      __INITIAL_THEME__  → theme name — technical-light|technical-dark|swiss-light|swiss-dark (may be overridden
                           by localStorage in the browser)
       __INITIAL_LAYOUT__ → "cose" | "concentric" | ...
 
@@ -31,6 +31,7 @@ __CDN_SCRIPTS__
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>
 <header class="okf-topbar">
   <div class="okf-topbar__brand">
+    <span class="okf-brand-mark" aria-hidden="true"></span>
     <strong id="bundle-name">__BUNDLE_NAME_DISPLAY__</strong>
     <span class="okf-muted">OKF bundle</span>
   </div>

@@ -10,7 +10,6 @@
  *
  * Optional window flags:
  *   - OKF_LOOM_INITIAL_LAYOUT (default "cose")
- *   - OKF_LOOM_INITIAL_THEME  (default "light")
  *   - OKF_CONCEPT_PAGE_PREFIX (default "/") - base URL for opening a concept
  *     page when "Open page" is clicked (graph view only).
  *
@@ -27,8 +26,13 @@
   // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
   // wiki.js / studio.js and render.py:_theme_button_html — this file must
   // stand alone in the single-file viewer, which has no wiki.js.
-  var THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
-  var THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
+  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
+  // Map a returning user's retired theme choice to the nearest new theme.
+  var LEGACY_THEMES = {
+    light: "technical-light", dark: "technical-dark",
+    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
+  };
 
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
@@ -52,50 +56,45 @@
   //                (dark family).
   //   select       selection colour. = --okf-select (contrast ratios are
   //                documented in wiki.css).
+  // Four Editorial-Workbench themes. Swiss `edge` = --okf-border-strong = fg
+  // (the hairline-grid identity); technical `edge` = --okf-border-strong.
   var GRAPH_COLORS = {
-    light: {
+    "technical-light": {
       nodeText: "#0f172a", nodeBorder: "#0f172a", bridgeBorder: "#0f172a",
-      edge: "#cbd5e1", edgeLabel: "#334155", edgeLabelBg: "#ffffff",
+      edge: "#c0c7d0", edgeLabel: "#57606a", edgeLabelBg: "#ffffff",
       select: "#0c7373",
     },
-    dark: {
-      nodeText: "#e2e8f0", nodeBorder: "#0b1220", bridgeBorder: "#e2e8f0",
-      edge: "#334155", edgeLabel: "#cbd5e1", edgeLabelBg: "#0b1220",
-      select: "#3ec9c9",
+    "technical-dark": {
+      nodeText: "#e6edf3", nodeBorder: "#0f1319", bridgeBorder: "#e6edf3",
+      edge: "#3b444f", edgeLabel: "#8b949e", edgeLabelBg: "#161b22",
+      select: "#2dd4bf",
     },
-    pastel: {
-      nodeText: "#403a58", nodeBorder: "#403a58", bridgeBorder: "#403a58",
-      edge: "#bbaed6", edgeLabel: "#4c4569", edgeLabelBg: "#f7f4fb",
-      select: "#6d4fae",
+    "swiss-light": {
+      nodeText: "#111418", nodeBorder: "#111418", bridgeBorder: "#111418",
+      edge: "#111418", edgeLabel: "#5b636e", edgeLabelBg: "#ffffff",
+      select: "#0c7373",
     },
-    sepia: {
-      nodeText: "#3d3020", nodeBorder: "#3d3020", bridgeBorder: "#3d3020",
-      edge: "#c6b28a", edgeLabel: "#54432c", edgeLabelBg: "#faf4e6",
-      select: "#8a4a15",
-    },
-    midnight: {
-      nodeText: "#dbe2f4", nodeBorder: "#050810", bridgeBorder: "#dbe2f4",
-      edge: "#2a3352", edgeLabel: "#b8c1dd", edgeLabelBg: "#050810",
-      select: "#52d8d8",
+    "swiss-dark": {
+      nodeText: "#f0f2f4", nodeBorder: "#121417", bridgeBorder: "#f0f2f4",
+      edge: "#f0f2f4", edgeLabel: "#9aa1a9", edgeLabelBg: "#181b1f",
+      select: "#2dd4bf",
     },
   };
 
-  // Resolve the palette for the CURRENT data-theme (light fallback).
+  // Resolve the palette for the CURRENT data-theme (swiss-light fallback).
   function graphPalette() {
-    var t = document.documentElement.getAttribute("data-theme") || "light";
-    return GRAPH_COLORS[t] || GRAPH_COLORS.light;
+    var t = document.documentElement.getAttribute("data-theme") || "swiss-light";
+    return GRAPH_COLORS[t] || GRAPH_COLORS["swiss-light"];
   }
 
   // ---- Config from data-* attributes (CSP-safe; no inline script) ------
   // The graph_page.html template passes config via data-* attributes on
   // #okf-graph instead of window.* globals, so the server's CSP
   // (script-src 'self' - no 'unsafe-inline') doesn't block initialisation.
-  // MUST be read before the theme block below uses INITIAL_THEME.
   var graphEl = document.getElementById("okf-graph");
   var DATA_URL = (graphEl && graphEl.getAttribute("data-graph-url")) || window.OKF_LOOM_GRAPH_DATA_URL || null;
   var CONCEPT_PREFIX = (graphEl && graphEl.getAttribute("data-concept-prefix")) || window.OKF_CONCEPT_PAGE_PREFIX || "/";
   var INITIAL_LAYOUT = (graphEl && graphEl.getAttribute("data-initial-layout")) || window.OKF_LOOM_INITIAL_LAYOUT || "cose";
-  var INITIAL_THEME = (graphEl && graphEl.getAttribute("data-initial-theme")) || window.OKF_LOOM_INITIAL_THEME || "light";
   // P1-3: build mode (serve|spa|static) is emitted on <body data-okf-mode>
   // by the graph_page template. In static mode the Open-page href needs a
   // .html suffix (concept pages are emitted as <id>.html; the bare path
@@ -226,17 +225,14 @@
     return common;
   }
 
-  function applyTheme(t) {
-    if (THEMES.indexOf(t) < 0) t = "light";
+  var onThemeApplied = null;   // registered by init() → syncLabelColour (canvas re-sync)
+  function applyTheme(t, persist) {
+    if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
-    try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {}
-    if (themeBtn) {
-      themeBtn.textContent = THEME_GLYPHS[t];
-      themeBtn.setAttribute("title", "Theme: " + t + " — click to cycle");
-      themeBtn.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      // Five-way cycle, not a two-state toggle — aria-pressed would lie.
-      themeBtn.removeAttribute("aria-pressed");
-    }
+    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
+    // (Round 2) The trigger is the Appearance popover ("Aa ▾") — no glyph to
+    // sync. Any theme change recolours the canvas through onThemeApplied.
+    if (onThemeApplied) onThemeApplied();
   }
 
   // ---- Luminance-aware chip foreground (P0-4 / P2-23) ------------------
@@ -359,20 +355,107 @@
     function lin(v) { return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   }
-  // Honour saved preference on load; fall back to OS pref, then INITIAL_THEME.
+  // Swiss-first OS resolution — IDENTICAL to wiki.js resolveAuto, so the graph /
+  // single-file viewer resolves the SAME theme as the reading pages (no legacy
+  // "light"/"dark" names, no INITIAL_THEME divergence). Consistency fix.
+  function resolveAutoTheme() {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return dark ? "swiss-dark" : "swiss-light";
+  }
+  // Honour a saved preference (migrating a retired name); else follow OS within
+  // the Swiss family — same logic as wiki.js currentTheme/resolveAuto boot.
   try {
     var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];
     if (saved && THEMES.indexOf(saved) >= 0) applyTheme(saved);
-    else {
-      var mq = window.matchMedia("(prefers-color-scheme: dark)");
-      if (mq && mq.matches) applyTheme("dark");
-      else applyTheme(INITIAL_THEME);
+    else applyTheme(resolveAutoTheme(), false);
+  } catch (e) { applyTheme("swiss-light"); }
+  // ---- Appearance menu (Round 2 §5.3) --------------------------------
+  // Same popover as wiki.js, wired here for the graph + single-file viewers
+  // (graph.js is inlined into single_file). Reuses graph's applyTheme (which
+  // drives the canvas re-sync via onThemeApplied). contrast/border apply
+  // post-paint and do NOT reach the Cytoscape canvas (documented P2 limit).
+  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
+  var apMenu = document.getElementById("okf-appearance-menu");
+  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
+
+  function applyModifier(kind, val, persist) {
+    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
+    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
+    var def = kind === "contrast" ? "high" : "on";
+    if (val && val !== def) document.documentElement.setAttribute(attr, val);
+    else document.documentElement.removeAttribute(attr);
+    if (persist !== false) {
+      try {
+        if (val && val !== def) localStorage.setItem(key, val);
+        else localStorage.removeItem(key);
+      } catch (e) {}
     }
-  } catch (e) { applyTheme(INITIAL_THEME); }
-  if (themeBtn) themeBtn.addEventListener("click", function () {
-    var cur = document.documentElement.getAttribute("data-theme") || "light";
-    applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+  }
+  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
+  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
+
+  function apFamily() {
+    return (document.documentElement.getAttribute("data-theme") || "swiss-light")
+      .indexOf("technical") === 0 ? "technical" : "swiss";
+  }
+  function apMode() {
+    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
+    if (!s || THEMES.indexOf(s) < 0) return "auto";
+    return s.indexOf("dark") >= 0 ? "dark" : "light";
+  }
+  function apAutoFamily(fam) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return fam + (dark ? "-dark" : "-light");
+  }
+  function apSetFamily(fam) {
+    if (apMode() === "auto") applyTheme(apAutoFamily(fam), false);
+    else applyTheme(fam + "-" + apMode());
+  }
+  function apSetMode(mode) {
+    if (mode === "auto") {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      applyTheme(apAutoFamily(apFamily()), false);
+    } else applyTheme(apFamily() + "-" + mode);
+  }
+  function apReflect() {
+    if (!apMenu) return;
+    var st = {
+      family: apFamily(), mode: apMode(),
+      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
+      border: document.documentElement.getAttribute("data-okf-border") || "on",
+    };
+    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
+    for (i = 0; i < opts.length; i++) {
+      o = opts[i];
+      o.setAttribute("aria-checked",
+        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
+    }
+  }
+  function apOpen() { if (apMenu) { apMenu.hidden = false; if (themeBtn) themeBtn.setAttribute("aria-expanded", "true"); apReflect(); } }
+  function apClose() { if (apMenu) { apMenu.hidden = true; if (themeBtn) themeBtn.setAttribute("aria-expanded", "false"); } }
+
+  if (themeBtn) themeBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (apMenu && apMenu.hidden) apOpen(); else apClose();
   });
+  if (apMenu) apMenu.addEventListener("click", function (e) {
+    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
+    if (!opt) return;
+    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
+    if (k === "family") apSetFamily(v);
+    else if (k === "mode") apSetMode(v);
+    else applyModifier(k, v);
+    apReflect();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && apMenu && !apMenu.hidden) { apClose(); if (themeBtn) themeBtn.focus(); }
+  });
+  document.addEventListener("click", function (e) {
+    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) apClose();
+  });
+  apReflect();
 
   // ---- Bundle acquisition ------------------------------------------------
   function acquireBundle() {
@@ -976,7 +1059,7 @@
             "background-position-y": "50%",
             "background-clip": "node",
             "label": "data(label)",
-            "color": GRAPH_COLORS.light.nodeText,
+            "color": GRAPH_COLORS["technical-light"].nodeText,
             // Review feedback: node names read "near-microscopic" at the
             // widened max spread (the auto-fit zooms the big graph out, so the
             // rendered size is font-size × zoom; measured max-range zoom is
@@ -999,19 +1082,19 @@
             // plate is a touch more opaque (0.72→0.85) so the bolder text stays
             // crisp over edges at high spread. Padding stays 2 so the plate does
             // not enlarge the label footprint at the compact default.
-            "text-background-color": GRAPH_COLORS.light.edgeLabelBg,
+            "text-background-color": GRAPH_COLORS["technical-light"].edgeLabelBg,
             "text-background-opacity": 0.85,
             "text-background-padding": 2,
             "text-background-shape": "roundrectangle",
             "width": "data(vizSize)",
             "height": "data(vizSize)",
             "border-width": 1,
-            "border-color": GRAPH_COLORS.light.nodeBorder,
+            "border-color": GRAPH_COLORS["technical-light"].nodeBorder,
           },
         },
         {
           selector: "node:selected",
-          style: { "border-width": 3, "border-color": GRAPH_COLORS.light.select },
+          style: { "border-width": 3, "border-color": GRAPH_COLORS["technical-light"].select },
         },
         {
           selector: "edge",
@@ -1022,8 +1105,8 @@
             // still override (an inline ele.style() bypass would not).
             "width": "mapData(weight, 0, 1, 1.2, 4.8)",
             "opacity": "mapData(weight, 0, 1, 0.5, 1)",
-            "line-color": GRAPH_COLORS.light.edge,
-            "target-arrow-color": GRAPH_COLORS.light.edge,
+            "line-color": GRAPH_COLORS["technical-light"].edge,
+            "target-arrow-color": GRAPH_COLORS["technical-light"].edge,
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
             // Phase 3: arrowheads scale with edge weight so direction stays
@@ -1036,7 +1119,7 @@
             // Review feedback: the contextual relationship labels were
             // faint/thin/unreadable at high spread. The faintness was the COLOR
             // and WEIGHT, so fix exactly those — a 600 weight and the darkened
-            // slate token (GRAPH_COLORS.light.edgeLabel, #334155 ≈ 10:1) — and
+            // slate token (GRAPH_COLORS["technical-light"].edgeLabel, #334155 ≈ 10:1) — and
             // leave the plate opacity/padding at their reviewed defaults so the
             // many overlapping selected-node labels do not stack into an opaque
             // blob at the compact default. min-zoomed-font-size is raised 7→9 so
@@ -1047,9 +1130,9 @@
             // .okf-show-label) and only changes WHEN they paint.
             "font-size": 11,
             "font-weight": 600,
-            "color": GRAPH_COLORS.light.edgeLabel,
+            "color": GRAPH_COLORS["technical-light"].edgeLabel,
             "text-rotation": "autorotate",
-            "text-background-color": GRAPH_COLORS.light.edgeLabelBg,
+            "text-background-color": GRAPH_COLORS["technical-light"].edgeLabelBg,
             "text-background-opacity": 0.9,
             "text-background-padding": 2,
             "text-background-shape": "roundrectangle",
@@ -1076,7 +1159,7 @@
         // compose instead of fighting.
         { selector: ".okf-hover-dim", style: { "opacity": 0.18 } },
         { selector: "node.okf-hover", style: {
-            "underlay-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.18,
             "underlay-padding": 8,
         } },
@@ -1085,14 +1168,14 @@
         { selector: ".okf-path-dim", style: { "opacity": 0.12 } },
         { selector: "node.okf-path", style: {
             "border-width": 3,
-            "border-color": GRAPH_COLORS.light.select,
-            "underlay-color": GRAPH_COLORS.light.select,
+            "border-color": GRAPH_COLORS["technical-light"].select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.14,
             "underlay-padding": 6,
         } },
         { selector: "edge.okf-path", style: {
-            "line-color": GRAPH_COLORS.light.select,
-            "target-arrow-color": GRAPH_COLORS.light.select,
+            "line-color": GRAPH_COLORS["technical-light"].select,
+            "target-arrow-color": GRAPH_COLORS["technical-light"].select,
             "width": 4.5,
             "opacity": 1,
             "line-style": "solid",
@@ -1101,8 +1184,8 @@
         {
           selector: "edge:selected",
           style: {
-            "line-color": GRAPH_COLORS.light.select,
-            "target-arrow-color": GRAPH_COLORS.light.select,
+            "line-color": GRAPH_COLORS["technical-light"].select,
+            "target-arrow-color": GRAPH_COLORS["technical-light"].select,
             "line-style": "solid",
             "width": 5,
             "opacity": 1,
@@ -1112,7 +1195,7 @@
         // heavy double-black ring (reviewer blocker 1). Still a non-colour-only
         // SHAPE/halo cue; cross-group bridge edges stay dashed.
         { selector: "node.okf-bridge", style: {
-            "underlay-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.16,
             "underlay-padding": 6,
             "border-width": 2,
@@ -1120,11 +1203,11 @@
         { selector: "edge.okf-bridge-edge", style: { "line-style": "dashed" } },
         // Focus root: strong selection halo so the focused node is unmistakable.
         { selector: "node.okf-focus-root", style: {
-            "underlay-color": GRAPH_COLORS.light.select,
+            "underlay-color": GRAPH_COLORS["technical-light"].select,
             "underlay-opacity": 0.38,
             "underlay-padding": 14,
             "border-width": 4,
-            "border-color": GRAPH_COLORS.light.select,
+            "border-color": GRAPH_COLORS["technical-light"].select,
             "z-index": 30,
         } },
         // Non-neighbour dim during focus is stronger (~12%); reviewer asked ≤30%.
@@ -1136,7 +1219,7 @@
         // halo is theme-aware and distinct from auto-generated node fills.
         { selector: ".okf-presence-halo", style: {
             "border-width": 4,
-            "border-color": GRAPH_COLORS.light.select,
+            "border-color": GRAPH_COLORS["technical-light"].select,
             "border-opacity": 0.9,
             "z-index": 20,
           } },
@@ -1185,8 +1268,10 @@
       syncBridgeColour();
     }
     syncLabelColour();
-    var themeBtn2 = document.getElementById("okf-theme");
-    if (themeBtn2) themeBtn2.addEventListener("click", syncLabelColour);
+    // (Round 2) Any applyTheme() recolours the canvas via this hook — so a
+    // theme change from the Appearance menu (or OS) re-syncs, even though the
+    // trigger click now opens the popover instead of cycling.
+    onThemeApplied = syncLabelColour;
     // P3-11: keep Cytoscape label colours in sync with OS colour-scheme.
     if (window.matchMedia) {
       var colourSchemeMq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1196,7 +1281,7 @@
           var saved = localStorage.getItem(STORAGE_KEY);
           if (saved && THEMES.indexOf(saved) >= 0) return;
         } catch (err) {}
-        applyTheme(e.matches ? "dark" : "light");
+        applyTheme(resolveAutoTheme());
         syncLabelColour();
       };
       if (colourSchemeMq.addEventListener) {

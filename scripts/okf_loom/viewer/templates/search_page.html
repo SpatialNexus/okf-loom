@@ -4,7 +4,7 @@
 
   Placeholders (str.replace):
       __LANG__           → document language
-      __THEME_ATTR__     → ` data-theme="light|dark|pastel|sepia|midnight"` (or empty)
+      __THEME_ATTR__     → ` data-theme="technical-light|technical-dark|swiss-light|swiss-dark"` (or empty)
       __HEAD_TITLE__     → <title> text
       __BUNDLE_NAME__    → display name
   __STATIC_PREFIX__  → URL prefix for /__static/ assets
@@ -34,7 +34,7 @@ __WIKI_CSS_LINK__
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>
 <header class="okf-topbar">
   <div class="okf-topbar__brand">
-    <a href="__BACK_LINK__" class="okf-brand-link"><strong>__BUNDLE_NAME__</strong></a>
+    <a href="__BACK_LINK__" class="okf-brand-link"><span class="okf-brand-mark" aria-hidden="true"></span><strong>__BUNDLE_NAME__</strong></a>
     <span class="okf-muted">search</span>
   </div>
   __NAV_HTML__

@@ -15,6 +15,7 @@ watchdog, atomic writes for build output.
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import os
 import re
@@ -547,36 +548,75 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # Theme button (P2-74) + shared topbar nav fragment (P2-61)
 # ---------------------------------------------------------------------------
 
-# Valid data-theme values. wiki.css defines a token block per theme; the
-# button cycles them in this order. KEEP IN SYNC with the THEMES /
-# THEME_GLYPHS copies in wiki.js, graph.js and studio.js (each JS context
-# loads without the others).
-_THEMES: tuple[str, ...] = ("light", "dark", "pastel", "sepia", "midnight")
+# The set of valid ``data-theme`` values. wiki.css defines a token block per
+# theme. KEEP IN SYNC with the THEMES / THEME_GLYPHS copies in wiki.js:27-28,
+# graph.js:30-31 and studio.js:219-220 (each JS context loads without the
+# others). Four Editorial-Workbench themes: technical/swiss families in
+# light + dark. `_theme_button_html` no longer cycles this tuple; it only
+# membership-tests `initial_theme` against it and hyphen-partitions the match
+# into family/mode. The order is retained solely for (a) the JS-mirror sync
+# contract and (b) auto resolving into Swiss (the primary family), which is
+# why Swiss stays listed first.
+_THEMES: tuple[str, ...] = (
+    "swiss-light", "swiss-dark", "technical-light", "technical-dark",
+)
 _THEME_GLYPHS: dict[str, str] = {
-    "light": "\u2600",     # \u2600 sun
-    "dark": "\u263e",      # \u263e moon
-    "pastel": "\u273f",    # \u273f flower
-    "sepia": "\u2615",     # \u2615 hot beverage
-    "midnight": "\u2605",  # \u2605 star
+    "swiss-light": "\u25d1",      # \u25d1 right half-black circle (solid-fill motif)
+    "swiss-dark": "\u25d0",       # \u25d0 left half-black circle
+    "technical-light": "\u2600",  # \u2600 sun
+    "technical-dark": "\u263e",   # \u263e moon
 }
 
 
 def _theme_button_html(initial_theme: str) -> str:
-    """Server-side initial theme button to avoid FOUC (P2-74).
-
-    Emits the glyph that matches the initial ``data-theme`` so the first
-    paint is consistent. ``wiki.js`` / ``graph.js`` update both the
-    ``data-theme`` attribute and the button glyph atomically when the user
-    (or localStorage) overrides the initial theme. The button cycles the
-    five themes, so it carries an aria-label naming the current theme
-    rather than a two-state aria-pressed.
+    """Appearance-menu trigger + popover (Round 2 \u00a75.3), server-rendered to
+    avoid FOUC. Replaces the former theme-cycle button. Consolidates family
+    (technical/swiss) \u00b7 mode (light/dark/auto) \u00b7 contrast (high/soft) \u00b7 border
+    (on/muted/off). The trigger keeps id="okf-theme" so the wiki.js/graph.js/
+    studio.js bindings resolve it; the wiring (open/close + option handlers,
+    each reusing its bundle's applyTheme) lives in those IIFEs. contrast/border
+    default to high/on server-side (the server can't read the user's
+    localStorage); the client corrects aria-checked at boot.
     """
-    theme = initial_theme if initial_theme in _THEMES else "light"
-    glyph = _THEME_GLYPHS[theme]
+    theme = initial_theme if initial_theme in _THEMES else ""
+    if theme:
+        family, _, mode = theme.partition("-")  # "swiss-light" -> "swiss","light"
+    else:
+        family, mode = "swiss", "auto"          # auto resolves within Swiss (see JS)
+
+    def _opt(setk: str, val: str, label: str, checked: bool) -> str:
+        return (
+            '<button type="button" role="radio" class="okf-appearance__opt" '
+            f'data-okf-set="{setk}" data-okf-val="{val}" '
+            f'aria-checked="{"true" if checked else "false"}">{label}</button>'
+        )
+
+    def _group(setk: str, label: str, opts: tuple, current: str) -> str:
+        buttons = "".join(_opt(setk, v, lbl, v == current) for v, lbl in opts)
+        return (
+            f'<div class="okf-appearance__group" role="radiogroup" aria-label="{label}">'
+            f'<span class="okf-appearance__label">{label}</span>{buttons}</div>'
+        )
+
+    groups = (
+        _group("family", "Family",
+               (("technical", "Technical"), ("swiss", "Swiss")), family)
+        + _group("mode", "Mode",
+                 (("light", "Light"), ("dark", "Dark"), ("auto", "Auto")), mode)
+        + _group("contrast", "Contrast",
+                 (("high", "High"), ("soft", "Soft")), "high")
+        + _group("border", "Border",
+                 (("on", "On"), ("muted", "Muted"), ("off", "Off")), "on")
+    )
     return (
-        '<button id="okf-theme" type="button" '
-        f'aria-label="Change colour theme (current: {theme})" '
-        f'title="Theme: {theme} \u2014 click to cycle">{glyph}</button>'
+        '<div class="okf-appearance">'
+        '<button id="okf-theme" type="button" class="okf-appearance__trigger" '
+        'aria-haspopup="true" aria-expanded="false" '
+        'aria-controls="okf-appearance-menu" aria-label="Appearance settings" '
+        'title="Appearance">Aa <span aria-hidden="true">\u25be</span></button>'
+        '<div class="okf-appearance__menu" id="okf-appearance-menu" role="dialog" '
+        f'aria-label="Appearance" hidden>{groups}</div>'
+        '</div>'
     )
 
 
@@ -610,12 +650,80 @@ def _nav_controls_html(
         f'<form action="{search_target}" method="get" role="search" class="okf-search-form">'
         '<input type="search" name="q" placeholder="Search\u2026" autocomplete="off"'
         f' aria-label="Search"{search_value}>'
+        # Plain "/" keycap (Editorial Workbench; SPEC \u00a73.1 \u2014 no OS glyph). The
+        # "/" key focuses this field (studio.js); the cue is OS-neutral.
+        '<kbd class="okf-kbd okf-search-kbd" aria-hidden="true">/</kbd>'
         '</form>'
         f'<a class="okf-btn" href="{graph_link}">Graph</a>'
         f'<a class="okf-btn" href="{index_href}">Index</a>'
         f'{_theme_button_html(initial_theme)}'
         '</div>'
     )
+
+
+# Canonical Diátaxis ordering for the concept left-nav (Editorial Workbench
+# SPEC §3.2). ``demo`` is featured first (the bundle's showcase entry point);
+# the four Diátaxis quadrants follow in pedagogical order; unknown types sort
+# alphabetically after the known set.
+_NAV_TYPE_ORDER: tuple[str, ...] = (
+    "demo", "tutorial", "how-to", "howto", "reference", "explanation",
+)
+
+
+def _norm_type(t: str) -> str:
+    """Normalise a type for order matching (case- and separator-insensitive)."""
+    return t.strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def _nav_type_label(t: str) -> str:
+    """Group heading for a Diátaxis type. Real-bundle frontmatter types are
+    already display-ready ("Demo", "How-to") and CSS upper-cases them; only the
+    synthetic ``<untyped>`` bucket needs a friendly name."""
+    return "Other" if t == "<untyped>" else t
+
+
+def _concept_nav_html(bundle: Bundle, concept: Concept, mode: str) -> str:
+    """Diátaxis-grouped left-nav for concept pages (Editorial Workbench §3.2).
+
+    Every concept in the bundle is grouped by its Diátaxis ``type`` under a
+    small uppercase group label, ordered by :data:`_NAV_TYPE_ORDER` (unknown
+    types alphabetical, deterministic). Within a group, concepts sort by title
+    then id (§3.2 determinism). The current concept's link is marked
+    ``aria-current="page"`` and carries ``--current`` for the active-state
+    tokens. This is a persistent wayfinding rail; studio.js mounts its dynamic
+    panels (related graph, quick actions) *below* it without disturbing it.
+    """
+    by_type: dict[str, list[Concept]] = {}
+    for c in bundle.concepts.values():
+        by_type.setdefault(c.type or "<untyped>", []).append(c)
+
+    def _type_key(t: str) -> tuple[int, str]:
+        norm = _norm_type(t)
+        try:
+            return (_NAV_TYPE_ORDER.index(norm), "")
+        except ValueError:
+            return (len(_NAV_TYPE_ORDER), norm)
+
+    parts: list[str] = ['<nav class="okf-nav" aria-label="Concepts">']
+    for t in sorted(by_type, key=_type_key):
+        parts.append(
+            f'<p class="okf-nav__group">{_esc(_nav_type_label(t))}</p>'
+        )
+        for c in sorted(by_type[t], key=lambda c: (c.title.lower(), c.id)):
+            url = url_for_concept(c.id, mode, source_cid=concept.id)
+            if c.id == concept.id:
+                parts.append(
+                    f'<a class="okf-nav__link okf-nav__link--current"'
+                    f' aria-current="page" href="{_esc(url)}"'
+                    f' title="{_esc(c.title)}">{_esc(c.title)}</a>'
+                )
+            else:
+                parts.append(
+                    f'<a class="okf-nav__link" href="{_esc(url)}"'
+                    f' title="{_esc(c.title)}">{_esc(c.title)}</a>'
+                )
+    parts.append("</nav>")
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -1097,6 +1205,53 @@ def _search_corpus_json(bundle: Bundle) -> list[dict[str, Any]]:
 # Page rendering (shared with server.py via _render_* helpers)
 # ---------------------------------------------------------------------------
 
+# Editorial Workbench §6.1: on-page ToC (reader-facing, server-rendered).
+# Phase-3 final-review note: this regex hard-codes the assumption that
+# markdown.py emits `<hN id="slug">` with `id` as the FIRST (sole,
+# double-quoted) attribute — a future change to that heading emitter (e.g.
+# an extra attribute before `id`, or single-quoting it) would silently drop
+# ToC headings with no failing test. (Verified correct today: markdown.py:729
+# emits id-first; `_demote_headings` preserves id position.)
+_TOC_HEADING_RE = re.compile(r'<h([23])\s+id="([^"]+)"[^>]*>(.*?)</h\1>', re.DOTALL)
+_TOC_TAG_RE = re.compile(r"<[^>]+>")
+_TOC_MIN_HEADINGS = 3
+
+
+def _build_toc_html(body_html: str) -> str:
+    """Server-rendered on-page Table of Contents (§6.1).
+
+    Scans the FINAL reading-column HTML (after link-rewrite + heading
+    demotion) for the ``<h2>``/``<h3>`` anchors the markdown renderer already
+    emitted (viewer/markdown.py assigns id slugs; ``_demote_headings`` keeps
+    them). Extracting from the rendered HTML — NOT parse.extract_headings —
+    keeps the ``#anchors`` byte-identical to the real ids (the two module
+    ``_slugify()``s diverge on ``_`` + empty titles) and uses the demoted
+    levels the reader sees, matching the studio Outline's ``h2,h3`` set.
+    Returns "" for docs with fewer than ``_TOC_MIN_HEADINGS`` headings so
+    trivially short pages get no ToC. Works with no JS (plain ``<a href``)
+    and is DISTINCT from the JS-only studio Outline overlay (``.okf-outline``).
+    """
+    heads = _TOC_HEADING_RE.findall(body_html)
+    items: list[str] = []
+    for level, slug, inner in heads:
+        text = _html.unescape(_TOC_TAG_RE.sub("", inner)).strip()  # unescape (inner is already-escaped HTML) so _esc() escapes exactly once
+        if not text:
+            continue
+        items.append(
+            f'<li class="okf-toc__item">'
+            f'<a class="okf-toc__link okf-toc__link--h{level}" '
+            f'href="#{_esc_attr_qs(slug)}">{_esc(text)}</a></li>'
+        )
+    if len(items) < _TOC_MIN_HEADINGS:
+        return ""
+    return (
+        '<nav class="okf-toc" aria-label="On this page">'
+        '<p class="okf-toc__title">On this page</p>'
+        f'<ul class="okf-toc__list">{"".join(items)}</ul>'
+        '</nav>'
+    )
+
+
 def _demote_headings(html: str) -> str:
     """Demote all HTML headings in ``html`` by one level (h1→h2, h2→h3, … h6→h6).
 
@@ -1302,6 +1457,10 @@ def _render_concept_page(
     # body becomes <h2>, `## Subsection` becomes <h3>, etc. h6 stays h6.
     body_html = _demote_headings(body_html)
 
+    # Editorial Workbench §6.1: on-page ToC from the FINAL body_html so its
+    # #anchors match the ids the renderer emitted (gated to >=3 headings).
+    toc_html = _build_toc_html(body_html)
+
     palette_for = palette
     type_color = palette_for.get(concept.type or "", "#94a3b8")
 
@@ -1409,7 +1568,7 @@ def _render_concept_page(
     # to avoid FOUC — P2-74).
     # P1-3: in static mode the Graph link must point at __graph.html (the
     # page is emitted at that path; the extensionless URL 404s).
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     nav_html = _nav_controls_html(
         root_prefix=root_prefix,
         graph_link=f"{root_prefix}__graph{'.html' if mode == 'static' else ''}",
@@ -1435,6 +1594,9 @@ def _render_concept_page(
     # P2-3 (iter-1): clickable breadcrumb trail (replaces the flat raw id).
     breadcrumb_html = _render_breadcrumb(concept, mode=mode, name=name)
 
+    # Editorial Workbench §3.2: Diátaxis-grouped left-nav rail.
+    concept_nav_html = _concept_nav_html(bundle, concept, mode)
+
     rendered = (
         template
         .replace("__LANG__", "en")
@@ -1458,6 +1620,7 @@ def _render_concept_page(
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__CONCEPT_ID__", _esc(cid_str))
         .replace("__BREADCRUMB_HTML__", breadcrumb_html)
+        .replace("__CONCEPT_NAV_HTML__", concept_nav_html)
         .replace("__CONCEPT_TYPE__", _esc(concept.type or "concept"))
         .replace("__CONCEPT_TYPE_COLOR__", _esc(type_color))
         .replace("__CONCEPT_TYPE_FG__", _esc(_chip_fg(type_color)))
@@ -1480,6 +1643,17 @@ def _render_concept_page(
         .replace("__FRONTMATTER_HTML__", frontmatter_html)
         .replace("__GOVERNED_HTML__", governed_html)
         .replace("__LOCAL_GRAPH_DATA__", _esc(local_data))
+        # Phase-3 final-review Fix 1: __TOC_HTML__ MUST be replaced LAST.
+        # toc_html is built from user heading text (_build_toc_html), and
+        # _esc() deliberately doesn't touch "_", so a heading whose text is
+        # itself one of the sentinels above (e.g. "__CONCEPT_BODY__") would
+        # survive into the ToC verbatim. If __TOC_HTML__ were substituted
+        # earlier in this chain, that sentinel-shaped ToC link text would
+        # then be matched (and clobbered) by that sentinel's own later
+        # .replace() call above. Being last means nothing after it can act
+        # on toc_html's injected content. The placeholders are otherwise
+        # independent, so no other replace here depends on ordering.
+        .replace("__TOC_HTML__", toc_html)
     )
     # P2-68: strip empty ``<section class="okf-relations__block">`` blocks
     # (those whose only content was an empty link list + the heading).
@@ -2007,7 +2181,10 @@ def _render_index_page(
             # = concept link; studio.js stampConceptIds + presence rely on
             # it) — the card look is CSS on top.
             rows.append(
-                f'<li class="okf-card" style="--okf-type-accent:{_esc(color)}">'
+                f'<li class="okf-card" style="--okf-type-accent:{_esc(color)}"'
+                f' data-okf-type="{_esc_attr_qs(t)}"'
+                f' data-okf-title="{_esc_attr_qs(c.title)}"'
+                f' data-okf-search="{_esc_attr_qs((c.title + " " + (c.description or "") + " " + " ".join(c.tags)).lower())}">'
                 f'<a href="{_esc(url)}" class="okf-internal okf-card__link">{_esc(c.title)}</a>'
                 f' <span class="okf-muted okf-card__id">{_esc(cid_str)}</span>'
                 f'{(" <span class=\"okf-concept-desc okf-card__desc\">" + desc + "</span>") if desc else ""}'
@@ -2015,7 +2192,8 @@ def _render_index_page(
                 f'</li>'
             )
         groups_parts.append(
-            f'<section class="okf-section" style="--okf-type-accent:{_esc(color)}">'
+            f'<section class="okf-section" style="--okf-type-accent:{_esc(color)}"'
+            f' data-okf-type="{_esc_attr_qs(t)}">'
             f'<h2 class="okf-section__title"><span class="okf-section__icon" style="color:{_esc(color)}">{icon}</span>'
             f'{_esc(t)} <span class="okf-section__count">{len(items)}</span></h2>'
             f'<ul class="okf-concept-list okf-cardgrid">{"".join(rows)}</ul>'
@@ -2051,7 +2229,7 @@ def _render_index_page(
     )
 
     theme_attr = ""
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
 
@@ -2114,6 +2292,60 @@ def _render_index_page(
     )
 
 
+_HIGHLIGHT_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _highlight(text: str, query: str, *, limit: int = 200) -> str:
+    """Truncate ``text`` to ``limit`` and wrap query-term matches in ``<mark>``
+    (Round 2 §6.3). Terms are matched against the RAW (pre-escape) text; each
+    segment — the gaps AND each matched run — is then HTML-escaped
+    independently via ``_esc`` and the match is wrapped in a LITERAL ``<mark>``.
+    Matching on the raw text (never the escaped string) is what keeps HTML
+    entities intact: a query term that collides with an entity name (e.g.
+    "gt"/"amp", which an identifier query like ``gt_flag``/``amp_events``
+    tokenizes to) can no longer land inside an escaped ``&gt;``/``&amp;`` and
+    shatter it. Every char of ``text`` is still escaped, so injected markup —
+    even a literal ``<mark>`` planted in the doc text — renders inert
+    (CSP-safe). Terms are the query's word tokens (>=2 chars), matched
+    case-insensitively, longest-first so overlapping terms don't half-wrap.
+
+    Tokenizer parity: ``_HIGHLIGHT_WORD_RE`` (``\\w+``) is deliberately the
+    SAME word regex the live LEXICAL search backend tokenizes the query with
+    (``search.py`` ``_WORD_RE``), so an identifier query like ``user_role`` is
+    one ``\\w+`` token to both and is marked as ONE run — not shattered into
+    ``user``/``role`` fragments the way the old ``[^\\W_]+`` regex did. Keeping
+    ``_`` also aligns these boundaries with static-search.js's ``highlight()``
+    (Task 5's static highlighter), whose ``tokenize()``
+    (``/[\\p{L}\\p{N}_]+/gu``) likewise keeps ``_``; the two share this exact
+    entity-safe match-on-raw → escape-per-segment ALGORITHM.
+
+    Scope: this reconciles the underscore/word-boundary handling only.
+    ``_highlight`` applies the ``\\w+`` regex plus a ``>=2``-char filter and
+    nothing else — it does NOT run the backend's full ``tokenize()`` pipeline —
+    so live vs static ``<mark>`` placement can still differ where a tokenizer
+    does more than split on word boundaries: (1) a query with a ``>=2``-char
+    STOPWORD (e.g. ``the`` in ``the users``) — the static page highlights
+    ``tokenize(query)`` output, which DROPS stopwords, while ``_highlight``
+    marks them; and (2) a pure-CJK query — static splits such runs per
+    character. Both are separate, pre-existing differences, independent of this
+    underscore reconciliation.
+    """
+    s = str(text or "")[:limit]
+    terms = [t for t in _HIGHLIGHT_WORD_RE.findall((query or "").lower()) if len(t) >= 2]
+    if not terms:
+        return _esc(s)
+    terms.sort(key=len, reverse=True)  # longest-first so overlapping terms win
+    pat = re.compile("|".join(re.escape(t) for t in terms), re.IGNORECASE)
+    out: list[str] = []
+    last = 0
+    for m in pat.finditer(s):  # match on the RAW text, never the escaped string
+        out.append(_esc(s[last:m.start()]))  # escape the gap
+        out.append("<mark>" + _esc(m.group()) + "</mark>")  # escape+wrap the match
+        last = m.end()
+    out.append(_esc(s[last:]))  # escape the tail
+    return "".join(out)
+
+
 def _render_search_page(
     bundle: Bundle,
     *,
@@ -2137,7 +2369,10 @@ def _render_search_page(
     for r in results:
         cid = r.get("concept_id") or r.get("id") or ""
         title = r.get("title") or cid
-        desc = r.get("description") or (r.get("snippets") or [""])[0]
+        # §6.3: prefer the match-centred snippet the backend computed
+        # (_extract_snippets) so the highlighted term is actually visible;
+        # fall back to the curated description, then empty.
+        desc = (r.get("snippets") or [None])[0] or r.get("description") or ""
         url = ("/" + cid) if mode in ("serve", "spa") else (cid + ".html")
         ctype = r.get("type") or ""
         if not ctype:
@@ -2155,18 +2390,18 @@ def _render_search_page(
         )
         result_parts.append(
             f'<article class="okf-search-result" style="--okf-type-accent:{_esc(color)}">'
-            f'<h3><a href="{_esc(url)}" class="okf-internal">{_esc(title)}</a></h3>'
+            f'<h3><a href="{_esc(url)}" class="okf-internal">{_highlight(title, query)}</a></h3>'
             # iter1 P3-13: concept-id moved OUT of the <h3> so the heading
             # outline announces only the title (screen-reader heading-list
             # navigation no longer reads "title concept/id" as one string).
             f'<div class="okf-search-result__meta okf-muted">{type_chip} {_esc(cid)}</div>'
-            f'<div class="okf-search-snippet">{_esc(str(desc)[:200])}</div>'
+            f'<div class="okf-search-snippet">{_highlight(desc, query)}</div>'
             f'</article>'
         )
     results_html = "\n".join(result_parts) or '<p class="okf-search-empty">No results.</p>'
 
     theme_attr = ""
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     if initial_theme in _THEMES:
         theme_attr = f' data-theme="{initial_theme}"'
 
@@ -2247,7 +2482,7 @@ def _render_graph_page(
     static_prefix = "/__static" if mode in ("serve", "spa") else "__static"
     data_url = "/__data/graph.json" if mode in ("serve", "spa") else "__data/graph.json"
     back_link = "/" if mode in ("serve", "spa") else "index.html"
-    initial_theme = config.get("theme") or "light"
+    initial_theme = config.get("theme") or "auto"
     initial_layout = config.get("default_layout") or "cose"
     theme_attr = f' data-theme="{initial_theme}"' if initial_theme in _THEMES else ""
 

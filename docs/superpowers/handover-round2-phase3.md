@@ -1,0 +1,54 @@
+# Handover — okf-loom Editorial Workbench, ROUND 2 · PHASE 3 (features)
+
+> Paste the block below into a fresh chat session to continue the redesign. It is self-contained.
+
+---
+
+Continue the okf-loom studio "Editorial Workbench" redesign — **ROUND 2, PHASE 3 (FEATURES: on-page ToC · index dashboard · search quality · studio depth)**. Work in `/l_kitty_kitty/opt/projects/repos/okf-loom` on branch `feature/new-layout` (STAY on it; do NOT branch/merge). **This is an AUTONOMOUS build — no further user input is expected. Proceed through writing-plans → build → verify, making reasonable design calls and documenting them; don't stop for approval gates.** Serve + tunnel + screenshot to self-verify across all themes before calling anything done.
+
+**THE FEATURE SET IS SCOPED by the approved spec §6 — do NOT re-brainstorm it.** Turn spec §6 into a Phase-3 plan (writing-plans skill FIRST), then build via **subagent-driven-development** (fresh subagent per task + two-stage review: spec-compliance THEN code-quality; fix loops via SendMessage to the same implementer; keep the suite green; commit per logical step; then a final whole-Phase-3 review).
+
+## READ FIRST (durable context — trust it; verify line refs, files shift)
+- Auto-loaded memory `editorial-workbench-layout-buildout.md` — full redesign state incl. the **"PHASE-2 BUILT + GREEN"** note, the D1/D3 decisions, and the consistency fixes.
+- `docs/superpowers/specs/2026-07-05-editorial-workbench-round2-design.md` (commit `b4a0159` + reconciliation note in `a07d32d`) — the APPROVED contract. **§6 IS PHASE 3** (6.1 ToC · 6.2 index dashboard · 6.3 search quality · 6.4 studio depth — some SPIKES). §7 verification; §9 machinery table.
+- `docs/superpowers/plans/2026-07-06-editorial-workbench-round2-phase2.md` — the Phase-2 plan; **REUSE its STRUCTURE** for the Phase-3 plan (header, decoupling contract, "Test contracts — MUST preserve" table, "New names locked", file-structure map, bite-sized TDD steps RED→GREEN→commit, self-review). Its per-task sections are hyper-precise — scope each implementer to read ONLY its own task section.
+- `design/new-layout/SPEC.md` — base contract (esp. **§3.6 the five views** — the index/search/graph specs Phase 3 enhances).
+
+## WHERE WE ARE (all committed on feature/new-layout)
+- **Phase 1 (layout/chrome) + Phase 2 (appearance) DONE + GREEN + final-review-clean**, plus browser-pass **consistency fixes**.
+- **Round 2 = 17 commits, `a957388..1b2fe99` (HEAD)**: Phase 2 = `a07d32d..6bc056b` (14 commits); then 3 consistency fixes from the user's browser pass — `9b2ca66` (topbar controls sit top-right on EVERY page via `margin-left:auto` — index/search/graph had them left), `88e87a0` (graph.js resolves theme **swiss-first** like the reading pages — no legacy `INITIAL_THEME` divergence), `1b2fe99` (raised `.okf-topbar` to `z-index:50` so the `Aa ▾` popover clears the graph's signal bar). Full suite green: **`1287 passed / 23 skipped / 0 failed`** (23 skips = pre-existing OPTIONAL upstream-bundle fixtures ga4/stackoverflow/crypto_bitcoin — expected). The documented flake `test_comment_mark_wraps_selection` passes on rerun. *(Re-confirm with `pytest tests/ -q` after any change.)*
+- **Appearance system is DONE — do NOT re-touch it:** `Aa ▾` topbar menu (family/mode/contrast/border) replacing the theme-cycle button; `data-okf-contrast="soft"` + `data-okf-border="muted|off"` root modifiers over per-theme `*-soft` tokens (DEFAULT = attrs absent = today's contrasty look); footer **Studio** button for off-rail pages; dead `.okf-sidebar-panel` subsystem removed.
+
+## WHAT PHASE 3 BUILDS (spec §6; summary so you don't re-derive)
+- **6.1 On-page ToC (reader-facing):** SERVER-render a ToC from the concept's `h2`/`h3` into the reading column for docs with **≥N headings** (works no-JS), flat-styled to match the left nav. **DISTINCT from the JS-only studio "Outline" overlay** (don't collide). Machinery: `render.py` concept rendering + `concept_page.html`. (Editing render.py/templates ⇒ **serve RESTART** to see it.)
+- **6.2 Index dashboard:** client-side **type-filter chips · sort · search-within** progressively enhancing the server-rendered type-groups (also fixes "index underuses horizontal space"). Server still renders the groups (`render.py` index render — VERIFY current lines); NEW `wiki.js` index logic enhances. No-JS still shows the groups.
+- **6.3 Search results quality:** **match-highlighting · relevance sort · result meta (type/path)**. The live serve already ranks via BM25 (`/__search`); mostly a results-renderer change + the static path (`static-search.js`, `wiki.js` search logic, `search_page.html`).
+- **6.4 Studio depth:**
+  - **(SPIKE) quick-actions RUN** — POST a directive to the agent instead of only pre-filling the composer (`studio.js buildIntentsToolbar`). Check for / introduce a server directive endpoint.
+  - **(SPIKE) validation count** in the rail/footer — surface validate state (CLI-only today; may need a small server endpoint).
+  - **On-demand doc diff in the Changes tab** — reuse the conflict-modal diff renderer (`showConflictModal`) for a Changes-tab diff (today `renderChangeList` is an event feed).
+- **SPIKES = capability check FIRST.** For anything needing a NEW server endpoint (quick-actions RUN; validation count): verify feasibility, and because the server is a **loopback-only trust boundary with CSRF** (`server.py`), implement carefully OR scope to the safe subset (keep composer pre-fill; defer RUN) and **document the decision in the plan**. Autonomous, but conservative on new server surface.
+
+## BUILD PROCESS
+writing-plans → produce the Phase-3 plan in `docs/superpowers/plans/` (self-review it) → subagent-driven-development (fresh implementer per task; spec-then-quality review; fix loops via SendMessage; suite green; commit per step) → final whole-Phase-3 review → serve + tunnel + Playwright screenshots across the 4 themes (× soft/border where relevant) for self-verification. **Autonomous — no user gate; make + document design calls.** When done, the redesign is feature-complete; update the memory file.
+
+## CRITICAL ENV GOTCHAS (these bit prior sessions)
+- Foreground `sleep`/`pkill`/`kill` are sandbox-blocked (exit 144). **Serve** via Bash `run_in_background:true`, command `exec scripts/okf-loom serve docs-bundle --no-open --port 8788 --tunnel` (the CLI supports `--port` + `--tunnel`; `--tunnel` starts cloudflared AND registers the tunnel host so studio works). **Wait** with `curl -s --retry 30 --retry-delay 1 --retry-connrefused http://localhost:8788/demo/showcase -o /dev/null` (NO `sleep`). **STOP/RESTART** with the **TaskStop** tool on the bg task id (never `pkill`). **RESTART after editing `render.py`/templates** (read at startup); static assets (css/js) are served fresh — just reload. A **stale serve from a prior session may squat `:8787`** with OLD render.py — bring up your own on a fresh `--port` (e.g. 8788).
+- Tunnel URL (`https://<x>.trycloudflare.com`) prints ~5s into the serve bg output; grep the bg task's output file for it (don't race a `tail -f | grep`). Hand it to the user only if they ask.
+- **Screenshots:** Playwright + system Chrome — `executable_path=$AIC_PLAYWRIGHT_CHROME_PATH` (`/opt/google/chrome/google-chrome`), `args=["--no-sandbox"]`, `wait_until="load"` (SSE breaks `networkidle`). Seed `localStorage['okf-theme']`/`['okf-contrast']`/`['okf-border']` via `context.add_init_script(...)` for variants (Swiss-light default = don't seed). Read image files back to self-review.
+- **Browser tests** use `server_url` + `page` fixtures (there is NO `studio_page` fixture) + `_wait_for_studio(page)` after `page.goto(f"{server_url}/tables/orders", wait_until="load")`; graph tests use `/__graph` + `wait_until="domcontentloaded"` + wait `#okf-graph`; set `page.set_viewport_size({...})` explicitly for >900px (rail) behaviour.
+- **Tests:** `python3 -m pip install pytest playwright pytest-playwright` (browser download disabled; system Chrome auto-used). `python3 -m pytest tests/ -q` (~3.5min incl. e2e). **NEVER pipe pytest through `| tail` and trust the exit code — READ the printed summary line.** Documented flake (pass on rerun; if the ONLY failure, rerun once): `test_comment_mark_wraps_selection` (120ms debounce); shared-server races `test_agent_watching_toggle_posts_presence` / `test_agent_activity_panel_has_unique_sections`. The 23 skips are optional upstream-bundle fixtures — expected.
+- **advisor tool** was UNAVAILABLE in prior sessions (errors "unavailable"); try it, and if it errors compensate with the two-stage subagent reviews + a final whole-implementation review + independent test/screenshot verification.
+
+## KEY CONTRACTS / DON'T-BREAK (verify at build)
+- **Decoupling:** layout CSS references `var(--okf-*)` tokens only; each theme = one self-contained `[data-theme="…"]` block; `test_render.py::test_theme_blocks_override_full_token_set` enforces token parity across all 4 blocks (splits selector→first `}`). Preserve the `okf-viewer` body class, `#okf-main`, and every `__TOKEN__` placeholder.
+- **THEMES / THEME_GLYPHS / LEGACY_THEMES** stay swiss-first + identical across `render.py`, `wiki.js`, `studio.js`, `graph.js`. `THEME_GLYPHS` is now UNUSED (the trigger is `Aa ▾`, no glyph) but kept for the sync contract.
+- **Appearance (Phase 2) is DONE — don't re-touch:** `_theme_button_html` (the `Aa ▾` menu markup), the `data-okf-contrast/-border` modifier CSS blocks + the `*-soft` tokens, the post-paint IIFE readers in wiki.js/graph.js, the `onThemeApplied` graph canvas-resync bridge. **D1:** contrast/border apply POST-paint (no pre-paint script; CSP `script-src 'self'` blocks inline on 4/5 templates). **D3:** the graph Cytoscape CANVAS does NOT reflect contrast/border (`GRAPH_COLORS` hardcoded per data-theme) — accepted; the chrome does.
+- **Preserved test contracts:** `_nav_controls_html`'s search `role="search"` form + Graph/Index `okf-btn` links; `.okf-topbar`; flat `.okf-related`; `GRAPH_COLORS`/`syncLabelColour`/`graphPalette` structure (`test_iter2_graph_selection_color_is_token_governed`); the parity token test; `.okf-panel` + `openPanel(kind)` API; `.okf-split__divider` aria; `.okf-comment-marker` ≥24px.
+- **ToC (6.1)** is SERVER-rendered — must work no-JS, be flat-styled like the nav, gate on ≥N headings, and NOT duplicate the JS-only studio Outline overlay.
+
+## ROLLBACK / DON'T TOUCH
+Git tag `pre-redesign-baseline` (commit `2066013`). Untracked, leave alone: `okf-loom-mcp/`, `redesign-files-1.zip`, `design/new-layout/workbench-preview.html`.
+
+## DELIVERABLE
+writing-plans → Phase-3 plan → build via subagent-driven-development (suite green, commit per step) → final whole-Phase-3 review → serve + tunnel + screenshots across themes. Autonomous; document decisions. Then the Editorial Workbench redesign is feature-complete — update `editorial-workbench-layout-buildout.md`.

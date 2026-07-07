@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -292,6 +293,7 @@ from okf_loom.render import (  # noqa: E402
     _render_subtitle,
     _strip_body_citations_section,
     _is_typed_relation_target_raw,
+    _theme_button_html,
 )
 
 
@@ -625,6 +627,55 @@ def test_p1_3_static_concept_nav_urls_have_html_extension(
     assert "__graph.html" in graph_match.group(1), (
         f"static graph link should include .html; got {graph_match.group(1)!r}"
     )
+
+
+def test_appearance_menu_replaces_theme_cycle_button(tiny_good_bundle: _Path) -> None:
+    """Round 2 §5.3: the topbar theme control is an Appearance popover
+    (family/mode/contrast/border), not a bare cycle button. The trigger keeps
+    id=okf-theme; the search form + Graph link (P1-3 contract) survive."""
+    html = _render_concept_html(tiny_good_bundle, "tables/users")  # same as test_p1_3
+    assert 'id="okf-theme"' in html
+    assert 'aria-haspopup="true"' in html
+    assert 'class="okf-appearance__menu"' in html
+    for setk in ("family", "mode", "contrast", "border"):
+        assert f'data-okf-set="{setk}"' in html, f"missing {setk} radiogroup"
+    for val in ("technical", "swiss", "light", "dark", "auto",
+                "high", "soft", "on", "muted", "off"):
+        assert f'data-okf-val="{val}"' in html, f"missing option {val}"
+    # P1-3 topbar contract survives.
+    assert 'role="search"' in html
+    assert ">Graph<" in html
+
+
+def test_appearance_menu_reflects_initial_theme() -> None:
+    """The server reflects the initial theme into the popover's aria-checked
+    state (later tasks read it to seed the client). Family/mode come from the
+    hyphen-split of ``initial_theme``; contrast/border default high/on. A value
+    outside ``_THEMES`` (e.g. ``auto``) falls back to the swiss + auto default."""
+    def opt(setk: str, val: str, checked: bool) -> str:
+        return (
+            f'data-okf-set="{setk}" data-okf-val="{val}" '
+            f'aria-checked="{"true" if checked else "false"}"'
+        )
+
+    # swiss-light -> family=swiss, mode=light, contrast=high, border=on checked.
+    html = _theme_button_html("swiss-light")
+    for setk, val in (("family", "swiss"), ("mode", "light"),
+                      ("contrast", "high"), ("border", "on")):
+        assert opt(setk, val, True) in html, f"{setk}={val} should be checked"
+    for setk, val in (("family", "technical"), ("mode", "dark"),
+                      ("mode", "auto"), ("contrast", "soft"),
+                      ("border", "muted"), ("border", "off")):
+        assert opt(setk, val, False) in html, f"{setk}={val} should be unchecked"
+
+    # A non-_THEMES value falls back to the documented default: swiss + auto.
+    html_auto = _theme_button_html("auto")
+    assert opt("mode", "auto", True) in html_auto, "auto should select mode=auto"
+    assert opt("family", "swiss", True) in html_auto, (
+        "auto should default family=swiss"
+    )
+    assert opt("mode", "light", False) in html_auto
+    assert opt("family", "technical", False) in html_auto
 
 
 def test_p1_3_spa_concept_nav_urls_extensionless(
@@ -991,14 +1042,20 @@ def test_iter1_subtitle_uses_css_class_not_inline_style(tmp_path: _Path) -> None
 
 
 def test_iter1_concept_page_sidebar_labeled_related(tmp_path: _Path) -> None:
-    """P2-4: the concept-page sidebar aria-label says 'Related concepts'
-    (honest — it's a flat labelled pill list, not a graph)."""
+    """Editorial Workbench §3.2: the concept-page sidebar is now the Diátaxis
+    navigation rail (with the related-graph / quick-action panels mounted below
+    it by studio.js), so its aria-label is the honest 'Navigation' and it
+    carries the server-rendered ``.okf-nav`` rail with grouped concept links."""
     bundle = _build_bundle_with(tmp_path, {
         "c.md": "---\ntype: T\ntitle: C\n---\nbody\n",
     })
     html = _render_concept_html(bundle, "c")
-    assert 'aria-label="Related concepts"' in html
-    assert 'aria-label="Concept navigation"' not in html
+    assert 'aria-label="Navigation"' in html
+    # The Diátaxis nav rail is server-rendered into the sidebar with a group
+    # heading and an active current-page link.
+    assert 'class="okf-nav"' in html
+    assert "okf-nav__group" in html
+    assert "okf-nav__link--current" in html
 
 
 def test_iter1_accent_is_not_tailwind_blue() -> None:
@@ -1013,10 +1070,10 @@ def test_iter1_accent_is_not_tailwind_blue() -> None:
         assert m, f"token --{name} not defined in block"
         return m.group(1).strip()
 
-    root_block = css.split(":root", 1)[1].split("}", 1)[0]
-    light_accent = _token(root_block, "okf-accent")
+    light_block = css.split('[data-theme="technical-light"]', 1)[1].split("}", 1)[0]
+    light_accent = _token(light_block, "okf-accent")
     assert light_accent.lower() != "#2563eb", "light accent still Tailwind blue-600"
-    dark_block = css.split('[data-theme="dark"]', 1)[1].split("}", 1)[0]
+    dark_block = css.split('[data-theme="technical-dark"]', 1)[1].split("}", 1)[0]
     dark_accent = _token(dark_block, "okf-accent")
     assert dark_accent.lower() != "#60a5fa", "dark accent still Tailwind blue-400"
 
@@ -1204,14 +1261,15 @@ def test_iter2_graph_selection_color_is_token_governed() -> None:
     # GRAPH_COLORS per-theme palette block exists and is referenced.
     assert 'GRAPH_COLORS' in graph_js, "GRAPH_COLORS constants block missing"
     # Every theme ships a canvas palette (mirrors its wiki.css tokens).
-    for theme in ("light", "dark", "pastel", "sepia", "midnight"):
-        assert re.search(rf'\b{theme}:\s*\{{', graph_js), (
+    # Keys are hyphenated so they must be quoted in the JS object literal.
+    for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
+        assert re.search(rf'"{re.escape(theme)}":\s*\{{', graph_js), (
             f"GRAPH_COLORS missing the {theme} palette"
         )
     # node:selected border reads from the palette (not a literal).
     assert re.search(
-        r'"border-color":\s*GRAPH_COLORS\.light\.select', graph_js
-    ), "node:selected border-color does not read from GRAPH_COLORS.light.select"
+        r'"border-color":\s*GRAPH_COLORS\["technical-light"\]\.select', graph_js
+    ), 'node:selected border-color does not read from GRAPH_COLORS["technical-light"].select'
     # syncLabelColour re-syncs the selection color on theme change.
     sync_match = re.search(
         r'function\s+syncLabelColour\s*\(\)\s*\{(.*?)\n\s*\}',
@@ -1233,11 +1291,7 @@ def test_iter2_select_token_defined_in_wiki_css() -> None:
     """P2-5 (iter-2): the --okf-select token is defined in EVERY theme
     (the graph.js GRAPH_COLORS block mirrors these values)."""
     css = _runtime_file("viewer", "static", "wiki.css").read_text(encoding="utf-8")
-    root_block = css.split(":root", 1)[1].split("}", 1)[0]
-    assert re.search(r'--okf-select\s*:', root_block), (
-        "light theme missing --okf-select token"
-    )
-    for theme in ("dark", "pastel", "sepia", "midnight"):
+    for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
         block = css.split(f'[data-theme="{theme}"]', 1)[1].split("}", 1)[0]
         assert re.search(r'--okf-select\s*:', block), (
             f"{theme} theme missing --okf-select token"
@@ -1257,14 +1311,68 @@ def test_theme_blocks_override_full_token_set() -> None:
         "okf-code-fg", "okf-pre-bg", "okf-pre-fg", "okf-broken",
         "okf-ok", "okf-ok-bg", "okf-warn", "okf-warn-bg",
         "okf-info", "okf-info-bg", "okf-error", "okf-error-bg", "okf-shadow",
+        # redesign additions (SPEC §5/§6) — every theme must define these:
+        "okf-active-fill", "okf-active-fg", "okf-active-border",
+        "okf-font-display", "okf-font-body", "okf-font-mono",
+        "okf-border-w", "okf-tag-transform", "okf-tag-weight", "okf-tag-spacing",
+        "okf-title-weight", "okf-title-spacing", "okf-pop-shadow", "okf-page-bg",
+        # Round 2 §5.2 soft-contrast variants — every theme owns its soft look:
+        "okf-fg-soft", "okf-active-fill-soft", "okf-active-fg-soft",
+        "okf-active-border-soft", "okf-page-bg-soft",
     )
-    for theme in ("dark", "pastel", "sepia", "midnight"):
+    for theme in ("technical-light", "technical-dark", "swiss-light", "swiss-dark"):
         assert f'[data-theme="{theme}"]' in css, f"{theme} theme block missing"
         block = css.split(f'[data-theme="{theme}"]', 1)[1].split("}", 1)[0]
         for token in core_tokens:
             assert re.search(rf'--{token}\s*:', block), (
                 f"{theme} theme missing --{token} token"
             )
+
+
+def test_validation_error_chip_uses_themed_error_token() -> None:
+    """Round 2 deferred-item fix (Item 2): the validation chip's error state
+    must reference a THEMED status token so it adapts light/dark, not render a
+    fixed colour. It previously used ``var(--okf-danger, #d64545)`` — but
+    ``--okf-danger`` is defined nowhere, so every theme fell back to the fixed
+    ``#d64545`` (even sub-AA on the light themes). Reuse the existing
+    ``--okf-error`` token — guaranteed present in every theme block by
+    ``test_theme_blocks_override_full_token_set`` — exactly as the warn chip
+    reuses ``--okf-warn`` and the offline-conn dot reuses ``--okf-error`` in
+    the same status bar. RED against a regression to an undefined status
+    token."""
+    css = _runtime_file("viewer", "static", "studio.css").read_text(encoding="utf-8")
+    m = re.search(
+        r'\.okf-statseg--validation\[data-state="error"\]\s*\{([^}]*)\}', css
+    )
+    assert m, "error-state validation chip rule not found in studio.css"
+    rule = m.group(1)
+    assert "var(--okf-error" in rule, (
+        f"error chip must use the themed --okf-error token, got: {rule!r}"
+    )
+    assert "--okf-danger" not in rule, (
+        f"error chip must not reference the undefined --okf-danger token: {rule!r}"
+    )
+
+
+def test_appearance_contrast_and_border_modifier_blocks() -> None:
+    """Round 2 §5.1: soft-contrast + border modifiers are orthogonal root
+    data-attr blocks placed AFTER the theme blocks, border after contrast."""
+    css = _runtime_file("viewer", "static", "wiki.css").read_text(encoding="utf-8")
+    assert '[data-okf-contrast="soft"]' in css
+    assert '[data-okf-border="muted"]' in css
+    assert '[data-okf-border="off"]' in css
+    # Border block AFTER contrast block (so off's transparent wins on --okf-border-strong).
+    assert css.index('[data-okf-contrast="soft"]') < css.index('[data-okf-border="off"]')
+    # Contrast=soft remaps the six documented tokens to their soft variants.
+    # Split on the FULL selector (with `:root` + brace) so a stray mention of
+    # the bare attribute in a comment can't shadow the real block.
+    soft = css.split(':root[data-okf-contrast="soft"] {', 1)[1].split("}", 1)[0]
+    for token in ("--okf-fg:", "--okf-border-strong:", "--okf-active-fill:",
+                  "--okf-active-fg:", "--okf-active-border:", "--okf-page-bg:"):
+        assert token in soft, f"contrast=soft must remap {token}"
+    # Border modifiers drive --okf-border-strong.
+    off = css.split('[data-okf-border="off"]', 1)[1].split("}", 1)[0]
+    assert "--okf-border-strong: transparent" in off
 
 
 # ===========================================================================
@@ -1575,3 +1683,440 @@ def test_iter3_all_fields_header_keys_actually_rendered(tmp_path: _Path) -> None
     assert '<span class="okf-tag">revenue</span>' in html, (
         "tag 'revenue' not rendered in header tags row"
     )
+
+
+# --- Round 2 §6.1: server-rendered on-page ToC -----------------------------
+
+
+def test_p3_1_toc_rendered_for_multi_heading_concept(tiny_good_bundle: _Path) -> None:
+    """Round 2 §6.1: a concept with >=3 rendered headings gets a server ToC
+    (no-JS), placed OUTSIDE .okf-page__body, with anchors matching the ids."""
+    doc = tiny_good_bundle / "references" / "tocprobe.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: TocProbe\n"
+        "description: Probe doc with several sections.\n---\n\n"
+        "# First Section\n\nAlpha.\n\n# Second Section\n\nBeta.\n\n"
+        "# Third Section\n\nGamma.\n", encoding="utf-8")
+    html = _render_concept_html(tiny_good_bundle, "references/tocprobe")
+    assert '<nav class="okf-toc"' in html
+    for slug in ("first-section", "second-section", "third-section"):
+        assert f'href="#{slug}"' in html, f"ToC missing #{slug}"
+        assert f'id="{slug}"' in html, f"body missing id {slug} (anchors must resolve)"
+    # ToC sits OUTSIDE the prose body (studio child-index/comment-mark tests).
+    assert html.index('class="okf-toc"') < html.index("okf-page__body")
+
+
+def test_p3_1_toc_absent_for_short_concept(tiny_good_bundle: _Path) -> None:
+    """Round 2 §6.1: docs with <3 headings get NO ToC (skip trivial pages)."""
+    doc = tiny_good_bundle / "references" / "shortprobe.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: ShortProbe\ndescription: One section.\n---\n\n"
+        "# Only Section\n\nText.\n", encoding="utf-8")
+    html = _render_concept_html(tiny_good_bundle, "references/shortprobe")
+    assert 'class="okf-toc"' not in html
+
+
+def test_p3_1_toc_escapes_heading_entities_once(tiny_good_bundle: _Path) -> None:
+    """Round 2 §6.1: ToC text is escaped exactly once (headings come from
+    already-escaped body HTML — no double-escaping of &, <, > etc.)."""
+    doc = tiny_good_bundle / "references" / "tocamp.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: TocAmp\ndescription: Amp probe.\n---\n\n"
+        "# Rendering & Feature Showcase\n\nA.\n\n# Second & Third\n\nB.\n\n# Fourth\n\nC.\n",
+        encoding="utf-8")
+    html = _render_concept_html(tiny_good_bundle, "references/tocamp")
+    toc = html.split('<nav class="okf-toc"', 1)[1].split("</nav>", 1)[0]
+    assert "Rendering &amp; Feature Showcase" in toc      # single-escaped
+    assert "&amp;amp;" not in toc, "double-escaped ampersand in ToC"
+
+
+def test_p3_1_toc_replace_not_clobbered_by_body_sentinel_heading(
+    tiny_good_bundle: _Path,
+) -> None:
+    """Phase-3 final-review Fix 1: a heading whose rendered TEXT equals one
+    of the LATER template sentinels (e.g. ``__CONCEPT_BODY__``) must not
+    have its ToC link text clobbered.
+
+    ``_render_concept_page``'s ``.replace(...)`` chain builds ``toc_html``
+    from user heading text (``_esc()`` deliberately leaves ``_`` alone), so
+    if ``__TOC_HTML__`` were substituted BEFORE ``__CONCEPT_BODY__`` /
+    ``__BACKLINKS_HTML__`` / ``__OUTGOING_HTML__``, a heading literally
+    named after one of those sentinels would inject that exact substring
+    into ``rendered`` early, and the later ``.replace("__CONCEPT_BODY__",
+    body_html)`` call would then match INSIDE the just-inserted ToC anchor
+    text too, stomping it with the entire rendered body. The heading text
+    below is wrapped in backticks (inline code) so the markdown renderer's
+    ``__..__`` emphasis regex doesn't consume the sentinel's own
+    underscores before it reaches the ToC.
+    """
+    doc = tiny_good_bundle / "references" / "tocsentinel.md"
+    doc.write_text(
+        "---\ntype: reference\ntitle: TocSentinel\n"
+        "description: Probe doc with a sentinel-named heading.\n---\n\n"
+        "# First Section\n\nAlpha.\n\n"
+        "# `__CONCEPT_BODY__`\n\nBeta.\n\n"
+        "# Third Section\n\nGamma.\n",
+        encoding="utf-8",
+    )
+    html = _render_concept_html(tiny_good_bundle, "references/tocsentinel")
+    toc = html.split('<nav class="okf-toc"', 1)[1].split("</nav>", 1)[0]
+    assert ">__CONCEPT_BODY__</a>" in toc, (
+        "ToC link text for the sentinel-named heading was clobbered — "
+        "__TOC_HTML__ must be the LAST replace in the chain so no later "
+        f"sentinel replace can act on its injected content. toc={toc!r}"
+    )
+
+
+# --- Round 2 §6.2: index dashboard data-okf-* attrs ------------------------
+
+
+def _render_index_html(bundle_root: _Path) -> str:
+    """Static-build the bundle and return its root index.html (mirror of
+    _render_concept_html — same imports/target, different output file)."""
+    from okf_loom import Bundle
+    from okf_loom.render import build_site
+    b = Bundle.load(bundle_root)
+    out = bundle_root / "_site_index"
+    build_site(b, out, target="static")
+    return (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_p3_2_index_cards_carry_filter_data_attrs(tiny_good_bundle):
+    """Round 2 §6.2: index cards + sections carry data-okf-* so wiki.js can
+    filter/sort/search without refetching; the server still renders the groups."""
+    html = _render_index_html(tiny_good_bundle)
+    assert 'class="okf-section"' in html and 'data-okf-type=' in html  # groups + type
+    assert 'data-okf-title=' in html
+    assert 'data-okf-search=' in html
+    # data-okf-type must appear on BOTH surfaces: the <section> (section-level
+    # filtering) AND a card <li> (card-level filtering). Pin each opening tag
+    # directly — an aggregate count is satisfied by the multiple cards alone,
+    # so dropping the section attr would slip past a `>= 2` check.
+    section_tag = re.search(r'<section class="okf-section"[^>]*>', html)
+    assert section_tag and 'data-okf-type=' in section_tag.group(0), \
+        "section opening tag must carry data-okf-type"
+    card_tag = re.search(r'<li class="okf-card"[^>]*>', html)
+    assert card_tag and 'data-okf-type=' in card_tag.group(0), \
+        "card <li> opening tag must carry data-okf-type"
+
+
+# --- Round 2 §6.3: search quality — live renderer ---------------------------
+
+
+def test_p3_3_live_search_highlights_query_terms(tiny_good_bundle):
+    """Round 2 §6.3: the live search renderer wraps query-term matches in
+    <mark> and keeps the result meta (type/path). `Bundle` is already
+    module-imported at test_render.py:19."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="serve", name=b.name, config={}, query="users",
+        results=[{"title": "Users", "concept_id": "tables/users", "id": "tables/users",
+                  "description": "The users table stores users.", "type": "BigQuery Table"}])
+    # <mark> must wrap the ACTUAL matched substring, not merely exist somewhere:
+    # the title (original case preserved) and the snippet term.
+    assert "<mark>Users</mark>" in html, "title term must be wrapped (case preserved)"
+    assert "<mark>users</mark>" in html, "snippet term must be wrapped exactly"
+    assert 'class="okf-search-result__meta' in html, "live meta must survive"
+
+
+def test_p3_3_live_search_tolerates_missing_fields(tiny_good_bundle):
+    """Round 2 §6.3: a result with no type/description/snippets still renders
+    (the iter2 h1 test uses exactly this shape)."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="static", name=b.name, config={}, query="orders",
+        results=[{"title": "Orders", "concept_id": "c", "id": "c"}])
+    assert 'class="okf-search-result"' in html  # no crash on missing fields
+
+
+def test_p3_3_live_search_does_not_shatter_entities(tiny_good_bundle):
+    """Round 2 §6.3: query terms are matched against the RAW text, so a term
+    that collides with an HTML entity NAME ("gt"/"amp") must NOT land inside
+    an escaped ``&gt;``/``&amp;`` and shatter it. Data-catalog docs routinely
+    carry ``<`` / ``>`` / ``&`` (SQL comparisons, ``Q&A``, ``AT&T``). RED
+    against the entity-splitting bug (matching on the escaped string).
+
+    The query is a plain multi-word ``"gt amp"`` (not an underscored
+    identifier): ``_HIGHLIGHT_WORD_RE`` now keeps ``_`` (``\\w+``, aligned to
+    the live search backend's ``_WORD_RE``), so ``gt_flag`` would stay ONE
+    token and never reach the highlighter as a bare ``"gt"`` — the same reason
+    the parallel static test (``..._static_search_highlight_does_not_shatter_
+    entities``) uses ``"gt amp"``."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="serve", name=b.name, config={}, query="gt amp",
+        results=[{"title": "Cmp", "concept_id": "c", "id": "c",
+                  "description": "cost > 50, A & B"}])
+    snippet = html.split('class="okf-search-snippet">', 1)[1].split("</div>", 1)[0]
+    assert "&gt;" in snippet, f"&gt; entity shattered: {snippet!r}"
+    assert "&amp;" in snippet, f"&amp; entity shattered: {snippet!r}"
+    assert "&<mark>" not in snippet, f"<mark> spliced inside an entity: {snippet!r}"
+
+
+def test_p3_3_live_search_prefers_snippet_over_description(tiny_good_bundle):
+    """Round 2 §6.3 headline feature: when the backend supplies a match-centred
+    ``snippets`` excerpt, the renderer shows/highlights THAT (so the matched
+    term is visible) rather than the curated ``description``, which frequently
+    lacks the query term. Exercises the snippet-source preference line (no
+    prior test carried a ``snippets`` key, so it always fell through to
+    ``description``)."""
+    from okf_loom.render import _render_search_page
+    b = Bundle.load(tiny_good_bundle)
+    html = _render_search_page(
+        b, mode="serve", name=b.name, config={}, query="keyed",
+        results=[{"title": "Users", "concept_id": "c", "id": "c",
+                  "description": "The users table.",
+                  "snippets": ["A row per user, keyed by user_id."]}])
+    snippet = html.split('class="okf-search-snippet">', 1)[1].split("</div>", 1)[0]
+    assert "The users table." not in snippet, "fell back to description, not snippet"
+    assert "<mark>keyed</mark>" in snippet, "match-centred snippet term not highlighted"
+
+
+# --- Round 2 §6.3: search quality — static renderer -------------------------
+
+
+def test_p3_3_static_search_renderer_has_meta_and_highlight():
+    """Round 2 §6.3: the static search renderer matches the live markup
+    (result meta + type) and highlights matches (<mark>)."""
+    js = _runtime_file("viewer", "static", "static-search.js").read_text(encoding="utf-8")
+    assert "okf-search-result__meta" in js, "static must reach live meta parity"
+    assert "okf-search-result__type" in js, "static must show the type label"
+    assert "function highlight(" in js and "<mark>" in js, "static must highlight matches"
+
+
+def _run_static_js(js_call: str) -> str:
+    """Splice ``highlight``/``makeSnippet`` (both hoisted ``function``
+    declarations in the static-search.js IIFE) onto ``globalThis`` right
+    after the literal ``"use strict";`` (the very first statement, before
+    the module's own ``document.body`` access), then evaluate ``js_call`` —
+    a JS expression referencing ``globalThis.__OKF_TEST__`` — and print its
+    ``String()`` form.
+
+    static-search.js is a browser IIFE gated on ``document``/``fetch``
+    globals that don't exist under plain Node — but ``highlight``/
+    ``makeSnippet``/``escapeHtml`` are pure string functions with no DOM
+    dependency, and because they are ``function`` DECLARATIONS they are
+    hoisted to the top of the IIFE's scope before any statement runs. The
+    rest of the IIFE throws under plain Node (no ``document``), which an
+    outer try/catch swallows — the stash already ran by then. This runs the
+    REAL shipped source, not a hand-reimplementation of it.
+    """
+    js_source = _runtime_file("viewer", "static", "static-search.js").read_text(encoding="utf-8")
+    marker = '"use strict";'
+    assert js_source.count(marker) == 1, "splice anchor moved/duplicated in static-search.js"
+    hook = (
+        marker
+        + "\n  globalThis.__OKF_TEST__ = { highlight: highlight, makeSnippet: makeSnippet };"
+    )
+    patched = js_source.replace(marker, hook, 1)
+    driver = (
+        "try {\n" + patched + "\n"
+        "} catch (e) { /* expected: no `document` global under plain Node */ }\n"
+        "try {\n"
+        "  process.stdout.write(String(" + js_call + "));\n"
+        "} catch (e) {\n"
+        "  process.stdout.write('__ERROR__:' + e);\n"
+        "}\n"
+    )
+    result = subprocess.run(
+        ["node", "-e", driver], capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, f"node driver failed: {result.stderr}"
+    assert not result.stdout.startswith("__ERROR__:"), f"call threw: {result.stdout}"
+    return result.stdout
+
+
+def _run_static_highlight(text: str, tokens: list) -> str:
+    """Execute the ACTUAL shipped ``highlight(text, tokens)`` from
+    static-search.js in Node (see ``_run_static_js``) and return its output.
+    """
+    call = (
+        "globalThis.__OKF_TEST__.highlight("
+        + json.dumps(text) + ", " + json.dumps(tokens) + ")"
+    )
+    return _run_static_js(call)
+
+
+def _run_static_make_snippet(entry: dict, tokens: list) -> str:
+    """Execute the ACTUAL shipped ``makeSnippet(entry, tokens)`` from
+    static-search.js in Node (see ``_run_static_js``) and return its output.
+    ``makeSnippet`` is a sibling hoisted ``function`` declaration in the
+    same IIFE scope as ``highlight``, so the same splice/stash technique
+    exposes it too.
+    """
+    call = (
+        "globalThis.__OKF_TEST__.makeSnippet("
+        + json.dumps(entry) + ", " + json.dumps(tokens) + ")"
+    )
+    return _run_static_js(call)
+
+
+def test_p3_3_static_search_highlight_wraps_matches_case_preserved():
+    """Round 2 §6.3: the static ``highlight()`` wraps the ACTUAL matched
+    substring in ``<mark>``, preserving the source's original case (mirrors
+    ``render.py _highlight``). Also guards against the harness/algorithm
+    being a silent no-op, which would make the entity-safety test below
+    vacuously pass for the wrong reason."""
+    out = _run_static_highlight("Users list", ["users"])
+    assert out == "<mark>Users</mark> list"
+
+
+def test_p3_3_static_search_highlight_does_not_shatter_entities():
+    """Round 2 §6.3: mirrors ``test_p3_3_live_search_does_not_shatter_entities``
+    for the STATIC renderer, and cross-checks the static JS output is
+    BYTE-IDENTICAL to the live Python ``_highlight()`` for the same input —
+    direct evidence the JS mirrors the CORRECTED (raw-match, not
+    escape-then-match) algorithm.
+
+    Note: static-search.js's own ``tokenize()`` keeps ``_`` as a word
+    character — and Python's ``_HIGHLIGHT_WORD_RE`` now does too (``\\w+``,
+    aligned to the search backend's ``_WORD_RE``) — so an identifier like
+    ``amp_events`` stays ONE token in BOTH and never reaches either
+    highlighter as a bare ``"amp"``. The reproduction of the entity-splitting
+    bug is therefore a plain multi-word query ("gt amp") — same bug class
+    (a token colliding with an HTML entity NAME), reached via the query
+    shape that actually produces a bare "gt"/"amp" token in each tokenizer.
+    """
+    from okf_loom.render import _highlight
+    text = "cost > 50, A & B"
+    js_out = _run_static_highlight(text, ["gt", "amp"])
+    assert "&gt;" in js_out, f"&gt; entity shattered: {js_out!r}"
+    assert "&amp;" in js_out, f"&amp; entity shattered: {js_out!r}"
+    assert "&<mark>" not in js_out, f"<mark> spliced inside an entity: {js_out!r}"
+    # Cross-language proof: same (text, terms) -> byte-identical output.
+    py_out = _highlight(text, "gt amp")
+    assert js_out == py_out, f"static/live highlight diverge: {js_out!r} != {py_out!r}"
+
+
+def test_p3_3_live_highlight_keeps_underscore_identifier_whole():
+    """Round 2 deferred-item fix (live↔static ``<mark>`` tokenizer
+    reconciliation): the live ``_highlight`` tokenizes the query with the SAME
+    ``\\w+`` word regex the live LEXICAL search backend uses (``search.py``
+    ``_WORD_RE``), so an underscore/identifier query is marked as ONE run —
+    consistent with how the live search actually matched it (a whole ``\\w+``
+    token) and byte-identical to the static highlighter (whose ``tokenize()``
+    also keeps ``_``). Before the fix ``_highlight`` used ``[^\\W_]+`` and
+    shattered ``user_role`` into ``user``/``role`` fragments that did not
+    reflect the match. RED against a regression to the ``_``-splitting
+    tokenizer."""
+    from okf_loom.render import _highlight
+    text = "the user_role column governs access"
+    out = _highlight(text, "user_role")
+    assert "<mark>user_role</mark>" in out, f"identifier not marked as one run: {out!r}"
+    assert "<mark>user</mark>" not in out, f"identifier shattered into fragments: {out!r}"
+    # live↔static parity for identifier queries: static ``tokenize('user_role')``
+    # yields the single token ``['user_role']``, and both highlighters now share
+    # the same ``\\w+`` tokenization + match-on-raw algorithm, so bytes match.
+    js_out = _run_static_highlight(text, ["user_role"])
+    assert js_out == out, f"live/static identifier highlight diverge: {js_out!r} != {out!r}"
+
+
+# --- Round 2 §6.3 fix: static makeSnippet must centre on a token highlight()
+# will actually mark (>= 2 chars) ------------------------------------------
+
+
+def test_p3_3_static_make_snippet_centres_on_highlight_eligible_token():
+    """RED-proving discriminator (reviewer's exact repro): ``makeSnippet``'s
+    centre-position scan (``best``) must consider ONLY tokens that
+    ``highlight()`` will actually mark — i.e. the SAME ``t && t.length >= 2``
+    eligibility predicate ``highlight()`` applies at static-search.js:216 (now
+    shared via ``eligibleTokens()``).
+
+    Before the fix, ``best`` was chosen by scanning EVERY token with no
+    length filter. ``tokenize()``'s ``/[\\p{L}\\p{N}_]+/gu`` happily emits
+    1-char tokens (a query like "a protocols" tokenizes to
+    ``["a", "protocols"]``), and a 1-char token sitting earlier in the text
+    always "wins" the earliest-match race — centring the 200-char window on
+    a spot ``highlight()`` will never mark, and pushing the genuine, longer,
+    highlightable match outside the window entirely. The excerpt then shows
+    NO ``<mark>`` at all, defeating ``makeSnippet``'s stated purpose (line
+    239: window around the match so the highlighted term is visible).
+
+    RED (current shipped code): "a" sits at offset 51 and has no length
+    filter applied, so it wins; the resulting window [11, 211) excludes
+    "protocols" at offset ~354 entirely — neither assertion below holds.
+    GREEN (fixed code): "a" is filtered out (length 1 < 2, same predicate
+    highlight() uses), so "protocols" (the only eligible token) wins and
+    centres the window on itself.
+    """
+    body = ("1" * 50) + " a " + ("2" * 300) + " protocols " + ("3" * 10)
+    entry = {"body_excerpt": body}
+    tokens = ["a", "protocols"]
+    snippet = _run_static_make_snippet(entry, tokens)
+    assert "protocols" in snippet, (
+        f"'protocols' (the only highlight-eligible token) must be inside "
+        f"the returned window: {snippet!r}"
+    )
+    marked = _run_static_highlight(snippet, tokens)
+    assert "<mark>protocols</mark>" in marked, (
+        f"highlight() must find a 'protocols' match inside the snippet "
+        f"window: {marked!r}"
+    )
+
+
+def test_p3_3_static_make_snippet_ignores_falsy_token_entries():
+    """Fix also subsumes a related minor finding: the old scan loop had no
+    truthiness guard on ``tokens[i]``, so a falsy entry (e.g. ``""``) reached
+    ``low.indexOf(...)`` directly — and ``"x".indexOf("")`` always returns
+    ``0`` in JS, so a stray empty-string token would unconditionally "win"
+    the earliest-match race with ``best = 0``. ``eligibleTokens()``'s
+    ``t && ...`` guard (``""`` is falsy) now excludes it, same as
+    ``highlight()`` always has.
+
+    Padding is long enough (300 chars before "protocols") that the old
+    best=0 bug's leading-200-char slice would be all filler with no
+    "protocols" in it; the fix must still find and window on "protocols".
+    """
+    body = ("z" * 300) + " protocols " + ("z" * 100)
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["", "protocols"])
+    assert "protocols" in snippet, f"falsy token entry corrupted the window: {snippet!r}"
+
+
+def test_p3_3_static_make_snippet_no_match_falls_back_to_leading_slice():
+    """Edge case: no eligible token appears anywhere in ``src`` -> ``best``
+    stays -1 and the function falls back to today's leading-slice
+    ``src.slice(0, 200)`` (no "…" prefix)."""
+    body = "y" * 300
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["protocols", "a"])
+    assert snippet == body[:200]
+    assert not snippet.startswith("…")
+
+
+def test_p3_3_static_make_snippet_match_near_start_uses_leading_slice():
+    """Edge case: the earliest eligible match sits at ``best <= 40`` -> the
+    function takes the plain leading slice (no windowing/"…" prefix), same
+    as the no-match fallback, and the match is naturally still present."""
+    body = "intro protocols " + ("x" * 300)
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["protocols"])
+    assert snippet == body[:200]
+    assert not snippet.startswith("…")
+    assert "protocols" in snippet
+
+
+def test_p3_3_static_make_snippet_match_near_end_clamps_without_crash():
+    """Edge case: the match sits near the end of a long body, so the
+    window's upper bound (``best - 40 + 200``) exceeds the text length.
+    ``slice()`` clamps silently (no crash/padding) and the match stays
+    inside the shorter-than-200-char, "…"-prefixed result."""
+    body = ("z" * 300) + " protocols"
+    entry = {"body_excerpt": body}
+    snippet = _run_static_make_snippet(entry, ["protocols"])
+    assert snippet.startswith("…")
+    assert "protocols" in snippet
+    assert len(snippet) - 1 < 200, f"clamped slice must be shorter than the window: {snippet!r}"
+
+
+def test_p3_3_static_make_snippet_short_text_returned_in_full():
+    """Edge case: a ``body_excerpt`` shorter than the 200-char window comes
+    back intact — a realistic-sized description, distinct from the
+    deliberately-long synthetic bodies the other edge-case tests use to hit
+    the windowing math."""
+    entry = {"body_excerpt": "Stores one row per user, keyed by user_id."}
+    snippet = _run_static_make_snippet(entry, ["user"])
+    assert snippet == entry["body_excerpt"]

@@ -47,6 +47,76 @@
 .okf-studio-bar__group--right { flex-wrap: nowrap; }
 .okf-studio-bar[hidden] { display: none; }
 
+/* Editorial Workbench Round 2: the footer is a bordered-button TOOLBAR, not a
+ * quiet status strip. Actions (Watching/Commands/view-switch/Focus) cluster
+ * left and read as real bordered buttons — the base .okf-studiobtn rule
+ * already supplies the border + elevated bg, so there is no quieting
+ * override here anymore. Ambient state (presence/◆N concepts/●Live) clusters
+ * right, mono + quiet, separated from the actions by a thin divider. Sticky
+ * to the viewport bottom so it stays visible as the reading column scrolls. */
+.okf-studio-bar--status {
+  position: sticky;
+  bottom: 0;
+  z-index: 9;
+  min-height: var(--okf-status-h);  /* now 40px (bumped in wiki.css :root): a real
+                                       toolbar, and the SAME token .okf-rail/.okf-panel
+                                       use for their bottom clearance, so they stay flush */
+  padding: 0 var(--okf-space-4);
+  gap: var(--okf-space-3);
+  background: var(--okf-bg-inset);  /* recover the original bar feel */
+  border-top: var(--okf-border-w) solid var(--okf-border);
+  border-bottom: none;
+  /* The bar is now 3 children (left group / divider / right group). The base
+   * .okf-studio-bar rule's `justify-content: space-between` would float the
+   * divider in the dead centre with the groups pinned to the edges — pack
+   * left instead, then push the right group out with its own auto margin
+   * (below) so actions+divider hug together on the left. */
+  justify-content: flex-start;
+}
+/* Round 2: push the divider (and the ambient group after it) to the right so
+ * the divider sits BESIDE the ambient readouts, not hugging the actions. */
+.okf-studio-bar--status .okf-studio-bar__divider {
+  margin-left: auto;
+}
+/* Actions read as bordered .okf-studiobtn (the base rule already provides the
+ * border + elev bg); ambient bits stay quiet & mono at the right edge. */
+.okf-studio-bar__divider {
+  width: var(--okf-border-w);
+  align-self: stretch;
+  margin: var(--okf-space-2) var(--okf-space-1);
+  background: var(--okf-border);
+}
+.okf-studio-bar--status .okf-statseg,
+.okf-studio-bar--status .okf-conn,
+.okf-studio-bar--status .okf-presence {
+  font-family: var(--okf-font-mono);
+  font-size: var(--okf-text-xs);
+}
+/* Ambient dash stat (e.g. "◆ 30 concepts"). */
+.okf-statseg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--okf-fg-muted);
+  white-space: nowrap;
+}
+/* Round 2 §6.4 review: validationStatseg is created with [hidden] until
+ * /__validate resolves (studio.js). The author .okf-statseg {
+ * display:inline-flex } above beats the UA [hidden] rule by cascade ORIGIN,
+ * so a hidden chip would stay visible -- restate display:none here (mirrors
+ * .okf-card[hidden] in wiki.css). Same specificity (0,2,0) as the grouped
+ * ".okf-studio-bar--status .okf-statseg" selector above; placed after it so
+ * the source-order tie resolves in this rule's favour. Scoped to
+ * .okf-statseg so conceptStatseg/connChip (which never set [hidden]) are
+ * unaffected. */
+.okf-statseg[hidden] { display: none; }
+.okf-statseg__mark { color: var(--okf-accent); }
+
+/* Round 2 §6.4: validation status chip states (ambient). */
+.okf-statseg--validation[data-state="ok"] { color: var(--okf-fg-muted); }
+.okf-statseg--validation[data-state="warn"] { color: var(--okf-warn, var(--okf-accent)); }
+.okf-statseg--validation[data-state="error"] { color: var(--okf-error, #d64545); }
+
 /* Studio buttons reuse the topbar control look but a touch denser. */
 .okf-studiobtn {
   font: inherit;
@@ -255,11 +325,9 @@
  * property on .okf-view so the drag handler only updates one value. */
 .okf-view[data-okf-view="split"] {
   display: grid;
-  /* Split view: rendered view keeps the same max-width as non-split mode.
-   * Source/code view takes 2/3 of the rendered view's width.
-   * Grid: [rendered (3fr)] [divider] [source (2fr)] so the source is 2/3
-   * the width of the rendered pane, and the rendered pane fills its track. */
-  grid-template-columns: 3fr 7px 2fr;
+  /* Rendered pane width is driven by --okf-split-pct (set by the divider drag
+   * in studio.js); source fills the rest. Divider is a fixed 7px track. */
+  grid-template-columns: var(--okf-split-pct, 60%) 7px minmax(0, 1fr);
   gap: 0;
   align-items: stretch;
 }
@@ -416,15 +484,18 @@
   width: 24px;
   pointer-events: none;
 }
+/* Editorial Workbench Round 2: active-state tokens strengthen the resting
+ * dot into an obvious clickable affordance (colours only — dimensions,
+ * aria-label, data-state and the --stub hit-area below are unchanged). */
 .okf-comment-marker {
   position: absolute;
   pointer-events: auto;
   width: 24px;
   height: 24px;
   border-radius: var(--okf-radius-pill);
-  border: 1px solid var(--okf-border-strong);
-  background: var(--okf-bg-elev);
-  color: var(--okf-accent);
+  border: var(--okf-border-w) solid var(--okf-active-border);
+  background: var(--okf-active-fill);
+  color: var(--okf-active-fg);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -476,14 +547,18 @@
 /* iter1 CRI-002: the <mark> wrapping the commented text. Persistent
  * across block patches (studio.js re-applies marks after applyDoc).
  * Carries a data-comment-state so resolved marks style muted. */
+/* Editorial Workbench Round 2: active-state tokens give the pin a clear
+ * affordance (Swiss = solid accent pill; Technical = tinted with accent
+ * text) instead of the old thin accent underline. */
 .okf-comment-mark {
-  background: var(--okf-accent-bg);
-  color: inherit;
-  border-radius: 3px;
+  background: var(--okf-active-fill);
+  color: var(--okf-active-fg);
+  border-bottom: 2px solid var(--okf-active-border);
+  border-radius: var(--okf-radius-sm);
   padding: 0 2px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  cursor: help;
+  cursor: pointer;   /* Editorial Workbench §3.3: the span is a pin. */
 }
 .okf-comment-mark[data-comment-state="resolved"] {
   background: var(--okf-ok-bg);
@@ -498,7 +573,7 @@
   text-decoration: underline dotted var(--okf-fg-muted);
   text-underline-offset: 2px;
 }
-.okf-comment-mark.okf-pulse, .okf-comment-marker.okf-pulse {
+.okf-comment-mark.okf-pulse, .okf-comment-marker.okf-pulse, .okf-comment.okf-pulse {
   animation: okf-pulse-highlight 1.4s ease-out 1;
 }
 
@@ -681,6 +756,18 @@
 .okf-change__undo:hover:not(:disabled) { background: var(--okf-border); }
 .okf-change__undo:disabled { opacity: 0.5; cursor: not-allowed; }
 .okf-change--group { background: var(--okf-accent-bg); border-radius: var(--okf-radius-sm); padding: var(--okf-space-2); margin: var(--okf-space-1) 0; border: 1px solid var(--okf-accent); }
+
+/* Round 2 §6.4: on-demand doc diff in the Changes tab. The diff TABLE reuses
+ * the existing .okf-conflict__diff-table styles; these style the trigger +
+ * the expandable container. */
+.okf-change__diffbtn {
+  padding: 2px 8px; font: inherit; font-size: var(--okf-text-xs);
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-elev); color: var(--okf-fg-muted); cursor: pointer;
+}
+.okf-change__diffbtn:hover { color: var(--okf-fg); border-color: var(--okf-border-strong); }
+.okf-change__diff { margin-top: var(--okf-space-2); max-height: 320px; overflow: auto; }
 
 /* Comment actions + threading */
 .okf-comment__actions { display: flex; gap: var(--okf-space-1); margin-top: var(--okf-space-1); }
@@ -1094,25 +1181,163 @@
 .okf-panel-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.35);
-  z-index: 70;
+  background: transparent;   /* click-catcher, not a modal dim (pops OVER, not modal) */
+  z-index: 7;                /* under panel(8)/rail(8); over content */
 }
 .okf-panel-overlay[hidden] { display: none; }
+/* Editorial Workbench Round 2: the studio panel is an OVERLAY that pops OVER
+ * the reading column from a rail icon — it no longer reflows content. It sits
+ * to the left of the thin rail, elevated by --okf-pop-shadow, dismissed on
+ * Esc / click-away (the .okf-panel-overlay scrim). */
 .okf-panel {
   position: fixed;
-  top: 0;
-  right: 0;
-  height: 100vh;
-  width: min(440px, 100vw);
+  top: var(--okf-topbar-h);
+  right: var(--okf-rail-w);
+  bottom: var(--okf-status-h);
+  width: var(--okf-studio-w, 380px);
   background: var(--okf-bg-elev);
-  border-left: 1px solid var(--okf-border-strong);
-  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.18);
-  z-index: 71;
+  border-left: var(--okf-border-w) solid var(--okf-border-strong);
+  box-shadow: var(--okf-pop-shadow);   /* elevation over content */
+  z-index: 8;                          /* over content + scrim(7); under status(9)/topbar(10) */
   display: flex;
   flex-direction: column;
-  transform: translateX(0);
 }
 .okf-panel[hidden] { display: none; }
+/* The reading column reserves a slim gutter for the always-docked rail so
+ * content never sits under it. The overlay panel does NOT reflow content. */
+body.okf-has-rail { padding-right: var(--okf-rail-w); }
+
+/* Focus mode (Round 2): collapse the rail and drop its slim reserve so
+ * Source/Split fill the width. (Rendered re-centers via wiki.css.) The
+ * attribute-scoped body selector wins on specificity over the reserve rule. */
+:root[data-okf-focus] .okf-rail { display: none; }
+:root[data-okf-focus] body.okf-has-rail { padding-right: 0; }
+
+/* ---- Thin studio rail (Round 2) ------------------------------------- */
+.okf-rail {
+  position: fixed;
+  top: var(--okf-topbar-h);
+  right: 0;
+  bottom: var(--okf-status-h);
+  width: var(--okf-rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--okf-space-1);
+  padding: var(--okf-space-2) 0;
+  background: var(--okf-bg-elev);
+  border-left: var(--okf-border-w) solid var(--okf-border);
+  z-index: 8;
+}
+.okf-rail[hidden] { display: none; }
+.okf-rail__btn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: var(--okf-text-base);
+  border: var(--okf-border-w) solid transparent;
+  border-radius: var(--okf-radius-sm);
+  background: transparent;
+  color: var(--okf-fg);      /* Round 2: rail icons read clearly at rest (was --okf-fg-muted) */
+  cursor: pointer;
+}
+.okf-rail__btn:hover { color: var(--okf-fg); background: var(--okf-bg-inset); }
+.okf-rail__btn[aria-pressed="true"] {
+  color: var(--okf-active-fg);
+  background: var(--okf-active-fill);
+  border-color: var(--okf-active-border);
+}
+.okf-rail__btn:focus-visible { outline-offset: 1px; }   /* outline itself comes from the universal :focus-visible (wiki.css) */
+.okf-rail__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--okf-radius-pill);
+  background: var(--okf-accent);
+  color: var(--okf-accent-on);
+  font-size: 10px;   /* deliberately below --okf-text-xs: count legibility at badge scale */
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.okf-rail__badge[hidden] { display: none; }
+.okf-rail__spacer { flex: 1 1 auto; }   /* pushes the rail toggle to the bottom */
+/* The dock header aligns with the top bar so the two read as one chrome line. */
+.okf-panel__header { min-height: var(--okf-topbar-h); }
+
+/* Quick-action directive toolbar at the top of the Comments tab. The buttons
+ * pre-fill the composer just below them. Top padding is 0: this row is the
+ * first child inside .okf-panel__body, whose own padding-top already gives
+ * the tab-bar-to-content gap (same single var(--okf-space-3) gap the
+ * Changes/Outline/Metadata tabs get); adding it again here would double it. */
+.okf-panel__intents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--okf-space-1);
+  padding: 0 var(--okf-space-4) var(--okf-space-3);   /* was `… 0` bottom — add breathing room before the composer */
+}
+.okf-panel__intent {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: var(--okf-text-xs);
+  font-weight: 600;
+  padding: 5px 9px;
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-radius: var(--okf-radius-sm);
+  background: var(--okf-bg-inset);
+  color: var(--okf-fg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.okf-panel__intent::before {
+  content: "+";
+  margin-right: 5px;
+  font-weight: 700;
+  color: var(--okf-fg-muted);
+}
+.okf-panel__intent:hover {
+  border-color: var(--okf-active-border);
+  background: var(--okf-active-fill);
+  color: var(--okf-active-fg);
+}
+.okf-panel__intent:hover::before { color: var(--okf-active-fg); }
+
+/* Round 2 §6.4: intent = pre-fill button + a Run (▶) button that posts the
+ * directive to the agent. */
+.okf-panel__intent-group { display: inline-flex; }
+.okf-panel__intent-run {
+  padding: 0 8px; font: inherit; font-size: var(--okf-text-sm);
+  border: var(--okf-border-w) solid var(--okf-border);
+  border-left: 0;
+  border-radius: 0 var(--okf-radius-sm) var(--okf-radius-sm) 0;
+  background: var(--okf-bg-elev); color: var(--okf-accent); cursor: pointer;
+}
+.okf-panel__intent-run:hover {
+  background: var(--okf-active-fill); color: var(--okf-active-fg);
+  border-color: var(--okf-active-border);
+}
+.okf-panel__intent-run:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+/* square the pre-fill button's right edge inside the group so the pair reads
+ * as one control. */
+.okf-panel__intent-group .okf-panel__intent { border-radius: var(--okf-radius-sm) 0 0 var(--okf-radius-sm); }
+
+@media (max-width: 900px) {
+  /* Narrow screens: no rail reserve; the overlay covers the full width and
+   * lifts above the chrome. The rail is hidden and the footer no longer
+   * carries Comments/Changes, so the panel is opened from the Command Palette. */
+  .okf-rail { display: none; }
+  body.okf-has-rail { padding-right: 0; }
+  .okf-panel { top: 0; right: 0; bottom: 0; z-index: 71; }
+  .okf-panel-overlay { background: rgba(15, 23, 42, 0.35); z-index: 70; } /* modal dim on mobile */
+}
 .okf-panel__header {
   display: flex;
   align-items: center;
@@ -1122,7 +1347,50 @@
   border-bottom: 1px solid var(--okf-border);
   flex-shrink: 0;
 }
-.okf-panel__title { font-size: var(--okf-text-base); font-weight: 600; margin: 0; }
+.okf-panel__title { font-size: var(--okf-text-base); font-weight: 600; margin: 0; font-family: var(--okf-font-display); }
+/* Pop-over tab bar (Comments/Changes/Outline/Metadata). Active tab is an
+ * underline in --okf-accent — a non-filled indicator, so per SPEC §5 it uses
+ * --okf-accent for text, never --okf-active-fg. */
+.okf-panel__tabs {
+  display: flex;
+  gap: var(--okf-space-1);
+  padding: 0 var(--okf-space-4);
+  border-bottom: var(--okf-border-w) solid var(--okf-border);
+  flex-shrink: 0;
+}
+.okf-panel__tab {
+  flex: 1;
+  font: inherit;
+  font-size: var(--okf-text-xs);
+  font-weight: 600;
+  padding: var(--okf-space-2) var(--okf-space-1);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--okf-fg-muted);
+  cursor: pointer;
+}
+.okf-panel__tab:hover { color: var(--okf-fg); }
+.okf-panel__tab[aria-selected="true"] {
+  color: var(--okf-accent);
+  border-bottom-color: var(--okf-accent);
+}
+.okf-panel__empty { color: var(--okf-fg-muted); font-size: var(--okf-text-sm); }
+/* Outline tab: jump links to this page's headings. */
+.okf-outline { display: flex; flex-direction: column; gap: 2px; }
+.okf-outline__item {
+  display: block;
+  padding: 5px var(--okf-space-2);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+  text-decoration: none;
+  border-radius: var(--okf-radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.okf-outline__item:hover { color: var(--okf-fg); background: var(--okf-bg-inset); }
+.okf-outline__item--h3 { padding-left: var(--okf-space-4); font-size: var(--okf-text-xs); }
 .okf-panel__body {
   flex: 1 1 auto;
   overflow-y: auto;

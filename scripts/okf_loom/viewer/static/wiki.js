@@ -1,8 +1,8 @@
 /* OKF wiki viewer - client-side enhancements for the served/built pages.
  *
  * Three concerns:
- *   1. Theme cycle button — light/dark/pastel/sepia/midnight (persist to
- *      localStorage['okf-theme']).
+ *   1. Theme cycle button — four Editorial-Workbench themes
+ *      (technical/swiss × light/dark; persist to localStorage['okf-theme']).
  *   2. Search-as-you-type on the topbar search box (debounced; hits /__search
  *      and renders results inline OR navigates on Enter). Disabled in static
  *      builds (no /__search backend) - a notice replaces live results (P2-65).
@@ -24,42 +24,141 @@
   // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
   // graph.js / studio.js and render.py:_theme_button_html — each context
   // loads without the others (single-file viewer, static build, studio).
-  var THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
-  var THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
+  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
+  // Map a returning user's retired theme choice to the nearest new theme.
+  var LEGACY_THEMES = {
+    light: "technical-light", dark: "technical-dark",
+    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
+  };
+  // Resolve "auto" (or an unknown value) to a real theme by OS colour scheme.
+  function resolveAuto() {
+    var dark = window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return dark ? "swiss-dark" : "swiss-light";
+  }
 
   function currentTheme() {
-    return document.documentElement.getAttribute("data-theme") || "light";
+    return document.documentElement.getAttribute("data-theme") || "swiss-light";
   }
-  function applyTheme(t) {
-    if (THEMES.indexOf(t) < 0) t = "light";
+  function applyTheme(t, persist) {
+    if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
-    try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {}
-    if (themeBtn) {
-      themeBtn.textContent = THEME_GLYPHS[t];
-      themeBtn.setAttribute("title", "Theme: " + t + " — click to cycle");
-      themeBtn.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      // The button cycles five themes now; it is no longer a two-state
-      // toggle, so aria-pressed would be dishonest.
-      themeBtn.removeAttribute("aria-pressed");
-    }
+    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
+    // (Round 2) The trigger is the Appearance popover ("Aa ▾"), not a glyph —
+    // nothing to sync here; the popover reflects state via reflectAppearance().
   }
   // Honour saved preference on load (overrides server-side default).
   try {
     var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];  // migrate
     if (saved && THEMES.indexOf(saved) >= 0) {
       applyTheme(saved);
     } else {
-      // No saved preference: respect the OS preference on first visit.
-      var mq = window.matchMedia("(prefers-color-scheme: dark)");
-      if (mq && mq.matches) applyTheme("dark");
+      // No saved preference: follow the OS preference WITHOUT persisting, so
+      // an unpinned user keeps auto-following if they change OS scheme later.
+      applyTheme(resolveAuto(), false);
     }
   } catch (e) {}
-  if (themeBtn) {
-    themeBtn.addEventListener("click", function () {
-      var next = (THEMES.indexOf(currentTheme()) + 1) % THEMES.length;
-      applyTheme(THEMES[next]);
-    });
+  // ---- Appearance menu (Round 2 §5.3) --------------------------------
+  // Consolidates family/mode/contrast/border. Wiring lives here because the
+  // theme setter applyTheme is IIFE-local. contrast/border are applied
+  // POST-paint from localStorage (no pre-paint script exists; inline scripts
+  // are CSP-blocked on 4/5 templates) — same timing as the theme read above.
+  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
+  var apMenu = document.getElementById("okf-appearance-menu");
+  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
+
+  function applyModifier(kind, val, persist) {
+    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
+    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
+    var def = kind === "contrast" ? "high" : "on";   // default = attribute absent
+    if (val && val !== def) document.documentElement.setAttribute(attr, val);
+    else document.documentElement.removeAttribute(attr);
+    if (persist !== false) {
+      try {
+        if (val && val !== def) localStorage.setItem(key, val);
+        else localStorage.removeItem(key);
+      } catch (e) {}
+    }
   }
+  // Apply persisted modifiers now (post-paint; mirrors the theme read above).
+  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
+  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
+
+  function currentFamily() {
+    return currentTheme().indexOf("technical") === 0 ? "technical" : "swiss";
+  }
+  function currentMode() {
+    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
+    if (!s || THEMES.indexOf(s) < 0) return "auto";
+    return s.indexOf("dark") >= 0 ? "dark" : "light";
+  }
+  function resolveAutoFamily(fam) {
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return fam + (dark ? "-dark" : "-light");
+  }
+  function setFamily(fam) {
+    if (currentMode() === "auto") applyTheme(resolveAutoFamily(fam), false); // stay auto, respect family
+    else applyTheme(fam + "-" + currentMode());
+  }
+  function setMode(mode) {
+    if (mode === "auto") {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      applyTheme(resolveAutoFamily(currentFamily()), false);
+    } else applyTheme(currentFamily() + "-" + mode);
+  }
+
+  function reflectAppearance() {
+    if (!apMenu) return;
+    var st = {
+      family: currentFamily(), mode: currentMode(),
+      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
+      border: document.documentElement.getAttribute("data-okf-border") || "on",
+    };
+    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
+    for (i = 0; i < opts.length; i++) {
+      o = opts[i];
+      o.setAttribute("aria-checked",
+        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
+    }
+  }
+  function openAppearance() {
+    if (!apMenu) return;
+    apMenu.hidden = false;
+    if (themeBtn) themeBtn.setAttribute("aria-expanded", "true");
+    reflectAppearance();
+  }
+  function closeAppearance() {
+    if (!apMenu) return;
+    apMenu.hidden = true;
+    if (themeBtn) themeBtn.setAttribute("aria-expanded", "false");
+  }
+
+  if (themeBtn) themeBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (apMenu && apMenu.hidden) openAppearance(); else closeAppearance();
+  });
+  if (apMenu) apMenu.addEventListener("click", function (e) {
+    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
+    if (!opt) return;
+    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
+    if (k === "family") setFamily(v);
+    else if (k === "mode") setMode(v);
+    else applyModifier(k, v);            // contrast | border
+    reflectAppearance();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && apMenu && !apMenu.hidden) {
+      closeAppearance();
+      if (themeBtn) themeBtn.focus();
+    }
+  });
+  document.addEventListener("click", function (e) {
+    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) closeAppearance();
+  });
+  reflectAppearance();
 
   // ---- Static-mode detection (P2-65) -----------------------------------
   // The server emits data-okf-enhance="1" for spa/serve and "0" for static
@@ -432,16 +531,153 @@
     });
   }
 
+  // ---- Index dashboard (Round 2 §6.2) ---------------------------------
+  // Progressive enhancement over the server-rendered type-groups: type-filter
+  // chips + sort + search-within. No-JS users keep the full server groups (we
+  // only ADD a toolbar + toggle visibility; we never remove server content).
+  // Filtering hides <li>/<section> nodes (never reorders their internals) so
+  // the .okf-concept-list li first-anchor contract (studio stampConceptIds)
+  // holds. Gated on the index page (.okf-index + body.okf-viewer--index).
+  function enhanceIndex() {
+    var root = document.querySelector(".okf-index");
+    if (!root || !document.body.classList.contains("okf-viewer--index")) return;
+    var sections = Array.prototype.slice.call(root.querySelectorAll(".okf-section"));
+    if (!sections.length) return;
+    // Snapshot each section's ORIGINAL (server-rendered) card order once. A
+    // fresh sort has no memory of that order, so returning to "Grouped"
+    // (default) must re-append these exact <li> nodes in their captured order
+    // — moving whole nodes only, never touching their internals, so the
+    // .okf-concept-list li first-anchor contract holds.
+    var origCards = sections.map(function (s) {
+      return Array.prototype.slice.call(s.querySelectorAll(".okf-card"));
+    });
+    var types = [];
+    sections.forEach(function (s) {
+      var t = s.getAttribute("data-okf-type");
+      if (t && types.indexOf(t) < 0) types.push(t);   // document (group) order
+    });
+
+    var uiState = { type: "", sort: "default", q: "" };
+
+    var toolbar = document.createElement("div");
+    toolbar.className = "okf-index-toolbar";
+    var chips = document.createElement("div");
+    chips.className = "okf-index-toolbar__chips";
+    chips.setAttribute("role", "group");
+    chips.setAttribute("aria-label", "Filter by type");
+    function makeChip(val, label) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "okf-index-chip";
+      b.textContent = label;
+      b.setAttribute("data-okf-type", val);
+      b.setAttribute("aria-pressed", val === uiState.type ? "true" : "false");
+      b.addEventListener("click", function () {
+        uiState.type = (uiState.type === val) ? "" : val;   // toggle off if re-clicked
+        apply();
+      });
+      return b;
+    }
+    chips.appendChild(makeChip("", "All"));
+    types.forEach(function (t) { chips.appendChild(makeChip(t, t)); });
+
+    var controls = document.createElement("div");
+    controls.className = "okf-index-toolbar__controls";
+    var search = document.createElement("input");
+    search.type = "search";
+    search.className = "okf-index-toolbar__search";
+    search.setAttribute("aria-label", "Filter concepts on this page");
+    search.placeholder = "Filter this index…";
+    var sort = document.createElement("select");
+    sort.className = "okf-index-toolbar__sort";
+    sort.setAttribute("aria-label", "Sort concepts");
+    [["default", "Sort: Grouped"], ["title", "Sort: Title A–Z"],
+     ["title-desc", "Sort: Title Z–A"]].forEach(function (o) {
+      var opt = document.createElement("option");
+      opt.value = o[0]; opt.textContent = o[1];
+      sort.appendChild(opt);
+    });
+    controls.appendChild(search);
+    controls.appendChild(sort);
+    toolbar.appendChild(chips);
+    toolbar.appendChild(controls);
+
+    var emptyMsg = document.createElement("p");
+    emptyMsg.className = "okf-index-empty";
+    emptyMsg.setAttribute("role", "status");
+    emptyMsg.textContent = "No concepts match your filter.";
+    emptyMsg.hidden = true;
+
+    function cardMatches(card) {
+      if (uiState.type && card.getAttribute("data-okf-type") !== uiState.type) return false;
+      if (uiState.q && (card.getAttribute("data-okf-search") || "").indexOf(uiState.q) < 0) return false;
+      return true;
+    }
+    function apply() {
+      var cs = chips.querySelectorAll(".okf-index-chip"), i;
+      for (i = 0; i < cs.length; i++) {
+        cs[i].setAttribute("aria-pressed",
+          cs[i].getAttribute("data-okf-type") === uiState.type ? "true" : "false");
+      }
+      var anyShown = false;
+      sections.forEach(function (s, idx) {
+        var lis = s.querySelectorAll(".okf-card"), shown = 0, j;
+        for (j = 0; j < lis.length; j++) {
+          var vis = cardMatches(lis[j]);
+          lis[j].hidden = !vis;
+          if (vis) { shown++; anyShown = true; }
+        }
+        // Reorder whole <li> nodes only (never their internals — first-anchor
+        // contract): sort by title, or RESTORE the snapshotted server order
+        // when back on "Grouped" (default) so the reset is not a no-op.
+        var ul = s.querySelector(".okf-concept-list");
+        if (ul) {
+          var arr;
+          if (uiState.sort === "default") {
+            arr = origCards[idx];   // restore original server-rendered order
+          } else {
+            arr = Array.prototype.slice.call(ul.querySelectorAll(".okf-card"));
+            arr.sort(function (a, b) {
+              var at = (a.getAttribute("data-okf-title") || "").toLowerCase();
+              var bt = (b.getAttribute("data-okf-title") || "").toLowerCase();
+              if (at === bt) return 0;
+              var lt = at < bt ? -1 : 1;
+              return uiState.sort === "title-desc" ? -lt : lt;
+            });
+          }
+          arr.forEach(function (n) { ul.appendChild(n); });  // reorder <li> nodes only
+        }
+        s.hidden = (shown === 0);
+      });
+      emptyMsg.hidden = anyShown;
+    }
+
+    search.addEventListener("input", debounce(function () {
+      uiState.q = search.value.trim().toLowerCase(); apply();
+    }, 120));
+    sort.addEventListener("change", function () { uiState.sort = sort.value; apply(); });
+
+    // Insert the toolbar after the hero (if present), else at the top; the
+    // empty-state message follows the toolbar.
+    var hero = root.querySelector(".okf-hero");
+    if (hero && hero.nextSibling) root.insertBefore(toolbar, hero.nextSibling);
+    else root.insertBefore(toolbar, root.firstChild);
+    if (toolbar.nextSibling) root.insertBefore(emptyMsg, toolbar.nextSibling);
+    else root.appendChild(emptyMsg);
+  }
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
       bindLinkHovers();
       renderLocalGraph();
       bindHeadingAnchors();
+      enhanceIndex();
     });
   } else {
     bindLinkHovers();
     renderLocalGraph();
     bindHeadingAnchors();
+    enhanceIndex();
   }
   // Re-apply after live SSE body patches (studio dispatches this event).
   window.addEventListener("okf-loom:bodyPatched", bindHeadingAnchors);

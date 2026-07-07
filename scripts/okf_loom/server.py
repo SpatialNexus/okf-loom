@@ -1110,6 +1110,37 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             "from": from_rev, "to": to_rev, "diff": diff_rows,
         })
 
+    def _handle_validate(self) -> None:
+        """Round 2 §6.4 / SPEC §3.5: read-only validation counts for the status
+        strip. Token-gated (same guard as /__diff) because it reports bundle
+        state; cached on the studio rev so a poll doesn't re-walk the bundle.
+        Returns ``{ok, error, warning}``.
+        """
+        if not self._check_write_auth():
+            return self._send_text(
+                403, "Forbidden: /__validate requires the studio token.",
+                content_type="text/plain; charset=utf-8",
+            )
+        rev = None
+        if self.studio is not None:
+            try:
+                rev = self.studio.current_rev()
+            except Exception:  # noqa: BLE001 — fall through to uncached compute
+                rev = None
+        cached = getattr(self.server, "_validate_cache", None)
+        if cached is not None and rev is not None and cached[0] == rev:
+            return self._send_json(200, cached[1])
+        from .validate import validate_bundle
+        report = validate_bundle(self.bundle)
+        counts = {
+            "ok": report.ok,
+            "error": len(report.errors),
+            "warning": len(report.warnings),
+        }
+        if rev is not None:
+            self.server._validate_cache = (rev, counts)  # type: ignore[attr-defined]
+        return self._send_json(200, counts)
+
     def _handle_preview(self, data: dict[str, Any]) -> None:
         """Render arbitrary in-flight markdown for preview (§9.5 DoS caps)."""
         md = str(data.get("markdown", ""))
@@ -1145,6 +1176,8 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             return self._handle_comments(query)
         if path == "/__diff":
             return self._handle_diff(query)
+        if path == "/__validate":
+            return self._handle_validate()
         if path in ("/__graph", "/__graph.html"):
             return self._handle_graph()
         if path == "/__search":

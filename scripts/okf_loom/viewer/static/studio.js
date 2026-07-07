@@ -17,8 +17,9 @@
  *   - Extension API (§13.6): okfLoomStudio.register(kind, impl). Wired kinds:
  *     {panel, viewMode}. Reserved (forward-compat, accepted + warned):
  *     {toolbar, graphDecorator, suggestionRenderer}.
- *   - Themes (§13.5): light/dark/pastel/sepia/midnight/auto, honouring
- *     saved choice + bootstrap + OS pref.
+ *   - Themes (§13.5): technical-light/technical-dark/swiss-light/swiss-dark
+ *     (+ auto), honouring saved choice + bootstrap + OS pref, with legacy
+ *     migration for retired theme names.
  *
  * Security: untrusted strings (comment bodies, summaries, ids) go through
  * textContent only. The only innerHTML assignment is the server-rendered
@@ -216,15 +217,21 @@
   // ====================================================================
   // Theme names + button glyphs. KEEP IN SYNC with the copies in wiki.js /
   // graph.js and render.py:_theme_button_html.
-  const THEMES = ["light", "dark", "pastel", "sepia", "midnight"];
-  const THEME_GLYPHS = { light: "☀", dark: "☾", pastel: "✿", sepia: "☕", midnight: "★" };
+  const THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
+  const THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
+  // Map a returning user's retired theme choice to the nearest new theme.
+  const LEGACY_THEMES = {
+    light: "technical-light", dark: "technical-dark",
+    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
+  };
   function effectiveTheme(choice) {
     if (THEMES.indexOf(choice) >= 0) return choice;
-    // auto: follow OS preference
-    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    if (choice && LEGACY_THEMES[choice]) return LEGACY_THEMES[choice];
+    // auto (or unknown): follow OS preference within the Swiss family
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "swiss-dark" : "swiss-light";
   }
   function applyThemeAttr(t, opts) {
-    if (THEMES.indexOf(t) < 0) t = "light";
+    if (THEMES.indexOf(t) < 0) t = "swiss-light";
     document.documentElement.setAttribute("data-theme", t);
     // Persist by default so a palette-chosen theme survives navigation
     // (wiki.js reads localStorage['okf-theme'] on every page). Boot and
@@ -233,18 +240,12 @@
     if (!opts || opts.persist !== false) {
       try { localStorage.setItem("okf-theme", t); } catch (e) {}
     }
-    // Keep the existing topbar cycle button (wiki.js) in sync if present.
-    const tb = document.getElementById("okf-theme");
-    if (tb) {
-      tb.textContent = THEME_GLYPHS[t];
-      tb.setAttribute("title", "Theme: " + t + " — click to cycle");
-      tb.setAttribute("aria-label", "Change colour theme (current: " + t + ")");
-      tb.removeAttribute("aria-pressed");
-    }
+    // (Round 2) The topbar control is the Appearance popover ("Aa ▾"), wired by
+    // wiki.js — no glyph to sync here (studio.js does not own the popover).
   }
   function currentThemeChoice() {
     const t = document.documentElement.getAttribute("data-theme");
-    return THEMES.indexOf(t) >= 0 ? t : "light";
+    return THEMES.indexOf(t) >= 0 ? t : "swiss-light";
   }
   // Apply the bootstrap theme on boot. A saved user choice (wiki.js theme
   // button / command palette) outranks the server-side studio.theme config —
@@ -253,6 +254,11 @@
   (function bootTheme() {
     let saved = null;
     try { saved = localStorage.getItem("okf-theme"); } catch (e) {}
+    // Migrate a retired saved theme to its nearest new value (and persist it).
+    if (saved && LEGACY_THEMES[saved]) {
+      saved = LEGACY_THEMES[saved];
+      try { localStorage.setItem("okf-theme", saved); } catch (e) {}
+    }
     const t = (saved && THEMES.indexOf(saved) >= 0)
       ? saved
       : effectiveTheme(BOOT.theme || "auto");
@@ -262,7 +268,12 @@
   // ====================================================================
   // 3. Studio bar
   // ====================================================================
-  const bar = el("div", { class: "okf-studio-bar", role: "region", "aria-label": "Studio controls" });
+  // Round 2: the studio controls live in a bottom bordered-button TOOLBAR
+  // (Editorial Workbench footer) — on-demand actions (Watching / Commands /
+  // view-switch / Focus) cluster on the left and read as real bordered
+  // buttons; ambient state (presence / ◆N concepts / ●Live) clusters on the
+  // right, separated by a thin divider (studio.css).
+  const bar = el("div", { class: "okf-studio-bar okf-studio-bar--status", role: "region", "aria-label": "Studio status" });
   const leftGroup = el("div", { class: "okf-studio-bar__group" });
   const rightGroup = el("div", { class: "okf-studio-bar__group okf-studio-bar__group--right" });
 
@@ -274,7 +285,7 @@
   const presenceChip = el("span", { class: "okf-presence", "data-state": "idle", role: "status",
     "aria-live": "polite", "aria-label": "Agent presence: idle" },
     [presenceDot, presenceLabel]);
-  leftGroup.appendChild(presenceChip);
+  // Appended to rightGroup (ambient) in the assembly below.
 
   // iter2 G11 (§3 watch question): an "Agent watching" switch in the studio
   // bar. The user can toggle whether the agent proactively watches + enriches
@@ -314,7 +325,45 @@
       toast("Could not update agent watching state.", { tone: "error" });
     });
   });
-  leftGroup.appendChild(watchingToggle);
+  // Appended to leftGroup (actions) in the assembly below.
+
+  // Bundle-size stat (ambient dash): the Diátaxis nav lists every concept, so
+  // its link count is the bundle size. Present on concept pages only. Named
+  // (not appended here) so the assembly below can place it in rightGroup.
+  const conceptCount = document.querySelectorAll(".okf-nav__link").length;
+  const conceptStatseg = el("span", { class: "okf-statseg", title: conceptCount + " concepts in this bundle" }, [
+    el("span", { class: "okf-statseg__mark", "aria-hidden": "true", text: "◆" }),
+    document.createTextNode(" " + conceptCount + " concepts"),
+  ]);
+
+  // Round 2 §6.4 / SPEC §3.5: validation count (ambient). Hidden until the
+  // read-only /__validate fetch resolves; refreshed on bundle changes.
+  const validationStatseg = el("span", { class: "okf-statseg okf-statseg--validation",
+    role: "status", "aria-live": "polite", hidden: "", title: "Bundle validation" }, [
+    el("span", { class: "okf-statseg__mark", "aria-hidden": "true", text: "◇" }),
+    document.createTextNode(" validating…"),
+  ]);
+  function refreshValidation() {
+    if (typeof tokenFetch !== "function") return;
+    tokenFetch("/__validate", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var label = d.error ? (d.error + " error" + (d.error === 1 ? "" : "s"))
+          : d.warning ? (d.warning + " warning" + (d.warning === 1 ? "" : "s"))
+          : "valid";
+        var mark = validationStatseg.querySelector(".okf-statseg__mark");
+        if (mark) mark.textContent = d.error ? "✕" : d.warning ? "!" : "✓";
+        validationStatseg.setAttribute("data-state", d.error ? "error" : d.warning ? "warn" : "ok");
+        while (validationStatseg.childNodes.length > 1) {
+          validationStatseg.removeChild(validationStatseg.lastChild);
+        }
+        validationStatseg.appendChild(document.createTextNode(" " + label));
+        validationStatseg.setAttribute("title", "Bundle validation: " + label);
+        validationStatseg.removeAttribute("hidden");
+      })
+      .catch(function () {});
+  }
 
   // Connection indicator (driven by live.js hub). iter1 CRI-015: aria-live
   // so "Reconnecting…" / "Live" / "Offline" state changes are announced to
@@ -342,51 +391,96 @@
   };
   Object.keys(viewBtns).forEach((k) => viewSwitch.appendChild(viewBtns[k]));
 
-  // Panel toggle buttons (right group)
-  const commentsBtn = el("button", { type: "button", class: "okf-studiobtn", "aria-expanded": "false",
-    "aria-controls": "okf-panel", text: "Comments" });
-  const commentsBadge = el("span", { class: "okf-badge", "aria-hidden": "true", text: "0" });
-  commentsBtn.insertBefore(commentsBadge, commentsBtn.firstChild);
-  commentsBtn.addEventListener("click", () => togglePanel("comments"));
-
-  const changesBtn = el("button", { type: "button", class: "okf-studiobtn", "aria-expanded": "false",
-    "aria-controls": "okf-panel", text: "Changes" });
-  const changesBadge = el("span", { class: "okf-badge", "aria-hidden": "true", text: "0" });
-  changesBtn.insertBefore(changesBadge, changesBtn.firstChild);
-  changesBtn.addEventListener("click", () => togglePanel("changes"));
-
-  // User feedback: the palette trigger used to be a bare "⌘K"
-  // glyph — meaningless on the ~90% of machines without a command key.
-  // It now says what it does ("Commands") with a platform-correct
-  // shortcut hint (⌘K on Apple devices, Ctrl+K everywhere else).
-  const isApplePlatform = /Mac|iPhone|iPad|iPod/.test(
-    (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "");
-  const paletteHint = isApplePlatform ? "⌘K" : "Ctrl+K";
+  // Editorial Workbench / SPEC §8: NO OS glyph (no ⌘/⊞). The trigger says
+  // what it does ("Commands") with an OS-neutral plain keycap. The functional
+  // binding stays Ctrl/Cmd-K (wirePaletteKeys) — only the rendered cue is
+  // neutral. macOS users can also open it via the "/"-then-palette path.
+  const paletteHint = "Ctrl K";
   const paletteBtn = el("button", { type: "button", class: "okf-studiobtn okf-palettebtn",
-    "aria-label": "Open the command palette (" + (isApplePlatform ? "Command K" : "Control K") + ")",
+    "aria-label": "Open the command palette (Control or Command K)",
     title: "Search pages and run commands  (" + paletteHint + ")" },
     [document.createTextNode("Commands "),
      el("kbd", { class: "okf-kbd", "aria-hidden": "true", text: paletteHint })]);
   paletteBtn.addEventListener("click", openPalette);
 
-  // Assemble bar (view switch only on concept pages)
-  rightGroup.appendChild(commentsBtn);
-  rightGroup.appendChild(changesBtn);
-  rightGroup.appendChild(paletteBtn);
+  // Round 2 carryover: a direct studio opener for pages/viewports without the
+  // rail. Opens Comments on a concept page (mobile), Changes elsewhere (the
+  // global feed; a non-concept page has no per-concept comments).
+  const studioBtn = el("button", { type: "button", class: "okf-studiobtn okf-studio-open-btn",
+    "aria-controls": "okf-panel", title: "Open the studio panel", "aria-label": "Open studio panel" },
+    [document.createTextNode("Studio")]);
+  studioBtn.addEventListener("click", function () {
+    openPanel(isConceptPage() ? "comments" : "changes");
+  });
+
+  // Round 2: Focus toggle (Workbench <-> Focus reading mode). Assigns the
+  // module-scope `focusBtn` (declared further below, alongside setFocus/
+  // toggleFocus) so setFocus can sync its aria-pressed; wired straight to
+  // the existing toggleFocus (Task 3 already implements the split coupling
+  // — this button does not reimplement any of that state machine).
+  focusBtn = el("button", { type: "button", class: "okf-studiobtn okf-focus-btn",
+    "aria-pressed": "false", "aria-label": "Toggle focus mode (wide, no chrome)",
+    title: "Focus: collapse nav + rail for a wide reading/split view" },
+    [document.createTextNode("Focus")]);
+  focusBtn.addEventListener("click", toggleFocus);
+
+  // Assemble bar. Comments/Changes now live in the rail; the dock toggle is
+  // retired. Round 2: actions left, ambient right, divider between.
+  // LEFT (actions): Watching · Commands · [view-switch] · Focus
+  leftGroup.appendChild(watchingToggle);
+  leftGroup.appendChild(paletteBtn);
+  // view-switch + Focus appended in mountBar (concept pages only), so DOM
+  // order still reads L->R: Watching, Commands, Rendered/Source/Split, Focus.
+  // RIGHT (ambient): presence · ◆ N concepts · ● Live
+  rightGroup.appendChild(presenceChip);
+  if (conceptCount > 0) rightGroup.appendChild(conceptStatseg);
+  rightGroup.appendChild(validationStatseg);
   rightGroup.appendChild(connChip);
   bar.appendChild(leftGroup);
+  bar.appendChild(el("span", { class: "okf-studio-bar__divider", "aria-hidden": "true" }));
   bar.appendChild(rightGroup);
 
   function mountBar() {
-    const topbar = $(".okf-topbar");
-    if (topbar && topbar.parentNode) {
-      topbar.parentNode.insertBefore(bar, topbar.nextSibling);
-    } else {
-      document.body.insertBefore(bar, document.body.firstChild);
-    }
+    // Bottom status strip: append as the last in-flow child of the flex-column
+    // body so it pins to the viewport bottom (sticky, see studio.css).
+    document.body.appendChild(bar);
+    // Round 2 carryover: show the direct Studio opener wherever the rail is
+    // ABSENT — non-concept pages (any width) OR concept pages on mobile
+    // (<=900). Desktop concept pages have the rail, so no footer duplication.
+    // (mountBar runs before body.okf-has-rail is set, so test the predicate
+    // directly.) Placed before the concept-only view controls so order reads
+    // Watch · Commands · Studio · [Rendered/Source/Split · Focus].
+    var railPresent = isConceptPage() && window.innerWidth > 900;
+    if (!railPresent) leftGroup.appendChild(studioBtn);
     if (isConceptPage()) {
       leftGroup.appendChild(viewSwitch);
+      leftGroup.appendChild(focusBtn);
     }
+  }
+
+  // Nav-collapse (Editorial Workbench §3.2): a toggle in the top bar collapses
+  // the concept-page sidebar to 0 for a full-width read. Persisted so the
+  // choice survives navigation. Only mounted on pages that have the sidebar.
+  const NAV_COLLAPSE_KEY = "okf-nav-collapsed";
+  function mountNavToggle() {
+    if (!isConceptPage()) return;
+    const topbar = $(".okf-topbar");
+    if (!topbar) return;
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(NAV_COLLAPSE_KEY) === "1"; } catch (e) {}
+    document.body.classList.toggle("okf-nav-collapsed", collapsed);
+    const btn = el("button", {
+      type: "button", class: "okf-navtoggle",
+      "aria-label": "Toggle navigation", "aria-pressed": collapsed ? "true" : "false",
+      title: "Collapse navigation for a full-width read", text: "☰",
+    });
+    btn.addEventListener("click", function () {
+      collapsed = !collapsed;
+      document.body.classList.toggle("okf-nav-collapsed", collapsed);
+      btn.setAttribute("aria-pressed", collapsed ? "true" : "false");
+      try { localStorage.setItem(NAV_COLLAPSE_KEY, collapsed ? "1" : "0"); } catch (e) {}
+    });
+    topbar.insertBefore(btn, topbar.firstChild);
   }
 
   // ====================================================================
@@ -409,7 +503,9 @@
 
   function applySplitPct(pct) {
     splitPct = Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, pct));
-    if (viewWrap) viewWrap.style.setProperty("--okf-split-pct", splitPct + "fr");
+    // Round 2: the split grid now consumes --okf-split-pct as a PERCENTAGE
+    // (rendered-pane width); source fills the rest via minmax(0,1fr).
+    if (viewWrap) viewWrap.style.setProperty("--okf-split-pct", (splitPct * 100).toFixed(2) + "%");
     if (splitDivider) {
       splitDivider.setAttribute("aria-valuenow", String(Math.round(splitPct * 100)));
       splitDivider.setAttribute("aria-valuetext",
@@ -521,6 +617,15 @@
   function setView(mode) {
     if (mode !== "rendered" && mode !== "source" && mode !== "split") return;
     state.view = mode;
+    // Round 2: Split auto-enters Focus (drops the __main cap so the panes fill
+    // the width — the real split fix); leaving Split exits Focus only if Split
+    // was what turned it on (a manual toggleFocus detaches from this).
+    if (mode === "split") {
+      if (!isFocus()) { focusFromSplit = true; setFocus(true); }
+      closePanel();               // overlays would fight the wide split
+    } else if (focusFromSplit) {
+      focusFromSplit = false; setFocus(false);
+    }
     ensureViewWrap();
     if (viewWrap) viewWrap.dataset.okfView = mode;
     if (sourcePre) sourcePre.hidden = (mode === "rendered");
@@ -533,6 +638,40 @@
     window.history.replaceState(null, "", url.toString());
     // Source/split need the raw markdown; load lazily.
     if (mode !== "rendered") ensureSourceLoaded();
+  }
+
+  // Editorial Workbench Round 2 — Workbench <-> Focus reading mode. Focus is a
+  // net-new attribute on <html> (data-okf-focus) that collapses nav + rail +
+  // frame and uncaps the reading column for Source/Split (Rendered stays at the
+  // ~76ch measure, re-applied in CSS). Distinct from the graph's okf-focus-root.
+  // focusBtn: a bare `var` (no initializer) — the hoisted declaration lets
+  // setFocus (below) reference it, but it is CONSTRUCTED earlier, in the
+  // footer toolbar section (Task 4), which runs before this line executes.
+  // A `= null` initializer here would re-run at this point in the top-to-
+  // bottom boot sequence and clobber that earlier assignment, so it is
+  // deliberately omitted; setFocus still null-guards it defensively.
+  var focusBtn;
+  var focusFromSplit = false;
+  function setFocus(on) {
+    if (on) document.documentElement.setAttribute("data-okf-focus", "");
+    else document.documentElement.removeAttribute("data-okf-focus");
+    if (focusBtn) focusBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  function isFocus() { return document.documentElement.hasAttribute("data-okf-focus"); }
+  // Invariant: view==="split" ⟺ Focus on. Split needs the wide (uncapped)
+  // layout, so turning Focus OFF while in split must also leave split —
+  // otherwise the .okf-page__main cap returns and re-traps the panes (the exact
+  // bug Task 3 fixes). Clearing focusFromSplit first makes setView("rendered")'s
+  // own auto-exit branch a no-op (no double toggle / recursion).
+  function toggleFocus() {
+    if (isFocus()) {                                     // turning OFF
+      focusFromSplit = false;
+      if (state.view === "split") setView("rendered");   // drop to Rendered
+      setFocus(false);
+    } else {                                             // turning ON
+      focusFromSplit = false;                            // manual toggle detaches from split auto-mode
+      setFocus(true);
+    }
   }
 
   function ensureSourceLoaded() {
@@ -1232,6 +1371,31 @@
     return String(s).replace(/[^a-zA-Z0-9_-]/g, (ch) => "\\" + ch);
   }
 
+  // Editorial Workbench Round 2: open the Comments overlay and scroll+pulse
+  // the card for a given comment id. Mirrors jumpToActivity (Changes panel,
+  // ~line 3507). Requires cards to carry data-comment-id (tagged in
+  // commentCard below) so the pin's click target can be found post-render.
+  function jumpToCommentCard(commentId) {
+    openPanel("comments");
+    const body = panelBodyEl();
+    if (!body) return false;
+    // The card renders synchronously inside openPanel's p.render() call, but
+    // poll briefly anyway (defensive, mirrors jumpToActivity's setTimeout
+    // lookup) in case a future render path makes it async.
+    let tries = 0;
+    (function find() {
+      const card = body.querySelector('.okf-comment[data-comment-id="' + cssEscape(commentId) + '"]');
+      if (!card) { if (tries++ < 20) setTimeout(find, 25); return; }
+      card.scrollIntoView({ block: "center", behavior: REDUCED_MOTION ? "auto" : "smooth" });
+      if (!REDUCED_MOTION) {
+        card.classList.remove("okf-pulse");
+        void card.offsetWidth;
+        card.classList.add("okf-pulse");
+      }
+    })();
+    return true;
+  }
+
   // --- composer ---------------------------------------------------------
   function composerNode() {
     const wrap = el("div", { class: "okf-composer" });
@@ -1260,7 +1424,7 @@
     hint.appendChild(el("kbd", { class: "okf-composer__kbd", text: "Esc" }));
     hint.appendChild(document.createTextNode(" clears selection anchor"));
     const cancel = el("button", { type: "button", class: "okf-iconbtn", text: "Cancel" });
-    const submit = el("button", { type: "button", class: "okf-studiobtn", text: "Send" });
+    const submit = el("button", { type: "button", class: "okf-studiobtn okf-composer__submit", text: "Send" });
     function refreshAnchor() {
       const a = state.draftAnchor || { kind: "concept", ref: state.conceptId };
       anchorRef.textContent = a.kind === "text" ? ("“" + (a.ref || "") + "”" + (a.section ? "  § " + a.section : "")) : (a.ref || state.conceptId);
@@ -1407,8 +1571,8 @@
       });
       if (!isResolved) marker.textContent = "•";
       marker.addEventListener("click", () => {
-        const jumped = jumpToCommentMark(c.id);
-        if (!jumped) openPanel("comments"); else openPanel("comments");
+        jumpToCommentMark(c.id);   // scroll+pulse the prose mark
+        jumpToCommentCard(c.id);   // open the overlay + scroll+pulse the card
       });
       rail.appendChild(marker);
     });
@@ -1622,15 +1786,19 @@
     // of an open session they don't exist yet; create + append them. On
     // subsequent renders (SSE, user toggles, etc.) they persist, so the
     // composer textarea node survives across rebuilds.
+    var intentsZone = body.querySelector(".okf-comment-intents-wrap");
     var composerZone = body.querySelector(".okf-comment-composer-section");
     var toolbarZone = body.querySelector(".okf-comment-toolbar-wrap");
     var listZone = body.querySelector(".okf-comment-list-wrap");
-    var initial = !(composerZone && toolbarZone && listZone);
+    var initial = !(intentsZone && composerZone && toolbarZone && listZone);
     if (initial) {
       body.innerHTML = "";
+      // Quick-action directives sit at the very top of the Comments tab.
+      intentsZone = el("div", { class: "okf-comment-intents-wrap" });
       composerZone = el("div", { class: "okf-panel__section okf-comment-composer-section" });
       toolbarZone = el("div", { class: "okf-comment-toolbar-wrap" });
       listZone = el("div", { class: "okf-comment-list-wrap" });
+      body.appendChild(intentsZone);
       body.appendChild(composerZone);
       body.appendChild(toolbarZone);
       body.appendChild(listZone);
@@ -1656,6 +1824,11 @@
       }
       body.scrollTop = composerScroll;
     }
+
+    // Quick-action directive toolbar (stateless — rebuilt each render). Only
+    // when commenting is enabled; the buttons pre-fill the composer above.
+    intentsZone.innerHTML = "";
+    if (EDIT) intentsZone.appendChild(buildIntentsToolbar());
 
     // Rebuild the toolbar + list, EXCEPT when the user is mid-
     // reply in an inline composer. The inline composer lives inside
@@ -1882,7 +2055,9 @@
     var card = el("div", {
       class: cls,
       id: "comment-" + (c.id || ""),
-      dataset: { state: c.state || "open", level: String(level) },
+      // commentId: data-comment-id — the functional pin (jumpToCommentCard)
+      // matches on this to scroll+pulse the card a mark/marker points at.
+      dataset: { state: c.state || "open", level: String(level), commentId: c.id || "" },
     });
 
     // Header row: chevron (root only) + state chip + anchor + meta.
@@ -2883,7 +3058,38 @@
       undo.addEventListener("click", () => undoOne(r, undo));
       actions.appendChild(undo);
     }
+    // Round 2 §6.4: on-demand doc diff. The change event already carries both
+    // revs (detail.before = prior content-hash rev; rev = new), so reuse the
+    // conflict modal's diff renderer without scanning history. Snapshots older
+    // than the 50-per-concept ring return 404 → renderDiffInto shows it.
+    const diffConcept = (r.detail && r.detail.before_concept) || (r.ids && r.ids[0]);
+    let diffWrap = null;
+    if (diffConcept && r.detail && r.detail.before && r.rev) {
+      diffWrap = el("div", { class: "okf-change__diff", hidden: "" });
+      const diffBtn = el("button", { type: "button", class: "okf-change__diffbtn",
+        "aria-expanded": "false", text: "View diff" });
+      diffBtn.addEventListener("click", () => {
+        if (diffWrap.hasAttribute("hidden")) {
+          diffWrap.removeAttribute("hidden");
+          diffBtn.setAttribute("aria-expanded", "true");
+          // Round 2 §6.4 review-gate fix: guard against overlapping renders.
+          // Without this, rapid expand->collapse->expand within one /__diff
+          // round-trip starts a second renderDiffInto against the same
+          // diffWrap before the first settles (a slower/erroring call can
+          // clobber a faster/successful render). Mirrors the conflict
+          // modal's viewBtn precedent (disable for the fetch duration).
+          diffBtn.disabled = true;
+          renderDiffInto(diffWrap, { concept: diffConcept, from: r.detail.before, to: r.rev })
+            .finally(() => { diffBtn.disabled = false; });
+        } else {
+          diffWrap.setAttribute("hidden", "");
+          diffBtn.setAttribute("aria-expanded", "false");
+        }
+      });
+      actions.appendChild(diffBtn);
+    }
     row.appendChild(actions);
+    if (diffWrap) row.appendChild(diffWrap);
     return row;
   }
 
@@ -2968,6 +3174,16 @@
     document.addEventListener("keydown", (e) => {
       const meta = e.ctrlKey || e.metaKey;
       if (meta && (e.key === "k" || e.key === "K")) { e.preventDefault(); togglePalette(); return; }
+      // "/" focuses the top-bar search (Editorial Workbench; SPEC §3.1). Skip
+      // when typing in a field or when a modifier is held.
+      if (e.key === "/" && !meta && !e.altKey) {
+        const t = e.target;
+        const typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+        if (!typing) {
+          const search = $('.okf-topbar__controls input[type="search"], #okf-search');
+          if (search) { e.preventDefault(); search.focus(); search.select && search.select(); return; }
+        }
+      }
       if (!paletteState.open) return;
       if (e.key === "Escape") { e.preventDefault(); closePalette(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); }
@@ -3043,11 +3259,10 @@
     if (EDIT && isConceptPage()) items.push({ label: "Post a comment / ask the agent", sub: "comment", run: () => openPanel("comments", { focusComposer: true }) });
     items.push({ label: "Open Comments panel", sub: "panel", run: () => openPanel("comments") });
     items.push({ label: "Open Changes panel", sub: "panel", run: () => openPanel("changes") });
-    items.push({ label: "Theme: Light", sub: "theme", run: () => applyThemeAttr("light") });
-    items.push({ label: "Theme: Dark", sub: "theme", run: () => applyThemeAttr("dark") });
-    items.push({ label: "Theme: Pastel", sub: "theme", run: () => applyThemeAttr("pastel") });
-    items.push({ label: "Theme: Sepia", sub: "theme", run: () => applyThemeAttr("sepia") });
-    items.push({ label: "Theme: Midnight", sub: "theme", run: () => applyThemeAttr("midnight") });
+    items.push({ label: "Theme: Technical Light", sub: "theme", run: () => applyThemeAttr("technical-light") });
+    items.push({ label: "Theme: Technical Dark", sub: "theme", run: () => applyThemeAttr("technical-dark") });
+    items.push({ label: "Theme: Swiss Light", sub: "theme", run: () => applyThemeAttr("swiss-light") });
+    items.push({ label: "Theme: Swiss Dark", sub: "theme", run: () => applyThemeAttr("swiss-dark") });
     items.push({ label: "Theme: Auto (follow OS)", sub: "theme", run: () => {
       // Clear the saved choice so the OS preference governs again.
       try { localStorage.removeItem("okf-theme"); } catch (e) {}
@@ -3106,27 +3321,46 @@
   // ====================================================================
   const panels = {}; // id → { id, label, render(container, ctx), __builtin }
   const panelOverlay = el("div", { class: "okf-panel-overlay", hidden: "" });
-  const panelShell = el("aside", { class: "okf-panel", hidden: "", role: "dialog",
-    "aria-modal": "true", "aria-label": "Studio panel", tabindex: "-1" });
+  // Editorial Workbench Round 2: the studio panel is an OVERLAY that pops OVER
+  // the reading column from a rail icon (not auto-opened). It keeps
+  // role=complementary and is dismissed on Esc / click-away via the
+  // .okf-panel-overlay scrim (no aria-modal, no focus-trap). id="okf-panel" is
+  // the aria-controls target for the rail buttons + view-switch.
+  const panelShell = el("aside", { class: "okf-panel", id: "okf-panel", hidden: "", role: "complementary",
+    "aria-label": "Studio panel", tabindex: "-1" });
   const panelHeader = el("div", { class: "okf-panel__header" });
   const panelTitle = el("h2", { class: "okf-panel__title" });
   const panelClose = el("button", { type: "button", class: "okf-panel__close", "aria-label": "Close panel", text: "Esc" });
   panelHeader.appendChild(panelTitle); panelHeader.appendChild(panelClose);
+  // Editorial Workbench: one pop-over with tabs (Comments/Changes/Outline/
+  // Metadata) instead of separately-opened panels. Clicking a tab swaps the
+  // rendered panel; the active tab is underlined with --okf-accent.
+  const panelTabs = el("div", { class: "okf-panel__tabs", role: "tablist", "aria-label": "Panel sections" });
+  const PANEL_TABS = [["comments", "Comments"], ["changes", "Changes"], ["outline", "Outline"], ["metadata", "Metadata"]];
+  const panelTabBtns = {};
+  PANEL_TABS.forEach(function (t) {
+    const b = el("button", { type: "button", class: "okf-panel__tab", role: "tab", "aria-selected": "false", text: t[1] });
+    b.addEventListener("click", function () { openPanel(t[0]); });
+    panelTabs.appendChild(b);
+    panelTabBtns[t[0]] = b;
+  });
   const panelBody = el("div", { class: "okf-panel__body", id: "okf-panel-body" });
-  panelShell.appendChild(panelHeader); panelShell.appendChild(panelBody);
+  panelShell.appendChild(panelHeader); panelShell.appendChild(panelTabs); panelShell.appendChild(panelBody);
   document.body.appendChild(panelOverlay); document.body.appendChild(panelShell);
   panelOverlay.addEventListener("click", closePanel);
   panelClose.addEventListener("click", closePanel);
   document.addEventListener("keydown", (e) => {
     if (!state.openPanel) return;
+    // The overlay is non-modal: Escape dismisses it; Tab flows naturally
+    // between the panel and the reading column (no focus trap).
     if (e.key === "Escape") { e.preventDefault(); closePanel(); }
-    // iter1 CRI-016: trap focus inside the slide-over panel so Tab can't
-    // reach the page behind while aria-modal="true" is claimed.
-    else if (e.key === "Tab") { e.preventDefault(); trapFocusIn(panelShell, !e.shiftKey); }
   });
   function panelBodyEl() { return panelBody; }
   // iter1 CRI-016: remember the trigger so focus is restored on close.
   let panelLastFocus = null;
+  // Round 2: the thin rail's icon buttons (set by buildRail); openPanel/
+  // closePanel reflect the active tab onto them via aria-pressed.
+  var railButtons = [];
 
   function openPanel(id, opts) {
     opts = opts || {};
@@ -3134,26 +3368,32 @@
     if (!p) return;
     state.openPanel = id;
     panelShell.hidden = false;
-    panelOverlay.hidden = false;
+    panelOverlay.hidden = false;  // overlay: show the click-away scrim
     panelTitle.textContent = p.label;
     panelShell.setAttribute("aria-label", p.label);
-    // Update aria-expanded on every toggle button.
-    [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
-    const tb = ({ comments: commentsBtn, changes: changesBtn })[id];
-    if (tb) tb.setAttribute("aria-expanded", "true");
-    // Save the trigger so closePanel can restore focus (CRI-016).
-    if (!panelLastFocus) panelLastFocus = document.activeElement;
+    // Reflect the active tab in the pop-over tab bar.
+    Object.keys(panelTabBtns).forEach(function (k) {
+      panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
+    });
+    // Reflect the open tab on the rail icons.
+    (railButtons || []).forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset.railId === id ? "true" : "false");
+    });
+    // Save the trigger so closePanel can restore focus. Skipped on the
+    // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
+    // scroll on page load.
+    if (!opts.noFocus && !panelLastFocus) panelLastFocus = document.activeElement;
     // Render.
     panelBody.innerHTML = "";
     panelBody._focusComposer = !!opts.focusComposer;
     try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
-    try { panelShell.focus(); } catch (e) {}
+    if (!opts.noFocus) { try { panelShell.focus(); } catch (e) {} }
   }
   function closePanel() {
     state.openPanel = null;
     panelShell.hidden = true;
     panelOverlay.hidden = true;
-    [commentsBtn, changesBtn].forEach((b) => b.setAttribute("aria-expanded", "false"));
+    (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
     // iter1 CRI-016: restore focus to the button/link that opened the panel.
     if (panelLastFocus && typeof panelLastFocus.focus === "function") {
       try { panelLastFocus.focus({ preventScroll: true }); } catch (e) {}
@@ -3161,6 +3401,40 @@
     panelLastFocus = null;
   }
   function togglePanel(id) { state.openPanel === id ? closePanel() : openPanel(id); }
+
+  // Editorial Workbench Round 2: the thin studio rail. Always docked on
+  // concept pages (>=900px); each icon opens the matching overlay tab. The
+  // Comments icon carries a live count badge (synced by updateBadges).
+  var railCommentBadge = null;
+  function buildRail() {
+    // role="group" (not "toolbar") to match the sibling view-switch: the rail
+    // has no roving-focus arrow handling, so "toolbar" would over-promise.
+    var railEl = el("aside", { class: "okf-rail", role: "group", "aria-label": "Studio" });
+    function railBtn(id, glyph, label) {
+      var b = el("button", { type: "button", class: "okf-rail__btn",
+        "aria-pressed": "false", "aria-controls": "okf-panel",
+        title: label, "aria-label": label, text: glyph });
+      b.dataset.railId = id;
+      b.addEventListener("click", function () { togglePanel(id); });
+      railEl.appendChild(b);
+      return b;
+    }
+    var cBtn = railBtn("comments", "💬", "Comments");   // 💬
+    railCommentBadge = el("span", { class: "okf-rail__badge", "aria-hidden": "true", hidden: "", text: "0" });
+    cBtn.appendChild(railCommentBadge);
+    railBtn("changes", "↻", "Changes");                      // ↻
+    railBtn("outline", "☰", "Outline");                      // ☰
+    railBtn("metadata", "ⓘ", "Metadata");                    // ⓘ
+    railEl.appendChild(el("span", { class: "okf-rail__spacer", "aria-hidden": "true" }));
+    // Quick-actions (+) jumps to the Comments overlay (its intents toolbar).
+    var plus = el("button", { type: "button", class: "okf-rail__btn",
+      title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel", text: "+" });
+    plus.addEventListener("click", function () { openPanel("comments", { focusComposer: false }); });
+    railEl.appendChild(plus);
+    document.body.appendChild(railEl);
+    railButtons = railEl.querySelectorAll(".okf-rail__btn[data-rail-id]");
+    return railEl;
+  }
 
   function ctx() {
     return {
@@ -3182,12 +3456,14 @@
   function register(kind, impl) {
     if (kind === "panel" && impl && impl.id) {
       panels[impl.id] = Object.assign({ __builtin: false }, impl);
-      // Add a bar toggle for non-builtin panels.
+      // Add a bar toggle for non-builtin panels. Round 2: paletteBtn (Commands)
+      // now lives in leftGroup (actions), not rightGroup — insert alongside it
+      // there (opening a panel is an action, same cluster as Commands).
       if (!impl.__builtin && !impl._btn) {
         const btn = el("button", { type: "button", class: "okf-iconbtn", "aria-expanded": "false", "aria-controls": "okf-panel", text: impl.label });
         btn.addEventListener("click", () => togglePanel(impl.id));
         impl._btn = btn;
-        rightGroup.insertBefore(btn, paletteBtn);
+        leftGroup.insertBefore(btn, paletteBtn);
       }
       if (state.openPanel === impl.id) openPanel(impl.id);
       return impl;
@@ -3237,6 +3513,53 @@
     __builtin: true,
   };
   panels.changes = { id: "changes", label: "Changes", render: (c) => { c.innerHTML = ""; renderChangeList(); }, __builtin: true };
+
+  // Outline: this page's heading structure, as jump links. Reads the rendered
+  // prose so it tracks live edits.
+  panels.outline = {
+    id: "outline", label: "Outline", __builtin: true,
+    render: function (c) {
+      c.innerHTML = "";
+      const heads = $$(".okf-prose h2, .okf-prose h3");
+      if (!heads.length) {
+        c.appendChild(el("p", { class: "okf-panel__empty", text: "No sections on this page." }));
+        return;
+      }
+      const nav = el("nav", { class: "okf-outline", "aria-label": "Page outline" });
+      heads.forEach(function (h, i) {
+        if (!h.id) { try { h.id = "okf-h-" + i; } catch (e) {} }
+        const label = (h.textContent || "").replace(/[¶#]\s*$/, "").trim();
+        const a = el("a", { class: "okf-outline__item okf-outline__item--" + h.tagName.toLowerCase(),
+          href: "#" + h.id, text: label });
+        a.addEventListener("click", function () { setTimeout(closePanel, 0); });
+        nav.appendChild(a);
+      });
+      c.appendChild(nav);
+    },
+  };
+
+  // Metadata: the concept's frontmatter. Clones the in-page "All fields"
+  // details table when present; otherwise summarises type + tags.
+  panels.metadata = {
+    id: "metadata", label: "Metadata", __builtin: true,
+    render: function (c) {
+      c.innerHTML = "";
+      const fm = $(".okf-frontmatter");
+      if (fm) {
+        const clone = fm.cloneNode(true);
+        clone.setAttribute("open", "");
+        const sum = clone.querySelector("summary");
+        if (sum) sum.remove();
+        c.appendChild(clone);
+        return;
+      }
+      const type = $(".okf-type-chip");
+      const tags = $(".okf-page__meta");
+      if (type) c.appendChild(el("div", { class: "okf-panel__section", text: "Type: " + (type.textContent || "").trim() }));
+      if (tags) c.appendChild(el("div", { class: "okf-panel__section", text: (tags.textContent || "").trim() }));
+      if (!type && !tags) c.appendChild(el("p", { class: "okf-panel__empty", text: "No metadata for this view." }));
+    },
+  };
 
   // ---- Built-in extension panel demonstrating register(): "Agent activity" ----
   // iter2 G13 (CRI2-012): enriched with UNIQUE content the presence chip +
@@ -3341,10 +3664,12 @@
   // ====================================================================
   function updateBadges() {
     const open = state.comments.filter((c) => c.state === "open" || c.state === "claimed").length;
-    commentsBadge.textContent = String(open);
-    commentsBadge.setAttribute("aria-label", open + " open comments");
-    const acts = state.events.filter((e) => e.type === "activity" || e.action).length;
-    changesBadge.textContent = String(acts);
+    // Round 2: mirror the live open-comment count onto the rail badge (the
+    // footer comment/changes badges were retired with the docked dock).
+    if (railCommentBadge) {
+      railCommentBadge.textContent = String(open);
+      railCommentBadge.hidden = !(open > 0);
+    }
   }
 
   function jumpToActivity(aid) {
@@ -3411,9 +3736,10 @@
       // still get their own toast, but a rapid stream no longer stacks 8.
       scheduleActivityToast(a);
     });
-    window.okfLoomLive.on("changed", (d) => { upsertEvent({ type: "changed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); });
-    window.okfLoomLive.on("created", (d) => { upsertEvent({ type: "created", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); });
-    window.okfLoomLive.on("removed", (d) => { upsertEvent({ type: "removed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); });
+    window.okfLoomLive.on("changed", (d) => { upsertEvent({ type: "changed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); refreshValidation(); });
+    window.okfLoomLive.on("created", (d) => { upsertEvent({ type: "created", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); refreshValidation(); });
+    window.okfLoomLive.on("removed", (d) => { upsertEvent({ type: "removed", ids: d.ids, origin: d.origin, rev: d.rev, ts: new Date().toISOString() }); if (state.openPanel === "changes") renderChangeList(); refreshValidation(); });
+    refreshValidation();   // Round 2 §6.4: initial validation count (rev-cached server-side, so repeats are cheap)
     window.okfLoomLive.on("resync", () => { loadComments(); });
     // INTENT5-001 / QUA5-002: comment_link consumer — upsert the event into
     // state.events so changeRow's lookup finds it and re-renders the back-link
@@ -3719,6 +4045,56 @@
     });
   }
 
+  // Round 2 §6.4: shared diff renderer. Fetches /__diff for (concept, from, to)
+  // and renders the line table into `container`. Extracted from the conflict
+  // modal's "View diff" so the Changes tab can reuse it on demand (the modal's
+  // Keep-mine/Take-agent resolution actions stay modal-only). tokenFetch is
+  // required by the server (403 otherwise). Returns a Promise.
+  async function renderDiffInto(container, opts) {
+    opts = opts || {};
+    container.innerHTML = "";
+    const placeholder = el("div", { class: "okf-conflict__diff-loading", text: "Loading diff…" });
+    container.appendChild(placeholder);
+    try {
+      const concept = encodeURIComponent(String(opts.concept || ""));
+      const fromRev = encodeURIComponent(String(opts.from || ""));
+      const toRev = encodeURIComponent(String(opts.to || ""));
+      const res = await tokenFetch(
+        "/__diff?concept=" + concept + "&from=" + fromRev + "&to=" + toRev,
+        { headers: { Accept: "application/json" } },
+      );
+      const payload = await res.json();
+      placeholder.remove();
+      if (!payload || payload.ok === false) {
+        container.appendChild(el("p", { class: "okf-conflict__diff-empty",
+          text: payload && payload.error ? payload.error : "Diff unavailable." }));
+        return;
+      }
+      const rows = Array.isArray(payload.diff) ? payload.diff : [];
+      if (!rows.length) {
+        container.appendChild(el("p", { class: "okf-conflict__diff-empty", text: "No textual differences." }));
+        return;
+      }
+      const table = el("table", { class: "okf-conflict__diff-table" });
+      const tbody = el("tbody");
+      rows.forEach((row) => {
+        const tr = el("tr", { class: "okf-conflict__diff-row okf-conflict__diff-row--" + (row.kind || "ctx") });
+        tr.appendChild(el("td", { class: "okf-conflict__diff-num", text: String(row.num != null ? row.num : "") }));
+        tr.appendChild(el("td", { class: "okf-conflict__diff-kind", text: row.kind === "add" ? "+" : (row.kind === "del" ? "-" : " ") }));
+        const td = el("td", { class: "okf-conflict__diff-text" });
+        td.textContent = String(row.text != null ? row.text : "");
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      container.appendChild(table);
+    } catch (e) {
+      placeholder.remove();
+      container.appendChild(el("p", { class: "okf-conflict__diff-empty",
+        text: "Diff fetch failed: " + (e && e.message ? e.message : String(e)) }));
+    }
+  }
+
   function _buildConflictModal() {
     const overlay = el("div", {
       class: "okf-conflict-overlay", hidden: "",
@@ -3783,58 +4159,16 @@
     // comment).
     viewBtn.addEventListener("click", async () => {
       viewBtn.disabled = true;
-      diffPanel.innerHTML = "";
       diffPanel.removeAttribute("hidden");
-      const placeholder = el("div", { class: "okf-conflict__diff-loading", text: "Loading diff…" });
-      diffPanel.appendChild(placeholder);
       try {
         const { data: cdata } = conflictState._retryArgs;
-        const concept = encodeURIComponent(String(cdata.concept || ""));
-        const fromRev = encodeURIComponent(String(cdata.expected_rev || ""));
-        const toRev = encodeURIComponent(String(cdata.current_rev || ""));
-        const res = await tokenFetch(
-          "/__diff?concept=" + concept + "&from=" + fromRev + "&to=" + toRev,
-          { headers: { Accept: "application/json" } },
-        );
-        const payload = await res.json();
-        placeholder.remove();
-        if (!payload || payload.ok === false) {
-          diffPanel.appendChild(el("p", {
-            class: "okf-conflict__diff-empty",
-            text: payload && payload.error ? payload.error : "Diff unavailable.",
-          }));
-          return;
-        }
-        const rows = Array.isArray(payload.diff) ? payload.diff : [];
-        if (!rows.length) {
-          diffPanel.appendChild(el("p", {
-            class: "okf-conflict__diff-empty",
-            text: "No textual differences.",
-          }));
-          return;
-        }
-        const table = el("table", { class: "okf-conflict__diff-table" });
-        const tbody = el("tbody");
-        rows.forEach((row) => {
-          const tr = el("tr", { class: "okf-conflict__diff-row okf-conflict__diff-row--" + (row.kind || "ctx") });
-          tr.appendChild(el("td", { class: "okf-conflict__diff-num", text: String(row.num != null ? row.num : "") }));
-          tr.appendChild(el("td", { class: "okf-conflict__diff-kind", text: row.kind === "add" ? "+" : (row.kind === "del" ? "-" : " ") }));
-          const td = el("td", { class: "okf-conflict__diff-text" });
-          td.textContent = String(row.text != null ? row.text : "");
-          tr.appendChild(td);
-          tbody.appendChild(tr);
+        // Reuse the shared renderer (Round 2 §6.4 extraction). Same DOM as
+        // before — the iter1 conflict-modal tests exercise this path.
+        await renderDiffInto(diffPanel, {
+          concept: cdata.concept, from: cdata.expected_rev, to: cdata.current_rev,
         });
-        table.appendChild(tbody);
-        diffPanel.appendChild(table);
-      } catch (e) {
-        placeholder.remove();
-        diffPanel.appendChild(el("p", {
-          class: "okf-conflict__diff-empty",
-          text: "Diff fetch failed: " + (e && e.message ? e.message : String(e)),
-        }));
       } finally {
-        // Allow re-clicking to refresh.
-        setTimeout(() => { viewBtn.disabled = false; }, 500);
+        setTimeout(() => { viewBtn.disabled = false; }, 500);  // allow re-click to refresh
       }
     });
 
@@ -3921,51 +4255,50 @@
     conflictState._retryArgs = null;
   }
 
-  // ---- sidebar panel system (user-requested: collapsible, reorderable, resizable) ----
-  var SIDEBAR_KEY = "okf:sidebar";
-  var SIDEBAR_PANELS = ["related", "sections", "intents"];
+  // ---- sidebar rail: nav + flat Related ----
+  // Editorial Workbench §3.2: the persistent Diátaxis nav is the primary rail;
+  // the in-page heading list moved to the pop-over Outline tab, so "sections"
+  // is retired here. Related (local graph) + Quick Actions stack below the nav.
+  // Quick-action "intents" moved OUT of the left nav into the Comments tab of
+  // the studio dock (buildIntentsToolbar) — so the left column stays a clean
+  // Diátaxis nav and the action buttons sit where they pre-fill the composer.
   var INTENTS = [
-    { id: "add-section", label: "Add section", prompt: "Add a new section about" },
-    { id: "split-doc", label: "Split document", prompt: "Split this document into" },
-    { id: "add-links", label: "Add links", prompt: "Add links from this concept to" },
-    { id: "enrich", label: "Enrich content", prompt: "Enrich this page with" },
+    { id: "add-section", label: "Add section", prompt: "Add a new section about",
+      runPrompt: "Add a new section covering an important aspect of this concept that isn't documented yet." },
+    { id: "split-doc", label: "Split document", prompt: "Split this document into",
+      runPrompt: "Split this document into focused sub-concepts if it covers multiple distinct topics." },
+    { id: "add-links", label: "Add links", prompt: "Add links from this concept to",
+      runPrompt: "Review this concept and add typed links to the closely related concepts in the bundle." },
+    { id: "enrich", label: "Enrich content", prompt: "Enrich this page with",
+      runPrompt: "Enrich this page with additional detail, concrete examples, and cross-links where helpful." },
   ];
-
-  function getSidebarState() {
-    try {
-      var s = JSON.parse(localStorage.getItem(SIDEBAR_KEY) || "{}");
-      if (!s.order || !Array.isArray(s.order)) s.order = SIDEBAR_PANELS.slice();
-      if (!s.collapsed) s.collapsed = {};
-      if (!s.width) s.width = 260;
-      return s;
-    } catch (e) { return { order: SIDEBAR_PANELS.slice(), collapsed: {}, width: 260 }; }
-  }
-  function saveSidebarState(s) {
-    try { localStorage.setItem(SIDEBAR_KEY, JSON.stringify(s)); } catch (e) {}
-  }
 
   function buildSidebarPanels() {
     var sidebar = $(".okf-page__sidebar");
     if (!sidebar) return;
-    var sbState = getSidebarState();
-    // Apply saved width.
-    document.documentElement.style.setProperty("--okf-sidebar-w", sbState.width + "px");
 
-    // Capture the existing local graph node (preserve event listeners
-    // by moving the actual node, not copying HTML).
+    // Capture the server-rendered nodes we must preserve (move the actual
+    // nodes, keeping wiki.js event listeners): the primary Diátaxis nav rail
+    // and the local-graph widget.
+    var existingNav = $(".okf-nav", sidebar);
     var existingGraph = $(".okf-local-graph", sidebar);
 
     // Clear sidebar.
     sidebar.innerHTML = "";
 
-    // Build panels in saved order.
-    sbState.order.forEach(function (panelId) {
-      var panel = buildPanel(panelId, sbState, existingGraph);
-      if (panel) sidebar.appendChild(panel);
-    });
+    // The Diátaxis nav is the persistent wayfinding rail — re-mount it at the
+    // top, NOT as a draggable panel, so it always leads the column.
+    if (existingNav) sidebar.appendChild(existingNav);
 
-    // Wire drag-and-drop reordering.
-    wireSidebarDnD(sidebar, sbState);
+    // Related renders FLAT (a nav-group label + the neighbour list), not a
+    // draggable card — one continuous left rail. Build it directly.
+    if (existingGraph) {
+      var related = el("section", { class: "okf-related", "aria-label": "Related" });
+      related.appendChild(el("p", { class: "okf-nav__group", text: "Related" }));
+      related.appendChild(existingGraph);   // move the node; wiki.js re-renders it flat
+      sidebar.appendChild(related);
+    }
+
     // Re-render the local graph pills inside the new panel location so
     // wiki.js's click handlers (navigation) are properly bound.
     if (window.okfWiki && window.okfWiki.renderLocalGraph) {
@@ -3973,173 +4306,89 @@
     }
   }
 
-  function buildPanel(panelId, sbState, existingGraph) {
-    var isCollapsed = !!sbState.collapsed[panelId];
-    var panel = el("div", {
-      class: "okf-sidebar-panel" + (isCollapsed ? " okf-sidebar-panel--collapsed" : ""),
-      "data-panel-id": panelId,
-      draggable: "true",
-    });
-    var header = el("div", { class: "okf-sidebar-panel__header" });
-    var toggle = el("button", {
-      class: "okf-sidebar-panel__toggle",
-      type: "button",
-      "aria-label": isCollapsed ? "Expand" : "Collapse",
-      text: isCollapsed ? "+" : "-",
-    });
-    toggle.addEventListener("click", function () {
-      var p = panel.classList.toggle("okf-sidebar-panel--collapsed");
-      toggle.textContent = p ? "+" : "-";
-      toggle.setAttribute("aria-label", p ? "Expand" : "Collapse");
-      sbState.collapsed[panelId] = p;
-      saveSidebarState(sbState);
-    });
-    header.appendChild(toggle);
-    header.appendChild(el("span", { class: "okf-sidebar-panel__title", text: sidebarPanelTitle(panelId) }));
-    panel.appendChild(header);
-
-    var body = el("div", { class: "okf-sidebar-panel__body" });
-    if (panelId === "related") {
-      // Move the actual DOM node to preserve event listeners on the
-      // local graph pills (buttons that navigate to concepts).
-      if (existingGraph) body.appendChild(existingGraph);
-    } else if (panelId === "sections") {
-      buildSectionsPanel(body);
-    } else if (panelId === "intents") {
-      buildIntentsPanel(body);
-    }
-    panel.appendChild(body);
-    return panel;
-  }
-
-  function sidebarPanelTitle(id) {
-    return ({ related: "Related", sections: "Sections", intents: "Quick Actions" })[id] || id;
-  }
-
-  function buildSectionsPanel(body) {
-    var headings = $$("h1, h2, h3, h4, h5, h6", $(".okf-page__body") || document);
-    if (headings.length === 0) {
-      body.appendChild(el("p", { class: "okf-fg-muted", text: "No sections." }));
-      return;
-    }
-    var ul = el("ul", { class: "okf-sidebar-toc" });
-    headings.forEach(function (h) {
-      var li = el("li", { class: "toc-" + h.tagName.toLowerCase() });
-      var a = el("a", { href: "#" + (h.id || ""), text: (h.textContent || "").trim().slice(0, 50) });
-      a.addEventListener("click", function (e) {
-        e.preventDefault();
-        if (h.id) {
-          var target = document.getElementById(h.id);
-          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-      });
-      li.appendChild(a);
-      ul.appendChild(li);
-    });
-    body.appendChild(ul);
-    wireTocScrollSpy(ul, headings);
-  }
-
-  // Phase 2: scroll-spy — the TOC entry whose section is currently on
-  // screen carries .is-active. One shared observer per panel build; the
-  // previous observer (pre-SSE-patch rebuild) is disconnected so patches
-  // don't stack observers.
-  var _tocObserver = null;
-  function wireTocScrollSpy(ul, headings) {
-    if (!("IntersectionObserver" in window)) return;
-    if (_tocObserver) { _tocObserver.disconnect(); _tocObserver = null; }
-    var links = $$("a", ul);
-    var byId = {};
-    links.forEach(function (a) {
-      var id = (a.getAttribute("href") || "").slice(1);
-      if (id) byId[id] = a;
-    });
-    function activate(id) {
-      links.forEach(function (a) { a.classList.remove("is-active"); });
-      if (byId[id]) byId[id].classList.add("is-active");
-    }
-    // Track which headings are intersecting; the topmost wins.
-    var visible = {};
-    _tocObserver = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (!en.target.id) return;
-        visible[en.target.id] = en.isIntersecting;
-      });
-      for (var i = 0; i < headings.length; i++) {
-        if (headings[i].id && visible[headings[i].id]) { activate(headings[i].id); return; }
-      }
-    }, { rootMargin: "-10% 0px -70% 0px" });
-    headings.forEach(function (h) { if (h.id) _tocObserver.observe(h); });
-  }
-
-  function buildIntentsPanel(body) {
-    var container = el("div", { class: "okf-sidebar-intents" });
+  // Editorial Workbench (revised): the quick-action directive buttons live at
+  // the top of the Comments tab in the studio dock. Same INTENTS + behaviour
+  // as the retired left-nav panel — clicking one pre-fills the composer prompt.
+  function buildIntentsToolbar() {
+    var wrap = el("div", { class: "okf-panel__intents", role: "group", "aria-label": "Quick actions" });
     INTENTS.forEach(function (intent) {
-      var btn = el("button", { class: "okf-sidebar-intent", type: "button", text: intent.label });
+      var group = el("div", { class: "okf-panel__intent-group" });
+      var btn = el("button", {
+        class: "okf-panel__intent", type: "button", text: intent.label,
+        title: intent.prompt + "… (fills the composer)",
+      });
       btn.addEventListener("click", function () {
-        // Pre-fill the comment composer with the intent prompt.
         state.draftBody = intent.prompt + " ";
         state.draftAnchor = { kind: "concept", ref: state.conceptId, concept: state.conceptId };
-        openPanel("comments", { focusComposer: true });
+        var ta = panelBodyEl() && panelBodyEl().querySelector(".okf-composer__textarea");
+        if (ta) {
+          ta.value = state.draftBody;
+          try { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+        } else {
+          openPanel("comments", { focusComposer: true });
+        }
       });
-      container.appendChild(btn);
+      // Round 2 §6.4: RUN posts the directive to the agent. A comment IS an
+      // open directive the watching agent runs (post_comment → directives.jsonl
+      // → wait/comment-claim). Reuse the composer's Send path (optimistic insert
+      // + POST /__comment + toast) by filling a COMPLETE directive when the
+      // composer is empty (respecting any text the user typed) and clicking Send.
+      var run = el("button", {
+        class: "okf-panel__intent-run", type: "button", text: "▶",
+        title: "Run: send this directive to the agent now",
+        "aria-label": "Run: " + intent.label,
+      });
+      run.addEventListener("click", function () {
+        var pb = panelBodyEl();
+        var ta = pb && pb.querySelector(".okf-composer__textarea");
+        var submit = pb && pb.querySelector(".okf-composer__submit");
+        if (!ta || !submit) { openPanel("comments", { focusComposer: true }); return; }
+        if (!ta.value.trim()) ta.value = intent.runPrompt;   // complete directive when empty
+        state.draftBody = ta.value;
+        state.draftAnchor = { kind: "concept", ref: state.conceptId, concept: state.conceptId };
+        submit.click();   // → postCommentFromComposer → POST /__comment
+      });
+      group.appendChild(btn);
+      group.appendChild(run);
+      wrap.appendChild(group);
     });
-    body.appendChild(container);
+    return wrap;
   }
 
-  function wireSidebarDnD(sidebar, sbState) {
-    var dragSrc = null;
-    sidebar.addEventListener("dragstart", function (e) {
-      var panel = e.target.closest(".okf-sidebar-panel");
-      if (!panel) return;
-      dragSrc = panel;
-      panel.classList.add("okf-sidebar-panel--dragging");
-      e.dataTransfer.effectAllowed = "move";
-    });
-    sidebar.addEventListener("dragend", function (e) {
-      var panel = e.target.closest(".okf-sidebar-panel");
-      if (panel) panel.classList.remove("okf-sidebar-panel--dragging");
-      $$(".okf-sidebar-panel--drag-target", sidebar).forEach(function (p) {
-        p.classList.remove("okf-sidebar-panel--drag-target");
-      });
-    });
-    sidebar.addEventListener("dragover", function (e) {
+  // Editorial Workbench §3.3 (Round 2: functional pin): clicking a commented
+  // span (the inline mark) jumps to the mark itself AND opens the Comments
+  // overlay scrolled+pulsed to that comment's card — the thread content
+  // lives only in the overlay, so the reading page stays a reading page.
+  // Delegated once so it survives mark re-creation on live patches.
+  function wireCommentMarkClicks() {
+    document.addEventListener("click", function (e) {
+      const t = e.target;
+      const mark = t && t.closest && t.closest(".okf-comment-mark");
+      if (!mark) return;
       e.preventDefault();
-      var panel = e.target.closest(".okf-sidebar-panel");
-      if (!panel || panel === dragSrc) return;
-      $$(".okf-sidebar-panel--drag-target", sidebar).forEach(function (p) {
-        p.classList.remove("okf-sidebar-panel--drag-target");
-      });
-      panel.classList.add("okf-sidebar-panel--drag-target");
-    });
-    sidebar.addEventListener("drop", function (e) {
-      e.preventDefault();
-      var target = e.target.closest(".okf-sidebar-panel");
-      if (!target || !dragSrc || target === dragSrc) return;
-      // Insert dragSrc before or after target based on drop position.
-      var rect = target.getBoundingClientRect();
-      var after = (e.clientY - rect.top) > rect.height / 2;
-      if (after) {
-        target.parentNode.insertBefore(dragSrc, target.nextSibling);
-      } else {
-        target.parentNode.insertBefore(dragSrc, target);
-      }
-      // Save new order.
-      sbState.order = $$(".okf-sidebar-panel", sidebar).map(function (p) {
-        return p.getAttribute("data-panel-id");
-      });
-      saveSidebarState(sbState);
+      const id = mark.getAttribute("data-comment-id");
+      jumpToCommentMark(id);         // scroll+pulse the prose mark
+      if (id) jumpToCommentCard(id); // open the overlay + scroll+pulse the card
+      else openPanel("comments");
     });
   }
 
   function boot() {
     mountBar();
+    mountNavToggle();
+    wireCommentMarkClicks();
     wirePaletteKeys();
     if (isConceptPage()) {
       ensureViewWrap();
       setView(state.view); // also deep-links + lazy-loads source if needed
       bindSelectionAffordance();
       buildSidebarPanels();
+      // Round 2: always-docked thin rail (>=900px); overlays open on demand
+      // (no auto-open dock). The slim reserve keeps content clear of the rail.
+      if (window.innerWidth > 900) {
+        buildRail();
+        document.body.classList.add("okf-has-rail");
+      }
     } else if (document.getElementById("detail-body")) {
       // Graph page: bind selection affordance for the detail panel.
       bindSelectionAffordance();
@@ -4171,11 +4420,13 @@
     closePanel,
     openPalette,
     setView,
+    toggleFocus,
     get state() { return state; },
     get panels() { return panels; },
     ctx,
     // Test/debug helpers.
     _toast: toast, _loadComments: loadComments, _renderChangeList: renderChangeList,
+    _changeRow: changeRow,
     _showConflictModal: (payload) => showConflictModal({
       data: payload,
       url: "/__apply",
