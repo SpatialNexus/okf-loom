@@ -19,6 +19,9 @@ Requires explicit Playwright browser-proof dependencies + Chromium::
     python scripts/capture_viewer_proof.py [--bundle samples/demo_bundle] \\
         [--out-dir docs/screenshots]
 
+Chrome's sandbox remains enabled by default. A constrained root container may
+explicitly set ``OKF_CAPTURE_NO_SANDBOX=1`` when its sandbox cannot initialize.
+
 Design notes
 ------------
 * Import-safe: Playwright is imported lazily inside :func:`main`, so the
@@ -43,10 +46,24 @@ import socket
 import subprocess
 import sys
 import threading
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
+
+try:  # Supports direct script execution and import through the repo namespace.
+    from scripts.capture_support import (
+        display_path,
+        launch_chromium,
+        wait_for_http_ok,
+        wait_for_capture_ready,
+        write_capture_manifest,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct invocation path
+    from capture_support import (
+        display_path,
+        launch_chromium,
+        wait_for_http_ok,
+        wait_for_capture_ready,
+        write_capture_manifest,
+    )
 
 __all__ = ["main"]
 
@@ -65,9 +82,6 @@ DEFAULT_OUT_DIR = REPO_ROOT / "docs" / "screenshots"
 # Live-server readiness budget (seconds). The OKF server boots in well
 # under a second; this covers slow runners.
 _SERVER_STARTUP_TIMEOUT = 20.0
-_SERVER_POLL_INTERVAL = 0.15
-_POLL_HTTP_TIMEOUT = 1.0
-
 # Per-shot navigation + settle budget for Playwright.
 _PAGE_LOAD_TIMEOUT_MS = 15_000
 
@@ -100,20 +114,6 @@ def _script_env() -> dict[str, str]:
     return env
 
 
-def _wait_for_http_ok(base: str, timeout: float = _SERVER_STARTUP_TIMEOUT) -> bool:
-    """Return True once ``GET base/`` answers 200; False on timeout."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(f"{base}/", timeout=_POLL_HTTP_TIMEOUT) as resp:
-                if resp.status == 200:
-                    return True
-        except (urllib.error.URLError, ConnectionError, OSError):
-            pass
-        time.sleep(_SERVER_POLL_INTERVAL)
-    return False
-
-
 # ---------------------------------------------------------------------------
 # Live server (scripts/okf-loom serve)
 # ---------------------------------------------------------------------------
@@ -140,7 +140,9 @@ class _LiveServer:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if not _wait_for_http_ok(self.base):
+        if not wait_for_http_ok(
+            self.base, timeout=_SERVER_STARTUP_TIMEOUT, proc=self._proc
+        ):
             raise RuntimeError(
                 f"scripts/okf-loom serve did not become ready at {self.base} within "
                 f"{_SERVER_STARTUP_TIMEOUT:g}s"
@@ -187,7 +189,7 @@ class _StaticServer:
             target=self._server.serve_forever, daemon=True
         )
         self._thread.start()
-        if not _wait_for_http_ok(self.base):
+        if not wait_for_http_ok(self.base, timeout=_SERVER_STARTUP_TIMEOUT):
             raise RuntimeError(
                 f"static-build server did not become ready at {self.base} "
                 f"within {_SERVER_STARTUP_TIMEOUT:g}s"
@@ -242,7 +244,9 @@ def _build_static_site(bundle: Path, out_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _capture_targets(base: str, page, *, label: str, out_dir: Path) -> list[Path]:
+def _capture_targets(
+    base: str, page, *, label: str, out_dir: Path, records: list[dict]
+) -> list[Path]:
     """Capture the three browser-proof pages from ``base``; return the file paths.
 
     ``label`` is "live" or "static" and is folded into each filename so a
@@ -252,27 +256,29 @@ def _capture_targets(base: str, page, *, label: str, out_dir: Path) -> list[Path
 
     # 1. Graph page. Live server route: /__graph. Static file: /__graph.html.
     graph_url = f"{base}/__graph.html" if label == "static" else f"{base}/__graph"
-    page.goto(graph_url, wait_until="networkidle", timeout=_PAGE_LOAD_TIMEOUT_MS)
-    # Give the Cytoscape layout a chance to settle (it animates for ~1s
-    # after networkidle when the CDN script is available). networkidle is
-    # the binding readiness signal; this is best-effort settle, not a
-    # hard requirement.
-    try:
-        page.wait_for_selector("#okf-graph canvas", timeout=2_000)
-    except Exception:
-        pass
+    page.goto(graph_url, wait_until="load", timeout=_PAGE_LOAD_TIMEOUT_MS)
+    ready = wait_for_capture_ready(page, "graph", timeout_ms=_PAGE_LOAD_TIMEOUT_MS)
     p = out_dir / f"{label}-graph.png"
     page.screenshot(path=str(p), full_page=True)
     shots.append(p)
+    records.append({"file": p.name, "source": label,
+                    "route": "/__graph" if label == "live" else "/__graph.html",
+                    "theme": "swiss-light", "viewport": {"width": 1280, "height": 900},
+                    "device_scale_factor": 2, "readiness": ready})
 
     # 2. Concept page (tables/orders).
     concept_url = (
         f"{base}/tables/orders.html" if label == "static" else f"{base}/tables/orders"
     )
-    page.goto(concept_url, wait_until="networkidle", timeout=_PAGE_LOAD_TIMEOUT_MS)
+    page.goto(concept_url, wait_until="load", timeout=_PAGE_LOAD_TIMEOUT_MS)
+    ready = wait_for_capture_ready(page, "concept", timeout_ms=_PAGE_LOAD_TIMEOUT_MS)
     p = out_dir / f"{label}-concept-orders.png"
     page.screenshot(path=str(p), full_page=True)
     shots.append(p)
+    records.append({"file": p.name, "source": label,
+                    "route": "/tables/orders" if label == "live" else "/tables/orders.html",
+                    "theme": "swiss-light", "viewport": {"width": 1280, "height": 900},
+                    "device_scale_factor": 2, "readiness": ready})
 
     # 3. Search page. Live server: /__search?q=orders. Static build has no
     # search backend; the static search page renders with zero results,
@@ -280,56 +286,65 @@ def _capture_targets(base: str, page, *, label: str, out_dir: Path) -> list[Path
     search_url = (
         f"{base}/__search.html" if label == "static" else f"{base}/__search?q=orders"
     )
-    page.goto(search_url, wait_until="networkidle", timeout=_PAGE_LOAD_TIMEOUT_MS)
+    page.goto(search_url, wait_until="load", timeout=_PAGE_LOAD_TIMEOUT_MS)
+    ready = wait_for_capture_ready(page, "search", timeout_ms=_PAGE_LOAD_TIMEOUT_MS)
     p = out_dir / f"{label}-search.png"
     page.screenshot(path=str(p), full_page=True)
     shots.append(p)
+    records.append({"file": p.name, "source": label,
+                    "route": "/__search?q=orders" if label == "live" else "/__search.html",
+                    "theme": "swiss-light", "viewport": {"width": 1280, "height": 900},
+                    "device_scale_factor": 2, "readiness": ready})
 
     return shots
 
 
-def _run_captures(bundle: Path, out_dir: Path) -> list[Path]:
+def _run_captures(
+    bundle: Path, out_dir: Path, *, chrome_path: str | None = None
+) -> tuple[list[Path], list[dict], str]:
     """Drive Playwright once for both live + static sources."""
     # Lazy import: this module stays import-safe (no top-level playwright
     # import) so tests / tooling can introspect it without the extra.
     from playwright.sync_api import sync_playwright
 
     captured: list[Path] = []
+    records: list[dict] = []
 
     with sync_playwright() as p:
-        # Launch once and reuse the browser across both sources.
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            raise SystemExit(
-                "ERROR: chromium binary not installed. "
-                "Run `playwright install chromium`.\n"
-                f"({exc})"
-            ) from exc
+        # Launch once and reuse the resolved managed/system browser.
+        launched = launch_chromium(p, chrome_path)
+        browser = launched.browser
         try:
             context = browser.new_context(
                 viewport={"width": 1280, "height": 900},
                 device_scale_factor=2,  # crisper screenshots for docs
             )
+            context.add_init_script(
+                "try { localStorage.setItem('okf-theme', 'swiss-light'); } catch (e) {}"
+            )
             page = context.new_page()
 
             # --- live server ---
             with _LiveServer(bundle) as base:
-                captured.extend(_capture_targets(base, page, label="live", out_dir=out_dir))
+                captured.extend(_capture_targets(
+                    base, page, label="live", out_dir=out_dir, records=records
+                ))
 
             # --- static build + stdlib http server ---
             static_dir = out_dir.parent / f"{out_dir.name}-static-src"
             _build_static_site(bundle, static_dir)
             with _StaticServer(static_dir) as base:
                 captured.extend(
-                    _capture_targets(base, page, label="static", out_dir=out_dir)
+                    _capture_targets(
+                        base, page, label="static", out_dir=out_dir, records=records
+                    )
                 )
 
             context.close()
         finally:
             browser.close()
 
-    return captured
+    return captured, records, launched.source
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +377,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "<YYYY-MM-DD>-viewer/ is created inside it "
             f"(default: {DEFAULT_OUT_DIR})"
         ),
+    )
+    p.add_argument(
+        "--chrome",
+        default=None,
+        help="path to Chrome/Chromium (then OKF_CHROME, AIC path, managed, system)",
     )
     return p
 
@@ -397,14 +417,20 @@ def main(argv: list[str] | None = None) -> int:
     _log(f"out_dir={out_dir}")
 
     try:
-        captured = _run_captures(bundle, out_dir)
+        captured, records, browser_source = _run_captures(
+            bundle, out_dir, chrome_path=args.chrome
+        )
     except (RuntimeError, SystemExit) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    print(f"# wrote {len(captured)} screenshots to {out_dir}")
-    for path in captured:
-        rel = path.relative_to(out_parent.parent) if out_parent.parent in path.parents else path
+    manifest = write_capture_manifest(
+        out_dir, records, repo_root=REPO_ROOT, browser_source=browser_source
+    )
+
+    print(f"# wrote {len(captured)} screenshots and manifest to {out_dir}")
+    for path in [*captured, manifest]:
+        rel = display_path(path, out_parent.parent)
         size = path.stat().st_size if path.exists() else 0
         print(f"  {rel}  ({size} bytes)")
     return 0
