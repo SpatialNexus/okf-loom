@@ -56,6 +56,26 @@ def test_render_single_file_contains_bundle_json(tiny_good_bundle: Path) -> None
     assert '"edges"' in content
 
 
+def test_viewer_config_name_is_escaped_in_html_and_script_contexts(
+    tiny_good_bundle: Path,
+) -> None:
+    """A valid display name cannot break out of HTML or embedded JSON."""
+    config_dir = tiny_good_bundle / ".okf-loom" / "viewer"
+    config_dir.mkdir(parents=True)
+    attack = '</script><script id="injected">alert(1)</script>'
+    (config_dir / "config.json").write_text(
+        json.dumps({"name": attack}), encoding="utf-8"
+    )
+
+    out = tiny_good_bundle / "viz.html"
+    render_single_file(Bundle.load(tiny_good_bundle), out)
+    html = out.read_text(encoding="utf-8")
+
+    assert '<script id="injected">' not in html
+    assert "&lt;/script&gt;&lt;script id=&quot;injected&quot;&gt;" in html
+    assert "\\u003c/script\\u003e\\u003cscript" in html
+
+
 def test_embedded_json_matches_bundle_graph(tiny_good_bundle: Path) -> None:
     """The embedded JSON blob matches what ``build_graph_data`` produces."""
     b = Bundle.load(tiny_good_bundle)

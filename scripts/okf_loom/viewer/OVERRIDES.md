@@ -82,8 +82,17 @@ of defence apply:
 |------------------|---------|-----------|------------------------------------------------|
 | `name`           | string  | bundle dir name | Display name for the viewer / browser title. |
 | `default_layout` | string  | `"cose"`  | Initial Cytoscape layout: `cose` / `concentric` / `breadthfirst` / `circle` / `grid`. |
-| `theme`          | string  | `"light"` | Initial colour theme: `light` / `dark`. Users can toggle and the choice is persisted to `localStorage['okf-theme']`. |
+| `theme`          | string  | `"technical-light"` | Concrete initial colour theme: `"swiss-light"` / `"swiss-dark"` / `"technical-light"` / `"technical-dark"`. A saved user preference takes precedence. |
 | `cdn`            | bool    | `true`    | If `false`, omit the Cytoscape.js CDN `<script>` tags from the single-file viewer and the `/__graph` page (for fully offline packaging — supply your own copy in that case). Markdown is rendered server-side by okf-loom's own stdlib renderer, so there is no client-side markdown parser to gate. |
+
+`config.json` is strict: malformed JSON, a non-object top level, unknown keys,
+wrong types, empty values, and unsupported enum values stop the operation with
+a file-and-field diagnostic. Retired theme names are not silently interpreted.
+Replace `light` with `technical-light`, `dark` or `midnight` with
+`technical-dark`, and `pastel` or `sepia` with `swiss-light`. This explicit
+configuration migration is separate from the one-time migration of returning
+users' saved browser preferences. Display names may contain ordinary special
+characters; renderer escaping remains mandatory and prevents interpolation.
 
 ```json
 {

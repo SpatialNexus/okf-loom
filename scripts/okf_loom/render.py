@@ -25,6 +25,7 @@ from typing import Any
 
 from .model import Bundle, Concept
 from .paths import ConceptId, concept_id_to_str
+from .theme import EXPLICIT_THEMES
 from .viewer.assets import (
     auto_palette,
     list_builtin_static,
@@ -548,18 +549,15 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # Theme button (P2-74) + shared topbar nav fragment (P2-61)
 # ---------------------------------------------------------------------------
 
-# The set of valid ``data-theme`` values. wiki.css defines a token block per
-# theme. KEEP IN SYNC with the THEMES / THEME_GLYPHS copies in wiki.js:27-28,
-# graph.js:30-31 and studio.js:219-220 (each JS context loads without the
-# others). Four Editorial-Workbench themes: technical/swiss families in
-# light + dark. `_theme_button_html` no longer cycles this tuple; it only
-# membership-tests `initial_theme` against it and hyphen-partitions the match
-# into family/mode. The order is retained solely for (a) the JS-mirror sync
-# contract and (b) auto resolving into Swiss (the primary family), which is
-# why Swiss stays listed first.
-_THEMES: tuple[str, ...] = (
-    "swiss-light", "swiss-dark", "technical-light", "technical-dark",
-)
+# The set of valid ``data-theme`` values comes from the shared backend contract.
+# wiki.css and the THEMES / THEME_GLYPHS copies in wiki.js:27-28, graph.js:30-31
+# and studio.js:219-220 remain runtime mirrors because each browser context can
+# load without the others. Four Editorial-Workbench themes: technical/swiss
+# families in light + dark. `_theme_button_html` no longer cycles this tuple; it
+# only membership-tests `initial_theme` against it and hyphen-partitions the
+# match into family/mode. EXPLICIT_THEMES preserves Swiss-first order for the
+# JS-mirror contract and Auto resolution into Swiss (the primary family).
+_THEMES: tuple[str, ...] = EXPLICIT_THEMES
 _THEME_GLYPHS: dict[str, str] = {
     "swiss-light": "\u25d1",      # \u25d1 right half-black circle (solid-fill motif)
     "swiss-dark": "\u25d0",       # \u25d0 left half-black circle

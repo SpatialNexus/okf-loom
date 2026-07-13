@@ -352,6 +352,20 @@ Bundles should normally gitignore `.okf-loom/index/` and `.okf-loom/session/`.
 
 All viewer targets share the same `ContentIndex`.
 
+Theme defaults have one configuration contract. `studio.theme` in
+`okf-loom.config.yaml` accepts `auto` plus the concrete `swiss-light`,
+`swiss-dark`, `technical-light`, and `technical-dark` themes. The narrower
+`.okf-loom/viewer/config.json` surface accepts the four concrete themes only.
+Both surfaces reject retired names with contextual replacements (`light` →
+`technical-light`, `dark` / `midnight` → `technical-dark`, and `pastel` /
+`sepia` → `swiss-light`); returning users' saved browser preferences are
+migrated separately. Invalid viewer JSON never silently falls back: malformed
+JSON, a non-object top level, unknown keys, wrong types, empty values, and
+unsupported layout/theme values are errors. A saved user preference overrides
+the validated configured initial value; otherwise the configured value applies,
+then Swiss Auto/OS fallback. The concrete resolved Auto value is derived and is
+not configuration or persisted preference state.
+
 | Target | Command | Use |
 |---|---|---|
 | Live studio / server | `serve` | Interactive browsing, comments, agent loop, SSE updates. |

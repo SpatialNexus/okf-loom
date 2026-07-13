@@ -185,7 +185,7 @@ No unlock flags required.
 | `log_edits` | bool | `true` | Append a SPEC §7 `log.md` entry per agent write / resolved comment. |
 | `max_sse_clients` | int | `32` | Cap on concurrent SSE streams. Returns 503 when full. |
 | `allowed_hosts` | list of strings | `[127.0.0.1, localhost]` | Origin/Host allow-list for the cross-origin guard. Never empty (defaults to loopback on unset). |
-| `theme` | enum | `auto` | `auto` / `light` / `dark`. |
+| `theme` | enum | `auto` | `auto`, `swiss-light`, `swiss-dark`, `technical-light`, or `technical-dark`. `auto` follows the OS colour scheme in the Swiss family until a user preference overrides it. |
 | `events_max_bytes` | int | `8388608` (8 MiB) | `events.jsonl` rotation cap (active file size). |
 | `events_keep` | int | `7` | Number of rotated `events.jsonl` files to keep. |
 
@@ -279,6 +279,16 @@ new one to change a value.
 
 `okf-loom.config.yaml` is the authoritative bundle-level config; the
 viewer's `config.json` is a narrower display-only override.
+
+Theme configuration is validated rather than guessed. The YAML `studio.theme`
+surface accepts `auto` and the four concrete Editorial Workbench themes. The
+viewer JSON surface accepts the four concrete themes because it supplies a
+build-time initial theme; it does not accept `auto`. Retired configuration
+names fail with a replacement in the diagnostic: `light` →
+`technical-light`, `dark` → `technical-dark`, `pastel` / `sepia` →
+`swiss-light`, and `midnight` → `technical-dark`. Saved browser preferences
+using those retired names are migrated client-side; configuration files must
+be updated explicitly.
 
 # Authoring tools
 

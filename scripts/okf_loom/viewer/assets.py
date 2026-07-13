@@ -41,7 +41,9 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from ..exceptions import OKFError
 from ..model import Bundle
+from ..theme import EXPLICIT_THEMES, legacy_theme_message
 
 _THIS_DIR = Path(__file__).resolve().parent
 _BUILTIN_TEMPLATES = _THIS_DIR / "templates"
@@ -517,9 +519,49 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 
 
 _ALLOWED_LAYOUTS = frozenset({"cose", "concentric", "breadthfirst", "circle", "grid"})
-_ALLOWED_THEMES = frozenset(
-    {"technical-light", "technical-dark", "swiss-light", "swiss-dark"}
-)
+_ALLOWED_THEMES = frozenset(EXPLICIT_THEMES)
+
+
+class ViewerConfigError(OKFError, ValueError):
+    """Raised when bundle-local ``viewer/config.json`` is invalid."""
+
+
+def _viewer_config_value(
+    path: Path, key: str, value: Any
+) -> Any:
+    """Validate one viewer config value without interpolation fallbacks."""
+    field = f"{path}:{key}"
+    if key == "name":
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ViewerConfigError(f"{field} must be a string or null")
+        if not value.strip():
+            raise ViewerConfigError(f"{field} must not be empty or whitespace")
+        return value
+    if key == "cdn":
+        if not isinstance(value, bool):
+            raise ViewerConfigError(f"{field} must be a boolean")
+        return value
+    if key in {"default_layout", "theme"}:
+        if not isinstance(value, str):
+            raise ViewerConfigError(f"{field} must be a string")
+        if not value.strip():
+            raise ViewerConfigError(f"{field} must not be empty or whitespace")
+        if key == "theme":
+            migration = legacy_theme_message(field, value)
+            if migration:
+                raise ViewerConfigError(migration)
+            allowed = _ALLOWED_THEMES
+        else:
+            allowed = _ALLOWED_LAYOUTS
+        if value not in allowed:
+            raise ViewerConfigError(
+                f"{field}: unsupported value {value!r}; "
+                f"expected one of {sorted(allowed)}"
+            )
+        return value
+    raise AssertionError(f"unhandled viewer config key: {key}")
 
 
 def load_config(bundle: Bundle) -> dict[str, Any]:
@@ -546,28 +588,37 @@ def load_config(bundle: Bundle) -> dict[str, Any]:
     All values are VALIDATED against their allowed sets before use, so a
     malicious config.json cannot inject arbitrary values into template
     contexts (defence against supply-chain XSS via config interpolation).
+    Invalid files raise :class:`ViewerConfigError` with the file and field;
+    they never silently disappear behind defaults.
     """
     cfg = dict(_DEFAULT_CONFIG)
     path = bundle.root / _OKF_VIEWER_SUBDIR / "config.json"
     if path.is_file():
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if k not in _DEFAULT_CONFIG:
-                        continue
-                    # Validate values against allowed sets (fail-closed).
-                    if k == "default_layout" and v not in _ALLOWED_LAYOUTS:
-                        continue  # keep default
-                    if k == "theme" and v not in _ALLOWED_THEMES:
-                        continue  # keep default
-                    if k == "cdn" and not isinstance(v, bool):
-                        continue  # keep default
-                    if k == "name" and not isinstance(v, (str, type(None))):
-                        continue
-                    cfg[k] = v
-        except (OSError, ValueError):
-            pass
+            source = path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise ViewerConfigError(f"could not read viewer config {path}: {e}") from e
+        try:
+            data = json.loads(source)
+        except json.JSONDecodeError as e:
+            raise ViewerConfigError(
+                f"invalid viewer config {path}: malformed JSON at "
+                f"line {e.lineno} column {e.colno}: {e.msg}"
+            ) from e
+        if not isinstance(data, dict):
+            raise ViewerConfigError(
+                f"invalid viewer config {path}: expected a JSON object at the "
+                f"top level, got {type(data).__name__}"
+            )
+        unknown = sorted(set(data) - set(_DEFAULT_CONFIG))
+        if unknown:
+            raise ViewerConfigError(
+                f"invalid viewer config {path}: unknown key(s) "
+                f"{', '.join(repr(key) for key in unknown)}; "
+                f"expected only {sorted(_DEFAULT_CONFIG)}"
+            )
+        for key, value in data.items():
+            cfg[key] = _viewer_config_value(path, key, value)
     return cfg
 
 

@@ -297,6 +297,56 @@ def test_malformed_yaml_rejected(tmp_path: Path) -> None:
         OkfConfig.load(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "theme",
+    ["auto", "swiss-light", "swiss-dark", "technical-light", "technical-dark"],
+)
+def test_studio_theme_accepts_documented_values(tmp_path: Path, theme: str) -> None:
+    _write_config(tmp_path, f"studio:\n  theme: {theme}\n")
+    assert OkfConfig.load(tmp_path).studio.theme == theme
+
+
+@pytest.mark.parametrize("yaml_value", ["null", "[]", "{}", "42", "true"])
+def test_studio_theme_rejects_wrong_type(tmp_path: Path, yaml_value: str) -> None:
+    _write_config(tmp_path, f"studio:\n  theme: {yaml_value}\n")
+    with pytest.raises(OkfConfigError, match=r"studio\.theme.*string"):
+        OkfConfig.load(tmp_path)
+
+
+@pytest.mark.parametrize("yaml_value", ['""', '"   "'])
+def test_studio_theme_rejects_empty_or_whitespace(tmp_path: Path, yaml_value: str) -> None:
+    _write_config(tmp_path, f"studio:\n  theme: {yaml_value}\n")
+    with pytest.raises(OkfConfigError, match=r"studio\.theme.*empty or whitespace"):
+        OkfConfig.load(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("legacy", "replacement"),
+    [
+        ("light", "technical-light"),
+        ("dark", "technical-dark"),
+        ("pastel", "swiss-light"),
+        ("sepia", "swiss-light"),
+        ("midnight", "technical-dark"),
+    ],
+)
+def test_studio_theme_rejects_legacy_value_with_migration(
+    tmp_path: Path, legacy: str, replacement: str
+) -> None:
+    _write_config(tmp_path, f"studio:\n  theme: {legacy}\n")
+    with pytest.raises(
+        OkfConfigError,
+        match=rf"legacy theme {legacy!r}.*replace it with {replacement!r}",
+    ):
+        OkfConfig.load(tmp_path)
+
+
+def test_studio_theme_rejects_unsupported_special_characters(tmp_path: Path) -> None:
+    _write_config(tmp_path, 'studio:\n  theme: "<script>"\n')
+    with pytest.raises(OkfConfigError, match=r"studio\.theme.*<script>.*expected one of"):
+        OkfConfig.load(tmp_path)
+
+
 # --- okf init CLI ----------------------------------------------------------
 
 
