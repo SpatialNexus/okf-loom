@@ -550,35 +550,45 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 # The set of valid ``data-theme`` values comes from the shared backend contract.
-# wiki.css and the THEMES / THEME_GLYPHS copies in wiki.js:27-28, graph.js:30-31
-# and studio.js:219-220 remain runtime mirrors because each browser context can
-# load without the others. Four Editorial-Workbench themes: technical/swiss
-# families in light + dark. `_theme_button_html` no longer cycles this tuple; it
-# only membership-tests `initial_theme` against it and hyphen-partitions the
+# The single client-side mirror lives in viewer/static/theme.js (THEMES /
+# LEGACY_THEMES), the canonical theme-state asset loaded before wiki.js /
+# graph.js / studio.js in every context; tests/test_theme_contract.py pins the
+# JS mirror to :data:`okf_loom.theme.EXPLICIT_THEMES` /
+# :data:`~okf_loom.theme.LEGACY_THEME_MIGRATIONS`. Four Editorial-Workbench
+# themes: technical/swiss families in light + dark. `_theme_button_html` only
+# membership-tests `initial_theme` against this tuple and hyphen-partitions the
 # match into family/mode. EXPLICIT_THEMES preserves Swiss-first order for the
 # JS-mirror contract and Auto resolution into Swiss (the primary family).
 _THEMES: tuple[str, ...] = EXPLICIT_THEMES
-_THEME_GLYPHS: dict[str, str] = {
-    "swiss-light": "\u25d1",      # \u25d1 right half-black circle (solid-fill motif)
-    "swiss-dark": "\u25d0",       # \u25d0 left half-black circle
-    "technical-light": "\u2600",  # \u2600 sun
-    "technical-dark": "\u263e",   # \u263e moon
-}
+
+
+def _theme_js_link(static_prefix: str) -> str:
+    """``<script>`` tag for the canonical theme-state asset.
+
+    Emitted in ``<head>`` so theme.js executes BEFORE every consumer: the
+    deferred wiki.js/graph.js/renderers.js at the end of ``<body>`` AND the
+    studio module scripts the live server injects before ``</head>``
+    (deferred classic scripts and module scripts share one in-document-order
+    execution queue).
+    """
+    return f'<script src="{static_prefix}/theme.js" defer></script>'
 
 
 def _theme_button_html(initial_theme: str) -> str:
     """Appearance-menu trigger + popover (Round 2 \u00a75.3), server-rendered to
     avoid FOUC. Replaces the former theme-cycle button. Consolidates family
     (technical/swiss) \u00b7 mode (light/dark/auto) \u00b7 contrast (high/soft) \u00b7 border
-    (on/muted/off). The trigger keeps id="okf-theme" so the wiki.js/graph.js/
-    studio.js bindings resolve it; the wiring (open/close + option handlers,
-    each reusing its bundle's applyTheme) lives in those IIFEs. contrast/border
+    (on/muted/off). The trigger keeps id="okf-theme" so the client bindings
+    resolve it; the wiring (open/close + option handlers, driving the shared
+    resolver) lives in viewer/static/theme.js. contrast/border
     default to high/on server-side (the server can't read the user's
     localStorage); the client corrects aria-checked at boot.
     """
     theme = initial_theme if initial_theme in _THEMES else ""
     if theme:
-        family, _, mode = theme.partition("-")  # "swiss-light" -> "swiss","light"
+        # Split at the LAST hyphen — parity with theme.js lastIndexOf("-")
+        # parsing, so a future multi-word family name cannot diverge.
+        family, _, mode = theme.rpartition("-")  # "swiss-light" -> "swiss","light"
     else:
         family, mode = "swiss", "auto"          # auto resolves within Swiss (see JS)
 
@@ -820,14 +830,23 @@ def render_single_file(
     data = build_graph_data(bundle, name=display_name)
     template = load_template("single_file.html", bundle)
     css = load_static("wiki.css", bundle) + "\n" + load_static("graph.css", bundle)
-    # Bundle renderers.js too so the single-file detail panel gets
-    # the same mermaid/hljs/KaTeX treatment as the wiki + graph views
-    # (graph.js dispatches okf-loom:bodyPatched after every showDetail).
-    js = load_static("graph.js", bundle) + "\n" + load_static("renderers.js", bundle)
+    # theme.js FIRST (graph.js and renderers.js consume window.OKFLoomTheme /
+    # its okf-loom:themeChanged event); bundle renderers.js too so the
+    # single-file detail panel gets the same mermaid/hljs/KaTeX treatment as
+    # the wiki + graph views (graph.js dispatches okf-loom:bodyPatched after
+    # every showDetail).
+    js = (
+        load_static("theme.js", bundle)
+        + "\n" + load_static("graph.js", bundle)
+        + "\n" + load_static("renderers.js", bundle)
+    )
 
-    initial_theme = "light"
-    if config.get("theme") in _THEMES:
-        initial_theme = config["theme"]
+    # Parity with the served/built pages: a concrete configured theme is
+    # server-rendered into ``data-theme`` (no FOUC); otherwise the attribute
+    # is omitted and theme.js resolves Swiss Auto/OS (never the retired
+    # "light" name the old fallback emitted).
+    initial_theme = config.get("theme") or "auto"
+    theme_attr = f' data-theme="{initial_theme}"' if initial_theme in _THEMES else ""
     initial_layout = config.get("default_layout") or "cose"
     cdn_scripts = _CDN_SCRIPTS if config.get("cdn", True) else (
         "<!-- CDN scripts omitted (config.cdn=false). Provide your own "
@@ -841,6 +860,7 @@ def render_single_file(
         .replace("__BUNDLE_DATA__", _json_for_script(data))
         .replace("/*__VIEWER_CSS__*/", css)
         .replace("/*__VIEWER_JS__*/", js)
+        .replace("__THEME_ATTR__", theme_attr)
         .replace("__INITIAL_THEME__", initial_theme)
         .replace("__INITIAL_THEME_BUTTON__", _theme_button_html(initial_theme))
         .replace("__INITIAL_LAYOUT__", initial_layout)
@@ -1587,6 +1607,7 @@ def _render_concept_page(
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
     css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
+    theme_js_link = _theme_js_link(static_prefix)
     js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
     renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
 
@@ -1621,6 +1642,7 @@ def _render_concept_page(
         # target URL. Only consumed by wiki.js in static mode.
         .replace("__ROOT_PREFIX__", _esc_attr_qs(root_prefix))
         .replace("__WIKI_CSS_LINK__", css_link)
+        .replace("__THEME_JS_LINK__", theme_js_link)
         .replace("__WIKI_JS_LINK__", js_link)
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__CONCEPT_ID__", _esc(cid_str))
@@ -2247,6 +2269,7 @@ def _render_index_page(
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
     css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
+    theme_js_link = _theme_js_link(static_prefix)
     js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
     renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
     graph_link = "/__graph" if mode in ("serve", "spa") else (
@@ -2288,6 +2311,7 @@ def _render_index_page(
         .replace("__BRAND_ARIA_CURRENT__", brand_aria)
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
+        .replace("__THEME_JS_LINK__", theme_js_link)
         .replace("__WIKI_JS_LINK__", js_link)
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__NAV_HTML__", nav_html)
@@ -2418,6 +2442,7 @@ def _render_search_page(
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
     css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
+    theme_js_link = _theme_js_link(static_prefix)
     js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
     renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
     # Current spec §9: in static mode also load the client-side
@@ -2462,6 +2487,7 @@ def _render_search_page(
         .replace("__BUNDLE_NAME__", _esc(name))
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
+        .replace("__THEME_JS_LINK__", theme_js_link)
         .replace("__WIKI_JS_LINK__", js_link)
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__NAV_HTML__", nav_html)
@@ -2526,6 +2552,7 @@ def _render_graph_page(
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
         .replace("__GRAPH_CSS_LINK__", graph_css_link)
+        .replace("__THEME_JS_LINK__", _theme_js_link(static_prefix))
         .replace("__GRAPH_JS_SRC__", graph_js)
         .replace("__CDN_SCRIPTS__", cdn_scripts)
         .replace("__INITIAL_THEME__", initial_theme)

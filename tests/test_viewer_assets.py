@@ -183,10 +183,13 @@ def _viewer_bundle(tmp_path, content: str | None = None):
 
 
 def test_viewer_config_absent_uses_validated_defaults(tmp_path) -> None:
+    # theme None = unconfigured: the resolution contract's configured slot
+    # stays empty so the Swiss Auto/OS fallback governs (a concrete default
+    # here would masquerade as author configuration downstream).
     assert assets.load_config(_viewer_bundle(tmp_path)) == {
         "name": None,
         "default_layout": "cose",
-        "theme": "technical-light",
+        "theme": None,
         "cdn": True,
     }
 
@@ -205,6 +208,19 @@ def test_viewer_config_accepts_all_fields_and_special_characters_in_name(tmp_pat
 def test_viewer_config_accepts_every_concrete_theme(tmp_path, theme: str) -> None:
     cfg = assets.load_config(_viewer_bundle(tmp_path, json.dumps({"theme": theme})))
     assert cfg["theme"] == theme
+
+
+def test_viewer_config_explicit_null_theme_means_unconfigured(tmp_path) -> None:
+    """``"theme": null`` equals omitting the key: the configured slot stays
+    empty so the Swiss Auto/OS fallback governs downstream."""
+    cfg = assets.load_config(_viewer_bundle(tmp_path, json.dumps({"theme": None})))
+    assert cfg["theme"] is None
+
+
+def test_viewer_config_null_layout_is_still_rejected(tmp_path) -> None:
+    """Accepting null for theme must not weaken the other enum fields."""
+    with pytest.raises(assets.ViewerConfigError, match=r"default_layout.*string"):
+        assets.load_config(_viewer_bundle(tmp_path, json.dumps({"default_layout": None})))
 
 
 def test_backend_theme_manifests_match_renderer_and_yaml_contract() -> None:

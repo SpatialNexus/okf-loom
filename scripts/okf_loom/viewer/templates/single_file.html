@@ -9,14 +9,18 @@
       __BUNDLE_DATA__    → JSON-encoded object: {name, nodes, edges, bodies,
                           types, palette, backlinks, external}
       /*__VIEWER_CSS__*/ → wiki.css + graph.css contents (inlined)
-      /*__VIEWER_JS__*/  → graph.js (the full viewer logic, inlined)
-      __INITIAL_THEME__  → theme name — technical-light|technical-dark|swiss-light|swiss-dark (may be overridden
-                          by localStorage in the browser)
+      /*__VIEWER_JS__*/  → theme.js + graph.js + renderers.js (inlined; theme.js
+                          FIRST — the others consume window.OKFLoomTheme)
+      __THEME_ATTR__     → ` data-theme="technical-light|technical-dark|swiss-light|swiss-dark"`
+                          when a concrete theme is configured, else empty
+                          (theme.js resolves saved preference > configured >
+                          Swiss Auto/OS at boot)
+      __INITIAL_THEME__  → configured theme name or "auto"
       __INITIAL_LAYOUT__ → "cose" | "concentric" | ...
 
   CDN scripts are emitted only when config["cdn"] is True.
 -->
-<html lang="en" data-theme="__INITIAL_THEME__">
+<html lang="en"__THEME_ATTR__>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

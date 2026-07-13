@@ -361,10 +361,20 @@ Both surfaces reject retired names with contextual replacements (`light` →
 `sepia` → `swiss-light`); returning users' saved browser preferences are
 migrated separately. Invalid viewer JSON never silently falls back: malformed
 JSON, a non-object top level, unknown keys, wrong types, empty values, and
-unsupported layout/theme values are errors. A saved user preference overrides
-the validated configured initial value; otherwise the configured value applies,
-then Swiss Auto/OS fallback. The concrete resolved Auto value is derived and is
-not configuration or persisted preference state.
+unsupported layout/theme values are errors. When both surfaces configure a
+theme for the same served page, the viewer JSON value — the one the server
+paints into `data-theme` — is authoritative; `studio.theme` applies only when
+the viewer surface leaves the theme unconfigured (explicit `null` equals
+omission), and its `auto` default carries no preference. A saved user
+preference overrides the validated configured initial value; otherwise the
+configured value applies, then Swiss Auto/OS fallback. The concrete resolved Auto value is derived and is
+not configuration or persisted preference state. Browsers persist the two
+orthogonal preferences under `okf-theme-family` (`swiss` | `technical`) and
+`okf-theme-mode` (`auto` | `light` | `dark`); the retired `okf-theme` key is
+migrated once and afterwards kept only as a write-only compatibility mirror of
+explicit concrete choices (removed while Auto). One shared client asset
+(`theme.js`) owns this state in every viewer output and announces each actual
+resolved change as a single `okf-loom:themeChanged` event.
 
 | Target | Command | Use |
 |---|---|---|

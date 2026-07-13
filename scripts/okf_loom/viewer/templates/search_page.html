@@ -12,6 +12,9 @@
                        (P1-10: lets wiki.js detect static mode on the search
                        page so the static-search-note shows correctly)
   __WIKI_CSS_LINK__  → <link rel="stylesheet" href="...wiki.css">
+  __THEME_JS_LINK__  → <script src="...theme.js" defer></script>
+                       (canonical theme state; MUST precede the other
+                        viewer scripts — they consume window.OKFLoomTheme)
   __WIKI_JS_LINK__   → <script src="...wiki.js" defer></script>
   __RENDERERS_JS_LINK__ → <script src="...renderers.js" defer></script>
                        (progressive renderers + markdown UX enhancers
@@ -29,6 +32,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>__HEAD_TITLE__</title>
 __WIKI_CSS_LINK__
+__THEME_JS_LINK__
 </head>
 <body class="okf-viewer okf-viewer--search" __DATA_ATTRS__>
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>

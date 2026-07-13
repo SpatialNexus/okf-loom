@@ -13,6 +13,9 @@
       __STATIC_PREFIX__    → URL prefix for /__static/ assets
       __WIKI_CSS_LINK__    → <link rel="stylesheet" href="...wiki.css">
       __GRAPH_CSS_LINK__   → <link rel="stylesheet" href="...graph.css">
+      __THEME_JS_LINK__    → <script src="...theme.js" defer></script>
+                             (canonical theme state; MUST precede graph.js,
+                              which consumes window.OKFLoomTheme)
       __GRAPH_JS_SRC__     → <script src="...graph.js" defer></script>
       __CDN_SCRIPTS__      → Cytoscape.js CDN tag (or empty if config.cdn=false)
       __INITIAL_THEME__    → "technical-light" | "technical-dark" | "swiss-light" | "swiss-dark"
@@ -28,6 +31,7 @@
 <title>__HEAD_TITLE__</title>
 __WIKI_CSS_LINK__
 __GRAPH_CSS_LINK__
+__THEME_JS_LINK__
 __CDN_SCRIPTS__
 </head>
 <body class="okf-viewer okf-viewer--graph" __DATA_ATTRS__>

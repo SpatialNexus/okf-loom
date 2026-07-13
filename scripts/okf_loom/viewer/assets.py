@@ -513,7 +513,12 @@ def resolve_palette(bundle: Bundle) -> dict[str, str]:
 _DEFAULT_CONFIG: dict[str, Any] = {
     "name": None,
     "default_layout": "cose",
-    "theme": "technical-light",
+    # No configured theme by default: only an AUTHOR-set value may act as
+    # the "configured preference" in the resolution contract (saved user
+    # preference > configured preference > Swiss Auto/OS fallback). A
+    # concrete built-in default here would be indistinguishable from real
+    # configuration downstream and would override the Swiss-first fallback.
+    "theme": None,
     "cdn": True,
 }
 
@@ -544,6 +549,11 @@ def _viewer_config_value(
             raise ViewerConfigError(f"{field} must be a boolean")
         return value
     if key in {"default_layout", "theme"}:
+        if key == "theme" and value is None:
+            # Explicit null is accepted as "unconfigured", identical to
+            # omitting the key: the configured slot stays empty and the
+            # Swiss Auto/OS fallback governs (parity with the None default).
+            return None
         if not isinstance(value, str):
             raise ViewerConfigError(f"{field} must be a string")
         if not value.strip():
@@ -573,11 +583,14 @@ def load_config(bundle: Bundle) -> dict[str, Any]:
         default_layout (str): one of cose, concentric, breadthfirst, circle,
             grid. Used as the initial Cytoscape layout in the single-file and
             full-page graph views.
-        theme (str): one of "technical-light", "technical-dark",
-            "swiss-light", "swiss-dark" —
-            initial theme for the single-file viewer. Page-served views
-            honour ``localStorage['okf-theme']`` if set; otherwise this
-            value.
+        theme (str|None): one of "technical-light", "technical-dark",
+            "swiss-light", "swiss-dark"; None/null (the default) means
+            unconfigured —
+            configured initial theme for every viewer output. A saved user
+            preference (``localStorage['okf-theme-family']`` /
+            ``['okf-theme-mode']``, owned by viewer/static/theme.js, which
+            also migrates the retired ``okf-theme`` key once) overrides it;
+            otherwise this value applies, then Swiss Auto/OS fallback.
         cdn (bool): if False, the single-file / graph templates omit the
             CDN ``<script>`` tag for Cytoscape.js. The graph view will then
             degrade (no rendering) but the page still loads — useful for

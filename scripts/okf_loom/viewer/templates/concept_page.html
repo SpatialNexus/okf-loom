@@ -18,6 +18,9 @@
                          neighbour links (P1-9). Only consumed by wiki.js
                          in static mode; empty for serve/spa.
   __WIKI_CSS_LINK__    → <link rel="stylesheet" href="...wiki.css">
+  __THEME_JS_LINK__    → <script src="...theme.js" defer></script>
+                         (canonical theme state; MUST precede the other
+                          viewer scripts — they consume window.OKFLoomTheme)
   __WIKI_JS_LINK__     → <script src="...wiki.js" defer></script>
        __CONCEPT_ID__       → concept id string (escaped; kept for compatibility
                               references; the visible breadcrumb is
@@ -46,6 +49,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>__HEAD_TITLE__</title>
 __WIKI_CSS_LINK__
+__THEME_JS_LINK__
 </head>
 <body class="okf-viewer okf-viewer--page" __DATA_ATTRS__>
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>

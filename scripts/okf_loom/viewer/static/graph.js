@@ -21,18 +21,11 @@
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "okf-theme";
-
-  // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
-  // wiki.js / studio.js and render.py:_theme_button_html — this file must
-  // stand alone in the single-file viewer, which has no wiki.js.
-  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
-  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
-  // Map a returning user's retired theme choice to the nearest new theme.
-  var LEGACY_THEMES = {
-    light: "technical-light", dark: "technical-dark",
-    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
-  };
+  // Theme preference/resolution state is owned by theme.js
+  // (window.OKFLoomTheme), inlined/loaded before this file in both graph
+  // contexts (full-page view and single-file viewer). This file only READS
+  // the resolved data-theme for its canvas palette and re-syncs on the
+  // okf-loom:themeChanged event.
 
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
@@ -102,8 +95,6 @@
     // viewers and older embedded pages).
   var MODE = (document.body && document.body.getAttribute("data-okf-mode")) || "serve";
 
-  // ---- Theme (kept here so single-file viewers without wiki.js still work)
-  var themeBtn = document.getElementById("okf-theme");
   var REDUCED_MOTION = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -223,16 +214,6 @@
     }
     // Fallback for any custom layout: hand back the common options.
     return common;
-  }
-
-  var onThemeApplied = null;   // registered by init() → syncLabelColour (canvas re-sync)
-  function applyTheme(t, persist) {
-    if (THEMES.indexOf(t) < 0) t = "swiss-light";
-    document.documentElement.setAttribute("data-theme", t);
-    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
-    // (Round 2) The trigger is the Appearance popover ("Aa ▾") — no glyph to
-    // sync. Any theme change recolours the canvas through onThemeApplied.
-    if (onThemeApplied) onThemeApplied();
   }
 
   // ---- Luminance-aware chip foreground (P0-4 / P2-23) ------------------
@@ -355,108 +336,6 @@
     function lin(v) { return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   }
-  // Swiss-first OS resolution — IDENTICAL to wiki.js resolveAuto, so the graph /
-  // single-file viewer resolves the SAME theme as the reading pages (no legacy
-  // "light"/"dark" names, no INITIAL_THEME divergence). Consistency fix.
-  function resolveAutoTheme() {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return dark ? "swiss-dark" : "swiss-light";
-  }
-  // Honour a saved preference (migrating a retired name); else follow OS within
-  // the Swiss family — same logic as wiki.js currentTheme/resolveAuto boot.
-  try {
-    var saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];
-    if (saved && THEMES.indexOf(saved) >= 0) applyTheme(saved);
-    else applyTheme(resolveAutoTheme(), false);
-  } catch (e) { applyTheme("swiss-light"); }
-  // ---- Appearance menu (Round 2 §5.3) --------------------------------
-  // Same popover as wiki.js, wired here for the graph + single-file viewers
-  // (graph.js is inlined into single_file). Reuses graph's applyTheme (which
-  // drives the canvas re-sync via onThemeApplied). contrast/border apply
-  // post-paint and do NOT reach the Cytoscape canvas (documented P2 limit).
-  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
-  var apMenu = document.getElementById("okf-appearance-menu");
-  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
-
-  function applyModifier(kind, val, persist) {
-    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
-    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
-    var def = kind === "contrast" ? "high" : "on";
-    if (val && val !== def) document.documentElement.setAttribute(attr, val);
-    else document.documentElement.removeAttribute(attr);
-    if (persist !== false) {
-      try {
-        if (val && val !== def) localStorage.setItem(key, val);
-        else localStorage.removeItem(key);
-      } catch (e) {}
-    }
-  }
-  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
-  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
-
-  function apFamily() {
-    return (document.documentElement.getAttribute("data-theme") || "swiss-light")
-      .indexOf("technical") === 0 ? "technical" : "swiss";
-  }
-  function apMode() {
-    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
-    if (!s || THEMES.indexOf(s) < 0) return "auto";
-    return s.indexOf("dark") >= 0 ? "dark" : "light";
-  }
-  function apAutoFamily(fam) {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return fam + (dark ? "-dark" : "-light");
-  }
-  function apSetFamily(fam) {
-    if (apMode() === "auto") applyTheme(apAutoFamily(fam), false);
-    else applyTheme(fam + "-" + apMode());
-  }
-  function apSetMode(mode) {
-    if (mode === "auto") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-      applyTheme(apAutoFamily(apFamily()), false);
-    } else applyTheme(apFamily() + "-" + mode);
-  }
-  function apReflect() {
-    if (!apMenu) return;
-    var st = {
-      family: apFamily(), mode: apMode(),
-      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
-      border: document.documentElement.getAttribute("data-okf-border") || "on",
-    };
-    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
-    for (i = 0; i < opts.length; i++) {
-      o = opts[i];
-      o.setAttribute("aria-checked",
-        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
-    }
-  }
-  function apOpen() { if (apMenu) { apMenu.hidden = false; if (themeBtn) themeBtn.setAttribute("aria-expanded", "true"); apReflect(); } }
-  function apClose() { if (apMenu) { apMenu.hidden = true; if (themeBtn) themeBtn.setAttribute("aria-expanded", "false"); } }
-
-  if (themeBtn) themeBtn.addEventListener("click", function (e) {
-    e.stopPropagation();
-    if (apMenu && apMenu.hidden) apOpen(); else apClose();
-  });
-  if (apMenu) apMenu.addEventListener("click", function (e) {
-    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
-    if (!opt) return;
-    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
-    if (k === "family") apSetFamily(v);
-    else if (k === "mode") apSetMode(v);
-    else applyModifier(k, v);
-    apReflect();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && apMenu && !apMenu.hidden) { apClose(); if (themeBtn) themeBtn.focus(); }
-  });
-  document.addEventListener("click", function (e) {
-    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) apClose();
-  });
-  apReflect();
-
   // ---- Bundle acquisition ------------------------------------------------
   function acquireBundle() {
     if (window.BUNDLE) return Promise.resolve(window.BUNDLE);
@@ -1268,28 +1147,11 @@
       syncBridgeColour();
     }
     syncLabelColour();
-    // (Round 2) Any applyTheme() recolours the canvas via this hook — so a
-    // theme change from the Appearance menu (or OS) re-syncs, even though the
-    // trigger click now opens the popover instead of cycling.
-    onThemeApplied = syncLabelColour;
-    // P3-11: keep Cytoscape label colours in sync with OS colour-scheme.
-    if (window.matchMedia) {
-      var colourSchemeMq = window.matchMedia("(prefers-color-scheme: dark)");
-      var colourSchemeHandler = function (e) {
-        // Only follow OS pref when the user has not explicitly chosen.
-        try {
-          var saved = localStorage.getItem(STORAGE_KEY);
-          if (saved && THEMES.indexOf(saved) >= 0) return;
-        } catch (err) {}
-        applyTheme(resolveAutoTheme());
-        syncLabelColour();
-      };
-      if (colourSchemeMq.addEventListener) {
-        colourSchemeMq.addEventListener("change", colourSchemeHandler);
-      } else if (colourSchemeMq.addListener) {
-        colourSchemeMq.addListener(colourSchemeHandler);
-      }
-    }
+    // Every ACTUAL resolved-theme change (Appearance menu, studio palette,
+    // or an OS scheme change while Auto — all resolved by theme.js, which
+    // never persists the Auto result, so consecutive OS flips keep landing
+    // here) recolours the canvas from the new data-theme.
+    window.addEventListener("okf-loom:themeChanged", syncLabelColour);
 
     // Legend overlay. Rebuilt by updateLegend() so it reflects the
     // active "Colour by" mode (type palette, per-group colours, or an

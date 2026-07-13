@@ -1,14 +1,18 @@
 /* OKF wiki viewer - client-side enhancements for the served/built pages.
  *
  * Three concerns:
- *   1. Theme cycle button — four Editorial-Workbench themes
- *      (technical/swiss × light/dark; persist to localStorage['okf-theme']).
- *   2. Search-as-you-type on the topbar search box (debounced; hits /__search
+ *   1. Search-as-you-type on the topbar search box (debounced; hits /__search
  *      and renders results inline OR navigates on Enter). Disabled in static
  *      builds (no /__search backend) - a notice replaces live results (P2-65).
- *   3. Hover/focus popover preview for internal links: fetches /__raw/<id> on
+ *   2. Hover/focus popover preview for internal links: fetches /__raw/<id> on
  *      hover OR keyboard focus, shows title + description + first lines.
  *      role="tooltip" + aria-describedby linkage (P2-70).
+ *   3. Local-graph pill nav, heading anchors, and misc page enhancements.
+ *
+ * Theme/appearance state (family, mode, contrast, border, the Appearance
+ * popover, and the okf-loom:themeChanged event) is owned entirely by
+ * theme.js (window.OKFLoomTheme), loaded before this file in every context.
+ * This file no longer reads or writes theme storage or data-theme.
  *
  * Loaded via <script defer>. No CDN deps. Degrades gracefully if a route
  * is missing (e.g. on a static site without /__search).
@@ -16,149 +20,8 @@
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "okf-theme";
-  var themeBtn = document.getElementById("okf-theme");
   var REDUCED_MOTION = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
-  // graph.js / studio.js and render.py:_theme_button_html — each context
-  // loads without the others (single-file viewer, static build, studio).
-  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
-  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
-  // Map a returning user's retired theme choice to the nearest new theme.
-  var LEGACY_THEMES = {
-    light: "technical-light", dark: "technical-dark",
-    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
-  };
-  // Resolve "auto" (or an unknown value) to a real theme by OS colour scheme.
-  function resolveAuto() {
-    var dark = window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return dark ? "swiss-dark" : "swiss-light";
-  }
-
-  function currentTheme() {
-    return document.documentElement.getAttribute("data-theme") || "swiss-light";
-  }
-  function applyTheme(t, persist) {
-    if (THEMES.indexOf(t) < 0) t = "swiss-light";
-    document.documentElement.setAttribute("data-theme", t);
-    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
-    // (Round 2) The trigger is the Appearance popover ("Aa ▾"), not a glyph —
-    // nothing to sync here; the popover reflects state via reflectAppearance().
-  }
-  // Honour saved preference on load (overrides server-side default).
-  try {
-    var saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];  // migrate
-    if (saved && THEMES.indexOf(saved) >= 0) {
-      applyTheme(saved);
-    } else {
-      // No saved preference: follow the OS preference WITHOUT persisting, so
-      // an unpinned user keeps auto-following if they change OS scheme later.
-      applyTheme(resolveAuto(), false);
-    }
-  } catch (e) {}
-  // ---- Appearance menu (Round 2 §5.3) --------------------------------
-  // Consolidates family/mode/contrast/border. Wiring lives here because the
-  // theme setter applyTheme is IIFE-local. contrast/border are applied
-  // POST-paint from localStorage (no pre-paint script exists; inline scripts
-  // are CSP-blocked on 4/5 templates) — same timing as the theme read above.
-  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
-  var apMenu = document.getElementById("okf-appearance-menu");
-  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
-
-  function applyModifier(kind, val, persist) {
-    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
-    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
-    var def = kind === "contrast" ? "high" : "on";   // default = attribute absent
-    if (val && val !== def) document.documentElement.setAttribute(attr, val);
-    else document.documentElement.removeAttribute(attr);
-    if (persist !== false) {
-      try {
-        if (val && val !== def) localStorage.setItem(key, val);
-        else localStorage.removeItem(key);
-      } catch (e) {}
-    }
-  }
-  // Apply persisted modifiers now (post-paint; mirrors the theme read above).
-  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
-  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
-
-  function currentFamily() {
-    return currentTheme().indexOf("technical") === 0 ? "technical" : "swiss";
-  }
-  function currentMode() {
-    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
-    if (!s || THEMES.indexOf(s) < 0) return "auto";
-    return s.indexOf("dark") >= 0 ? "dark" : "light";
-  }
-  function resolveAutoFamily(fam) {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return fam + (dark ? "-dark" : "-light");
-  }
-  function setFamily(fam) {
-    if (currentMode() === "auto") applyTheme(resolveAutoFamily(fam), false); // stay auto, respect family
-    else applyTheme(fam + "-" + currentMode());
-  }
-  function setMode(mode) {
-    if (mode === "auto") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-      applyTheme(resolveAutoFamily(currentFamily()), false);
-    } else applyTheme(currentFamily() + "-" + mode);
-  }
-
-  function reflectAppearance() {
-    if (!apMenu) return;
-    var st = {
-      family: currentFamily(), mode: currentMode(),
-      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
-      border: document.documentElement.getAttribute("data-okf-border") || "on",
-    };
-    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
-    for (i = 0; i < opts.length; i++) {
-      o = opts[i];
-      o.setAttribute("aria-checked",
-        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
-    }
-  }
-  function openAppearance() {
-    if (!apMenu) return;
-    apMenu.hidden = false;
-    if (themeBtn) themeBtn.setAttribute("aria-expanded", "true");
-    reflectAppearance();
-  }
-  function closeAppearance() {
-    if (!apMenu) return;
-    apMenu.hidden = true;
-    if (themeBtn) themeBtn.setAttribute("aria-expanded", "false");
-  }
-
-  if (themeBtn) themeBtn.addEventListener("click", function (e) {
-    e.stopPropagation();
-    if (apMenu && apMenu.hidden) openAppearance(); else closeAppearance();
-  });
-  if (apMenu) apMenu.addEventListener("click", function (e) {
-    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
-    if (!opt) return;
-    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
-    if (k === "family") setFamily(v);
-    else if (k === "mode") setMode(v);
-    else applyModifier(k, v);            // contrast | border
-    reflectAppearance();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && apMenu && !apMenu.hidden) {
-      closeAppearance();
-      if (themeBtn) themeBtn.focus();
-    }
-  });
-  document.addEventListener("click", function (e) {
-    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) closeAppearance();
-  });
-  reflectAppearance();
 
   // ---- Static-mode detection (P2-65) -----------------------------------
   // The server emits data-okf-enhance="1" for spa/serve and "0" for static
