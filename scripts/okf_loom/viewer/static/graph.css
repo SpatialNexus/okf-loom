@@ -583,32 +583,37 @@
 .okf-graph-legend__item--off { opacity: 0.45; }
 .okf-graph-legend__item--off span:last-child { text-decoration: line-through; }
 
-@media (max-width: 900px) {
-  .okf-graph-legend { display: none; }
-  .okf-node-index { width: min(220px, 70vw); top: 56px; }
-  /* Mobile-open feedback loop: stack the panes in normal
-   * flow so the page scrolls, give the graph a tall fixed viewport (76vh), and
-   * let the detail panel flow at natural height below it. The open drawer is
-   * capped at 36vh, so the graph keeps a ≈39vh readable strip uncovered — well
-   * above the ~35vh the reviewer requires — instead of a thumbnail. */
-  .okf-layout { display: block; min-height: auto; }
-  .okf-layout > .okf-graph { flex: 0 0 auto; height: 76vh; min-height: 360px; }
-  .okf-layout > .okf-detail { flex: 0 0 auto; }
-  /* The signal bar is in-flow at the top of the detail pane (which
-   * stacks below the canvas on mobile) — no overlay geometry needed; just
-   * relax the sticky inset to the pane's mobile padding. */
-  .okf-signal--bar { top: 0; margin: 0 0 var(--okf-space-3); padding: var(--okf-space-2) var(--okf-space-3); }
-  .okf-signal__body { max-height: 29vh; -webkit-overflow-scrolling: touch; }
-  /* Stack the overlays so the collapsed Signal summary, node index, and LOD
-   * pill never sit on top of each other. */
-  .okf-graph-lod-pill { font-size: var(--okf-text-xs); padding: 4px 10px; top: 102px; }
-  /* Topbar controls wrap instead of truncating ("Force n…") (reviewer #10).
-   * Scoped to graph contexts since graph.css only loads on the graph page and
-   * the single-file viewer. */
-  .okf-topbar__controls { flex-wrap: wrap; row-gap: var(--okf-space-2); }
-  .okf-topbar__controls #okf-search { flex: 1 1 100%; }
-  .okf-topbar__controls select { flex: 1 1 auto; min-width: 8.5rem; }
-}
+  @media (max-width: 900px) {
+    .okf-graph-legend { display: none; }
+    .okf-node-index { width: min(220px, 70vw); top: 56px; }
+    /* Mobile-open feedback loop: stack the panes in normal
+     * flow so the page scrolls, give the graph a tall fixed viewport (76vh), and
+     * let the detail panel flow at natural height below it. The open drawer is
+     * capped at 36vh, so the graph keeps a ≈39vh readable strip uncovered — well
+     * above the ~35vh the reviewer requires — instead of a thumbnail. */
+    .okf-layout { display: block; min-height: auto; }
+    .okf-layout > .okf-graph { flex: 0 0 auto; height: 76vh; min-height: 360px; }
+    .okf-layout > .okf-detail { flex: 0 0 auto; }
+    /* The signal bar is in-flow at the top of the detail pane (which
+     * stacks below the canvas on mobile) — no overlay geometry needed; just
+     * relax the sticky inset to the pane's mobile padding. */
+    .okf-signal--bar { top: 0; margin: 0 0 var(--okf-space-3); padding: var(--okf-space-2) var(--okf-space-3); }
+    .okf-signal__body { max-height: 29vh; -webkit-overflow-scrolling: touch; }
+    /* Stack the overlays so the collapsed Signal summary, node index, and LOD
+     * pill never sit on top of each other. */
+    .okf-graph-lod-pill { font-size: var(--okf-text-xs); padding: 4px 10px; top: 102px; }
+    /* Editorial Workbench hardening: graph topbar controls must NOT wrap
+     * (wrapping pushed controls outside the fixed single-row bar height).
+     * Instead they scroll horizontally inside the controls scroller — same
+     * pattern as the wiki topbar. Every child has min-width:0 so no single
+     * control forces document-level horizontal overflow. */
+    .okf-topbar__controls {
+      flex-wrap: nowrap; overflow-x: auto; row-gap: 0;
+    }
+    .okf-topbar__controls > * { min-width: 0; flex-shrink: 0; }
+    .okf-topbar__controls #okf-search { flex: 1 1 100px; min-width: 90px; }
+    .okf-topbar__controls select { flex: 0 1 auto; min-width: 7rem; }
+  }
 
 @media (prefers-reduced-motion: reduce) {
   .okf-signal__advanced > summary::after { transition: none !important; }

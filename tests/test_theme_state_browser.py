@@ -847,10 +847,18 @@ def test_modifiers_persist_navigate_reload_and_reset(server_url, page):
     page.reload(wait_until="load")
     assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") == "soft"
 
-    # Reset to defaults removes both attribute and key.
+    # Reset to defaults removes both attribute and key. The menu is now
+    # position:fixed (escaping topbar overflow clipping); dispatch clicks
+    # directly because Playwright's scrollIntoView has a known interaction
+    # issue with fixed-position containers.
     page.click("#okf-theme")
-    page.click('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="high"]')
-    page.click('.okf-appearance__opt[data-okf-set="border"][data-okf-val="on"]')
+    page.wait_for_selector("#okf-appearance-menu:not([hidden])")
+    page.eval_on_selector(
+        '.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="high"]',
+        "el => el.click()")
+    page.eval_on_selector(
+        '.okf-appearance__opt[data-okf-set="border"][data-okf-val="on"]',
+        "el => el.click()")
     assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") is None
     assert page.evaluate("document.documentElement.getAttribute('data-okf-border')") is None
     assert _stored(page, "okf-contrast") is None

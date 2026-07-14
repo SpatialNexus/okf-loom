@@ -655,7 +655,7 @@ def test_appearance_menu_replaces_theme_cycle_button(tiny_good_bundle: _Path) ->
     id=okf-theme; the search form + Graph link (P1-3 contract) survive."""
     html = _render_concept_html(tiny_good_bundle, "tables/users")  # same as test_p1_3
     assert 'id="okf-theme"' in html
-    assert 'aria-haspopup="true"' in html
+    assert 'aria-haspopup="dialog"' in html
     assert 'class="okf-appearance__menu"' in html
     for setk in ("family", "mode", "contrast", "border"):
         assert f'data-okf-set="{setk}"' in html, f"missing {setk} radiogroup"

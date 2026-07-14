@@ -593,9 +593,12 @@ def _theme_button_html(initial_theme: str) -> str:
         family, mode = "swiss", "auto"          # auto resolves within Swiss (see JS)
 
     def _opt(setk: str, val: str, label: str, checked: bool) -> str:
+        # tabindex="-1": roving-tabindex pattern managed by theme.js
+        # (sets tabindex="0" on the checked option per group at boot and on
+        # selection change). All peers start unfocusable via Tab.
         return (
             '<button type="button" role="radio" class="okf-appearance__opt" '
-            f'data-okf-set="{setk}" data-okf-val="{val}" '
+            f'tabindex="-1" data-okf-set="{setk}" data-okf-val="{val}" '
             f'aria-checked="{"true" if checked else "false"}">{label}</button>'
         )
 
@@ -619,7 +622,7 @@ def _theme_button_html(initial_theme: str) -> str:
     return (
         '<div class="okf-appearance">'
         '<button id="okf-theme" type="button" class="okf-appearance__trigger" '
-        'aria-haspopup="true" aria-expanded="false" '
+        'aria-haspopup="dialog" aria-expanded="false" '
         'aria-controls="okf-appearance-menu" aria-label="Appearance settings" '
         'title="Appearance">Aa <span aria-hidden="true">\u25be</span></button>'
         '<div class="okf-appearance__menu" id="okf-appearance-menu" role="dialog" '

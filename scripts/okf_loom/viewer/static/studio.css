@@ -54,25 +54,24 @@
  * override here anymore. Ambient state (presence/◆N concepts/●Live) clusters
  * right, mono + quiet, separated from the actions by a thin divider. Sticky
  * to the viewport bottom so it stays visible as the reading column scrolls. */
-.okf-studio-bar--status {
-  position: sticky;
-  bottom: 0;
-  z-index: 9;
-  min-height: var(--okf-status-h);  /* now 40px (bumped in wiki.css :root): a real
-                                       toolbar, and the SAME token .okf-rail/.okf-panel
-                                       use for their bottom clearance, so they stay flush */
-  padding: 0 var(--okf-space-4);
-  gap: var(--okf-space-3);
-  background: var(--okf-bg-inset);  /* recover the original bar feel */
-  border-top: var(--okf-border-w) solid var(--okf-border);
-  border-bottom: none;
-  /* The bar is now 3 children (left group / divider / right group). The base
-   * .okf-studio-bar rule's `justify-content: space-between` would float the
-   * divider in the dead centre with the groups pinned to the edges — pack
-   * left instead, then push the right group out with its own auto margin
-   * (below) so actions+divider hug together on the left. */
-  justify-content: flex-start;
-}
+  .okf-studio-bar--status {
+    position: sticky;
+    bottom: 0;
+    z-index: 9;
+    min-height: var(--okf-status-h);
+    padding: 0 var(--okf-space-4);
+    gap: var(--okf-space-3);
+    background: var(--okf-bg-inset);
+    border-top: var(--okf-border-w) solid var(--okf-border);
+    border-bottom: none;
+    justify-content: flex-start;
+    /* Prevent ambient chips (presence/conn/statseg, all white-space:nowrap)
+     * from causing document-level horizontal overflow at narrow desktop
+     * widths (901-1024px). The bar clips internally; children keep
+     * min-width:0 so flexbox can shrink them. */
+    overflow: hidden;
+    max-width: 100vw;
+  }
 /* Round 2: push the divider (and the ambient group after it) to the right so
  * the divider sits BESIDE the ambient readouts, not hugging the actions. */
 .okf-studio-bar--status .okf-studio-bar__divider {
@@ -1538,36 +1537,53 @@ html.okf-studio-booted .okf-studio-fallback-banner { display: none; }
 .okf-changes__cap-note button { font: inherit; color: var(--okf-accent); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
 
 /* ---- 10. Responsive + reduced motion --------------------------------- */
-@media (max-width: 900px) {
-  /* iter2 CRI2-001: studio bar is non-sticky on every viewport (see §1).
-   * On small screens it still wraps so all controls stay reachable, but it
-   * scrolls with the page rather than stacking sticky under the topbar. */
-  .okf-studio-bar {
-    position: static;
-    flex-wrap: wrap;
-    padding: var(--okf-space-2) var(--okf-space-3);
-    gap: var(--okf-space-2);
+  @media (max-width: 900px) {
+    /* iter2 CRI2-001: studio bar is non-sticky on every viewport (see §1).
+     * Editorial Workbench hardening: the status footer becomes an in-flow
+     * TWO-ZONE layout — action group wraps full-width on the first row,
+     * ambient group wraps on the second row, and the decorative divider is
+     * hidden so the zones read as distinct clusters. Every child has
+     * min-width:0 so no single button can force document-level overflow. */
+    .okf-studio-bar {
+      position: static;
+      flex-wrap: wrap;
+      padding: var(--okf-space-2) var(--okf-space-3);
+      gap: var(--okf-space-2);
+    }
+    .okf-studio-bar--status {
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+    }
+    .okf-studio-bar--status .okf-studio-bar__group {
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .okf-studio-bar--status .okf-studio-bar__group > * { min-width: 0; }
+    .okf-studio-bar--status .okf-studio-bar__divider { display: none; }
+    .okf-presence { max-width: 100%; }
+    .okf-view[data-okf-view="split"] {
+      /* iter2 G8 mobile fallback: stack vertically (Bundle B behaviour). The
+       * draggable divider + proportional scroll are desktop niceties; on a
+       * narrow screen the two panes flow in reading order at natural height. */
+      grid-template-columns: 1fr;
+      gap: var(--okf-space-3);
+    }
+    .okf-view[data-okf-view="split"] > .okf-page__body,
+    .okf-view[data-okf-view="split"] > .okf-source {
+      max-height: none;
+      min-height: 0;
+      overflow-y: visible;
+      padding-right: 0;
+      padding-left: 0;
+    }
+    .okf-split__divider { display: none; }
+    .okf-panel {
+      width: 100vw; top: 0; right: 0; bottom: 0;
+      z-index: 71; max-height: 100dvh;
+    }
+    .okf-comment-rail { display: none; }
   }
-  .okf-presence { max-width: 100%; }
-  .okf-view[data-okf-view="split"] {
-    /* iter2 G8 mobile fallback: stack vertically (Bundle B behaviour). The
-     * draggable divider + proportional scroll are desktop niceties; on a
-     * narrow screen the two panes flow in reading order at natural height. */
-    grid-template-columns: 1fr;
-    gap: var(--okf-space-3);
-  }
-  .okf-view[data-okf-view="split"] > .okf-page__body,
-  .okf-view[data-okf-view="split"] > .okf-source {
-    max-height: none;
-    min-height: 0;
-    overflow-y: visible;
-    padding-right: 0;
-    padding-left: 0;
-  }
-  .okf-split__divider { display: none; }
-  .okf-panel { width: 100vw; }
-  .okf-comment-rail { display: none; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .okf-pulse { animation: none !important; }

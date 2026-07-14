@@ -687,30 +687,41 @@ hr { border: 0; border-top: 1px solid var(--okf-border); margin: var(--okf-space
  * so the input + keycap are flex siblings in the controls row). */
 .okf-search-kbd { margin-left: calc(-1 * var(--okf-space-2)); align-self: center; }
 
-/* ---- Appearance menu (Round 2 §5.3) ---------------------------------- */
-.okf-appearance { position: relative; display: inline-flex; }
-.okf-appearance__trigger {
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 4px 10px;
-  font: inherit; font-size: var(--okf-text-sm); line-height: 1.2;
-  border: var(--okf-border-w) solid var(--okf-border-strong);
-  border-radius: var(--okf-radius-sm);
-  background: var(--okf-bg-elev); color: var(--okf-fg);
-  cursor: pointer;
-}
-.okf-appearance__trigger:hover { border-color: var(--okf-accent); color: var(--okf-accent); }
-.okf-appearance__trigger:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
-.okf-appearance__menu {
-  position: absolute; top: calc(100% + var(--okf-space-1)); right: 0;
-  z-index: 30;                       /* above topbar chrome + content */
-  display: flex; flex-direction: column; gap: var(--okf-space-3);
-  min-width: 220px;
-  padding: var(--okf-space-3) var(--okf-space-4);
-  background: var(--okf-bg-elev);
-  border: var(--okf-border-w) solid var(--okf-border-strong);
-  border-radius: var(--okf-radius);
-  box-shadow: var(--okf-pop-shadow);
-}
+  /* ---- Appearance menu (Round 2 §5.3) ---------------------------------- */
+  .okf-appearance { position: relative; display: inline-flex; }
+  .okf-appearance__trigger {
+    display: inline-flex; align-items: center; gap: 2px;
+    padding: 4px 10px;
+    font: inherit; font-size: var(--okf-text-sm); line-height: 1.2;
+    border: var(--okf-border-w) solid var(--okf-border-strong);
+    border-radius: var(--okf-radius-sm);
+    background: var(--okf-bg-elev); color: var(--okf-fg);
+    cursor: pointer;
+    flex-shrink: 0;                    /* stay pinned in the controls scroller */
+  }
+  .okf-appearance__trigger:hover { border-color: var(--okf-accent); color: var(--okf-accent); }
+  .okf-appearance__trigger:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
+  /* position:fixed escapes ALL ancestor overflow clipping (the topbar controls
+   * scroller at <=900px). top/left are set by theme.js positionMenu() from the
+   * trigger's bounding rect; the defaults below are only a paint-time fallback
+   * before the first positioning call. */
+  .okf-appearance__menu {
+    position: fixed;
+    left: 0; top: 0;
+    z-index: 100;                      /* above all chrome + content */
+    display: flex; flex-direction: column; gap: var(--okf-space-3);
+    /* CSS fallback width (JS positionMenu also sets this — this ensures
+     * the menu has a bounded width before JS runs or if JS fails). */
+    width: min(22rem, 100vw - 16px);
+    /* max-height/overflow-y set dynamically by theme.js positionMenu() so
+     * the menu grows naturally when content fits and only scrolls when it
+     * would overflow the viewport. */
+    padding: var(--okf-space-3) var(--okf-space-4);
+    background: var(--okf-bg-elev);
+    border: var(--okf-border-w) solid var(--okf-border-strong);
+    border-radius: var(--okf-radius);
+    box-shadow: var(--okf-pop-shadow);
+  }
 .okf-appearance__menu[hidden] { display: none; }
 .okf-appearance__group {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--okf-space-1);
@@ -945,7 +956,7 @@ details.okf-frontmatter td code {
  * article stop halfway across the header on wide screens. Long-form
  * readability is preserved by capping the page shell itself
  * (--okf-page-maxw) rather than the body. */
-.okf-page__body { max-width: none; }
+.okf-page__body { max-width: none; overflow-x: auto; }
 .okf-prose h2 { font-family: var(--okf-font-display); letter-spacing: -0.01em; }
 /* Heading deep-link anchors (phase 2): invisible until heading hover. */
 .okf-heading-anchor {

@@ -3141,8 +3141,8 @@
         }
       }
       if (!paletteState.open) return;
-      if (e.key === "Escape") { e.preventDefault(); closePalette(); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); }
+      // Escape is handled by the shared overlay stack — no separate handler.
+      if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); movePalette(-1); }
       else if (e.key === "Enter") { e.preventDefault(); activatePalette(); }
       // iter1 CRI-016: trap focus inside the modal so Tab/Shift+Tab can't
@@ -3153,14 +3153,35 @@
       }
     });
   }
-  // iter1 CRI-016: focus trap shared by the palette and the slide-over panel.
-  // Returns the focusable elements of a container in DOM order, skipping
-  // hidden/disabled/negative-tabindex nodes.
+  // iter1 CRI-016: focus trap shared by the palette, panel, and conflict
+  // modal. Returns the focusable elements of a container in DOM order,
+  // skipping hidden/disabled/negative-tabindex/inert-ancestor nodes.
   function focusableIn(root) {
     if (!root) return [];
-    const sel = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
+    const sel = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex]:not([tabindex="-1"])';
     return $$(sel, root).filter((n) => {
+      if (n.getAttribute("tabindex") === "-1") return false;
       if (n.hasAttribute("hidden")) return false;
+      if (n.disabled) return false;
+      // Ancestor walk: reject if any ancestor (up to root) is hidden via the
+      // HTML hidden attribute or CSS display:none. (visibility:hidden is
+      // inherited, so the node's OWN computed style already reflects it —
+      // checked below.)
+      var parent = n.parentElement;
+      while (parent && parent !== root) {
+        if (parent.hidden) return false;
+        if (getComputedStyle(parent).display === "none") return false;
+        parent = parent.parentElement;
+      }
+      // Closed <details>: a descendant of a closed <details> is not rendered
+      // (and thus not focusable) UNLESS it is inside that <details>'s
+      // <summary> element (the summary is always visible).
+      var closedDetails = n.closest('details:not([open])');
+      if (closedDetails) {
+        var summary = closedDetails.querySelector(':scope > summary');
+        if (!summary || !summary.contains(n)) return false;
+      }
+      if (n.closest("[inert]")) return false;
       const cs = getComputedStyle(n);
       return cs.display !== "none" && cs.visibility !== "hidden" && cs.pointerEvents !== "none";
     });
@@ -3177,22 +3198,63 @@
     else next = focusables[(idx - 1 + focusables.length) % focusables.length];
     try { next.focus({ preventScroll: true }); } catch (e) {}
   }
+  // Safe focus restoration: validates the saved target is connected, visible,
+  // not inside an inert ancestor, and focusable — then uses a deterministic
+  // fallback chain: saved → mobile Studio opener → Appearance trigger →
+  // first topbar control → #okf-main. Returns true if focus landed somewhere.
+  function safeFocus(saved) {
+    // Validate saved target: connected, visible, not inert, not disabled,
+    // not negative-tabindex (unless it's a programmatic-focus container like
+    // #okf-main with tabindex=-1 which IS valid for .focus()). Then call
+    // .focus() and verify document.activeElement actually became the target.
+    function tryFocus(el) {
+      if (!el || !el.isConnected || typeof el.focus !== "function") return false;
+      if (el === document.body || el === document.documentElement) return false;
+      if (el.closest("[inert]") || el.hasAttribute("hidden")) return false;
+      if (el.disabled) return false;
+      var cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.visibility === "hidden") return false;
+      try { el.focus({ preventScroll: true }); } catch (e) { return false; }
+      return document.activeElement === el;
+    }
+    if (tryFocus(saved)) return true;
+    // Deterministic fallback chain.
+    var sels = [".okf-studio-open-btn", "#okf-theme", ".okf-topbar button", ".okf-topbar a[href]", "#okf-main"];
+    for (var i = 0; i < sels.length; i++) {
+      if (tryFocus(document.querySelector(sels[i]))) return true;
+    }
+    return false;
+  }
+  var _paletteOverlay = null;
+  var _paletteFocusTimer = null;
   function openPalette() {
     if (!paletteState.overlay) buildPalette();
+    // Cancel any pending focus timer from a previous open.
+    if (_paletteFocusTimer) { clearTimeout(_paletteFocusTimer); _paletteFocusTimer = null; }
     paletteState.open = true;
     paletteState.overlay.hidden = false;
     paletteState.input.value = "";
     refreshPaletteList("");
     paletteState._lastFocus = document.activeElement;
-    setTimeout(() => paletteState.input.focus(), 20);
+    if (!_paletteOverlay) _paletteOverlay = { close: function () { closePalette(); } };
+    if (window.OKFOverlayStack) window.OKFOverlayStack.push(_paletteOverlay);
+    // Generation guard: if close fires before the timer, the callback no-ops.
+    var gen = paletteState._gen = (paletteState._gen || 0) + 1;
+    _paletteFocusTimer = setTimeout(function () {
+      _paletteFocusTimer = null;
+      if (paletteState.open && paletteState._gen === gen) {
+        try { paletteState.input.focus(); } catch (e) {}
+      }
+    }, 20);
   }
   function closePalette() {
     if (!paletteState.overlay) return;
+    if (_paletteFocusTimer) { clearTimeout(_paletteFocusTimer); _paletteFocusTimer = null; }
     paletteState.open = false;
     paletteState.overlay.hidden = true;
-    if (paletteState._lastFocus && typeof paletteState._lastFocus.focus === "function") {
-      try { paletteState._lastFocus.focus(); } catch (e) {}
-    }
+    if (_paletteOverlay && window.OKFOverlayStack) window.OKFOverlayStack.remove(_paletteOverlay);
+    safeFocus(paletteState._lastFocus);
+    paletteState._lastFocus = null;
   }
   function togglePalette() { paletteState.open ? closePalette() : openPalette(); }
   function movePalette(delta) {
@@ -3289,29 +3351,50 @@
   const panelTitle = el("h2", { class: "okf-panel__title" });
   const panelClose = el("button", { type: "button", class: "okf-panel__close", "aria-label": "Close panel", text: "Esc" });
   panelHeader.appendChild(panelTitle); panelHeader.appendChild(panelClose);
-  // Editorial Workbench: one pop-over with tabs (Comments/Changes/Outline/
-  // Metadata) instead of separately-opened panels. Clicking a tab swaps the
-  // rendered panel; the active tab is underlined with --okf-accent.
-  const panelTabs = el("div", { class: "okf-panel__tabs", role: "tablist", "aria-label": "Panel sections" });
-  const PANEL_TABS = [["comments", "Comments"], ["changes", "Changes"], ["outline", "Outline"], ["metadata", "Metadata"]];
-  const panelTabBtns = {};
-  PANEL_TABS.forEach(function (t) {
-    const b = el("button", { type: "button", class: "okf-panel__tab", role: "tab", "aria-selected": "false", text: t[1] });
-    b.addEventListener("click", function () { openPanel(t[0]); });
-    panelTabs.appendChild(b);
-    panelTabBtns[t[0]] = b;
-  });
-  const panelBody = el("div", { class: "okf-panel__body", id: "okf-panel-body" });
+    // Editorial Workbench: one pop-over with tabs (Comments/Changes/Outline/
+    // Metadata) instead of separately-opened panels. Clicking a tab swaps the
+    // rendered panel; the active tab is underlined with --okf-accent.
+    // Roving tabindex: selected tab = 0, peers = -1. Arrows/Home/End activate.
+    const panelTabs = el("div", { class: "okf-panel__tabs", role: "tablist", "aria-label": "Panel sections" });
+    const PANEL_TABS = [["comments", "Comments"], ["changes", "Changes"], ["outline", "Outline"], ["metadata", "Metadata"]];
+    const panelTabBtns = {};
+    PANEL_TABS.forEach(function (t) {
+      const b = el("button", {
+        type: "button", class: "okf-panel__tab", role: "tab",
+        id: "okf-panel-tab--" + t[0],
+        "aria-controls": "okf-panel-body",
+        "aria-selected": "false", tabindex: "-1", text: t[1],
+      });
+      b.addEventListener("click", function () { openPanel(t[0]); });
+      panelTabs.appendChild(b);
+      panelTabBtns[t[0]] = b;
+    });
+    // Tablist keyboard: arrows wrap+activate, Home/End first/last. Tab exits
+    // naturally (roving tabindex → only one tab stop in the tablist).
+    panelTabs.addEventListener("keydown", (e) => {
+      if (!state.openPanel) return;
+      var keys = Object.keys(panelTabBtns);
+      var cur = keys.indexOf(state.openPanel);
+      if (cur < 0) return;
+      var key = e.key;
+      if (key === "ArrowRight" || key === "ArrowDown") { e.preventDefault(); openPanel(keys[(cur + 1) % keys.length]); }
+      else if (key === "ArrowLeft" || key === "ArrowUp") { e.preventDefault(); openPanel(keys[(cur - 1 + keys.length) % keys.length]); }
+      else if (key === "Home") { e.preventDefault(); openPanel(keys[0]); }
+      else if (key === "End") { e.preventDefault(); openPanel(keys[keys.length - 1]); }
+    });
+    const panelBody = el("div", { class: "okf-panel__body", id: "okf-panel-body", role: "tabpanel" });
   panelShell.appendChild(panelHeader); panelShell.appendChild(panelTabs); panelShell.appendChild(panelBody);
   document.body.appendChild(panelOverlay); document.body.appendChild(panelShell);
+  // Desktop backdrop click-away: the overlay is a genuine visible scrim on
+  // desktop (panel is 360px with real space around it). On mobile the panel
+  // covers 100vw so there is no visible backdrop — the close button (labeled
+  // "Esc") and the Escape key are the primary mobile dismissal paths. The
+  // overlay click handler stays for desktop; mobile dismissal is via the
+  // close button + overlay-stack Escape.
   panelOverlay.addEventListener("click", closePanel);
   panelClose.addEventListener("click", closePanel);
-  document.addEventListener("keydown", (e) => {
-    if (!state.openPanel) return;
-    // The overlay is non-modal: Escape dismisses it; Tab flows naturally
-    // between the panel and the reading column (no focus trap).
-    if (e.key === "Escape") { e.preventDefault(); closePanel(); }
-  });
+  // Escape is handled by the shared overlay stack (capture-phase keydown on
+  // document) — no separate document-level handler here.
   function panelBodyEl() { return panelBody; }
   // iter1 CRI-016: remember the trigger so focus is restored on close.
   let panelLastFocus = null;
@@ -3319,45 +3402,178 @@
   // closePanel reflect the active tab onto them via aria-pressed.
   var railButtons = [];
 
-  function openPanel(id, opts) {
-    opts = opts || {};
-    const p = panels[id];
-    if (!p) return;
-    state.openPanel = id;
-    panelShell.hidden = false;
-    panelOverlay.hidden = false;  // overlay: show the click-away scrim
-    panelTitle.textContent = p.label;
-    panelShell.setAttribute("aria-label", p.label);
-    // Reflect the active tab in the pop-over tab bar.
-    Object.keys(panelTabBtns).forEach(function (k) {
-      panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
-    });
-    // Reflect the open tab on the rail icons.
-    (railButtons || []).forEach(function (b) {
-      b.setAttribute("aria-pressed", b.dataset.railId === id ? "true" : "false");
-    });
-    // Save the trigger so closePanel can restore focus. Skipped on the
-    // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
-    // scroll on page load.
-    if (!opts.noFocus && !panelLastFocus) panelLastFocus = document.activeElement;
-    // Render.
-    panelBody.innerHTML = "";
-    panelBody._focusComposer = !!opts.focusComposer;
-    try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
-    if (!opts.noFocus) { try { panelShell.focus(); } catch (e) {} }
-  }
-  function closePanel() {
-    state.openPanel = null;
-    panelShell.hidden = true;
-    panelOverlay.hidden = true;
-    (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-    // iter1 CRI-016: restore focus to the button/link that opened the panel.
-    if (panelLastFocus && typeof panelLastFocus.focus === "function") {
-      try { panelLastFocus.focus({ preventScroll: true }); } catch (e) {}
+  var _panelOverlay = null;
+    function openPanel(id, opts) {
+      opts = opts || {};
+      const p = panels[id];
+      if (!p) return;
+      // Distinguish initial open (panel was hidden) from tab-switch (already
+      // visible). Tab-switches keep focus on the active tab (WAI-ARIA tabs
+      // pattern); initial opens manage focus per modal/non-modal rules.
+      const isTabSwitch = !panelShell.hidden && state.openPanel;
+      state.openPanel = id;
+      panelShell.hidden = false;
+      panelOverlay.hidden = false;  // overlay: show the click-away scrim
+      panelTitle.textContent = p.label;
+      panelShell.setAttribute("aria-label", p.label);
+      // Reflect the active tab in the pop-over tab bar (aria-selected + roving
+      // tabindex + tabpanel aria-labelledby).
+      Object.keys(panelTabBtns).forEach(function (k) {
+        var btn = panelTabBtns[k];
+        var isActive = k === id;
+        btn.setAttribute("aria-selected", isActive ? "true" : "false");
+        btn.setAttribute("tabindex", isActive ? "0" : "-1");
+      });
+      panelBody.setAttribute("aria-labelledby", "okf-panel-tab--" + id);
+      // Reflect the open tab on the rail icons.
+      (railButtons || []).forEach(function (b) {
+        b.setAttribute("aria-pressed", b.dataset.railId === id ? "true" : "false");
+      });
+      // Save the trigger so closePanel can restore focus. Skipped on the
+      // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
+      // scroll on page load.
+      if (!opts.noFocus && !panelLastFocus) panelLastFocus = document.activeElement;
+      // Register with the shared overlay stack (initial open only).
+      if (!isTabSwitch) {
+        if (!_panelOverlay) _panelOverlay = { close: function () { closePanel(); } };
+        if (window.OKFOverlayStack) window.OKFOverlayStack.push(_panelOverlay);
+      }
+      // Render.
+      panelBody.innerHTML = "";
+      panelBody._focusComposer = !!opts.focusComposer;
+      try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
+
+      if (isTabSwitch) {
+        // Tab-switch: focus the newly active tab (keyboard activation keeps
+        // focus on the tab list per the WAI-ARIA tabs pattern).
+        try { panelTabBtns[id].focus(); } catch (e) {}
+        return;
+      }
+      // Initial open: acquire mobile modal or focus panel shell on desktop.
+      if (_isMobile()) {
+        _acquireModal(opts);
+      } else {
+        if (!opts.noFocus) { try { panelShell.focus(); } catch (e) {} }
+      }
     }
-    panelLastFocus = null;
-  }
-  function togglePanel(id) { state.openPanel === id ? closePanel() : openPanel(id); }
+    function closePanel() {
+      // Release mobile modal ownership BEFORE hiding so focus restoration lands
+      // on a non-inert element.
+      if (_modalActive) _releaseModal();
+      // Unregister from the shared overlay stack.
+      if (_panelOverlay && window.OKFOverlayStack) window.OKFOverlayStack.remove(_panelOverlay);
+      state.openPanel = null;
+      panelShell.hidden = true;
+      panelOverlay.hidden = true;
+      (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+      // Safe focus restoration: validate the saved trigger or use fallback chain.
+      safeFocus(panelLastFocus);
+      panelLastFocus = null;
+    }
+    function togglePanel(id) { state.openPanel === id ? closePanel() : openPanel(id); }
+
+    // ---- Mobile (<=900px) modal ownership --------------------------------
+    // At narrow viewports the panel becomes a full-screen modal dialog:
+    // role=dialog + aria-modal=true, siblings inert, focus trapped, Escape
+    // topmost. Desktop stays complementary/non-modal (no inert/trap).
+    var _modalActive = false;
+    var _modalInerted = [];    // elements we set inert on (for exact restore)
+    var _modalPrevRole = null;
+    var _modalTrapHandler = null;
+    var _modalFocusTimer = null;
+    var _mobileMq = window.matchMedia("(max-width: 900px)");
+
+    function _isMobile() {
+      return _mobileMq.matches;
+    }
+
+    function _acquireModal(opts) {
+      _modalActive = true;
+      _modalPrevRole = panelShell.getAttribute("role");
+      panelShell.setAttribute("role", "dialog");
+      panelShell.setAttribute("aria-modal", "true");
+      // Inert all body children except panel + overlay (scripts are in <head>
+      // or have no visual content). Record prior inert state for exact restore.
+      _modalInerted = [];
+      var bodyChildren = document.body.children;
+      for (var i = 0; i < bodyChildren.length; i++) {
+        var child = bodyChildren[i];
+        if (child === panelShell || child === panelOverlay) continue;
+        if (child.tagName === "SCRIPT" || child.tagName === "LINK" || child.tagName === "STYLE") continue;
+        if (child.inert) continue; // already inert — don't double-record
+        child.inert = true;
+        _modalInerted.push(child);
+      }
+      // Focus: composer if requested, else active tab, else panel shell.
+      // Deferred so the panel render finishes first; cancelable via
+      // _modalFocusTimer so close/release can abort if they fire first.
+      if (_modalFocusTimer) clearTimeout(_modalFocusTimer);
+      _modalFocusTimer = setTimeout(function () {
+        _modalFocusTimer = null;
+        var focusTarget = null;
+        if (opts && opts.focusComposer) {
+          focusTarget = panelBody.querySelector(".okf-composer__textarea");
+        }
+        if (!focusTarget) {
+          var activeTab = panelTabs.querySelector('.okf-panel__tab[aria-selected="true"]');
+          if (activeTab) focusTarget = activeTab;
+        }
+        if (!focusTarget) focusTarget = panelShell;
+        try { focusTarget.focus({ preventScroll: true }); } catch (e) {}
+      }, 0);
+      // Tab trap: reuse the canonical focusableIn helper (filters
+      // hidden/disabled/inert/negative-tabindex/visibility:hidden).
+      _modalTrapHandler = function (e) {
+        if (e.key !== "Tab") return;
+        trapFocusIn(panelShell, !e.shiftKey);
+        // preventDefault for Tab at focus boundaries is handled inside
+        // trapFocusIn's wrapping logic; we also preventDefault here so the
+        // browser's native Tab doesn't escape the panel before trapFocusIn
+        // wraps — but only if focus actually wrapped (focusables exist).
+        var focusables = focusableIn(panelShell);
+        if (focusables.length) e.preventDefault();
+      };
+      panelShell.addEventListener("keydown", _modalTrapHandler);
+      // Escape is handled by the shared overlay stack — no separate
+      // mobile-only Escape handler needed. The panel registers with the
+      // stack in openPanel; closePanel unregisters.
+    }
+
+    function _releaseModal() {
+      if (!_modalActive) return;
+      _modalActive = false;
+      // Cancel any pending deferred focus.
+      if (_modalFocusTimer) { clearTimeout(_modalFocusTimer); _modalFocusTimer = null; }
+      // Restore role.
+      if (_modalPrevRole) panelShell.setAttribute("role", _modalPrevRole);
+      else panelShell.removeAttribute("role");
+      panelShell.removeAttribute("aria-modal");
+      // Restore inert: only undo what we set.
+      for (var i = 0; i < _modalInerted.length; i++) {
+        _modalInerted[i].inert = false;
+      }
+      _modalInerted = [];
+      // Remove modal-only listeners.
+      if (_modalTrapHandler) panelShell.removeEventListener("keydown", _modalTrapHandler);
+      _modalTrapHandler = null;
+    }
+
+    // Breakpoint transition: crossing 900px while the panel is open must
+    // acquire or release modal ownership without losing the selected panel.
+    // addEventListener + addListener fallback for older browsers.
+    var _bpHandler = function (e) {
+      if (!state.openPanel) return;
+      if (e.matches) {
+        // Desktop → mobile: acquire modal.
+        if (!_modalActive) _acquireModal({});
+      } else {
+        // Mobile → desktop: release modal (panel stays open, non-modal).
+        if (_modalActive) _releaseModal();
+        try { panelShell.focus(); } catch (er) {}
+      }
+    };
+    if (_mobileMq.addEventListener) _mobileMq.addEventListener("change", _bpHandler);
+    else if (_mobileMq.addListener) _mobileMq.addListener(_bpHandler);
 
   // Editorial Workbench Round 2: the thin studio rail. Always docked on
   // concept pages (>=900px); each icon opens the matching overlay tab. The
@@ -3989,10 +4205,20 @@
     conflictState.open = true;
     conflictState.overlay.hidden = false;
     conflictState.lastFocus = document.activeElement;
+    // Register with the shared overlay stack.
+    if (!_conflictOverlayEntry) _conflictOverlayEntry = { close: function () { _closeConflict("keep"); } };
+    if (window.OKFOverlayStack) window.OKFOverlayStack.push(_conflictOverlayEntry);
     // Focus the first action button after a tick (let the modal render).
-    setTimeout(() => {
-      const first = focusableIn(conflictState.overlay)[0];
-      if (first) try { first.focus({ preventScroll: true }); } catch (e) {}
+    // Generation guard: if _closeConflict fires before the timer, the callback
+    // no-ops. Timer is cancelable via _conflictFocusTimer.
+    if (_conflictFocusTimer) clearTimeout(_conflictFocusTimer);
+    var cgen = conflictState._gen = (conflictState._gen || 0) + 1;
+    _conflictFocusTimer = setTimeout(function () {
+      _conflictFocusTimer = null;
+      if (conflictState.open && conflictState._gen === cgen) {
+        const first = focusableIn(conflictState.overlay)[0];
+        if (first) try { first.focus({ preventScroll: true }); } catch (e) {}
+      }
     }, 20);
     // Resolve the caller's promise once the user picks an action.
     return new Promise((resolve) => {
@@ -4178,11 +4404,13 @@
     conflictState.overlay = overlay;
   }
 
+  var _conflictOverlayEntry = null;
+  var _conflictFocusTimer = null;
   function _conflictKeydown(e) {
     if (!conflictState.open) return;
-    if (e.key === "Escape") { e.preventDefault(); _closeConflict("keep"); }
+    // Escape is handled by the shared overlay stack — no separate handler.
     // Focus trap: Tab/Shift+Tab cycles inside the alertdialog.
-    else if (e.key === "Tab") {
+    if (e.key === "Tab") {
       e.preventDefault();
       trapFocusIn(conflictState.overlay, !e.shiftKey);
     }
@@ -4190,14 +4418,14 @@
 
   function _closeConflict(action, newResponse) {
     if (!conflictState.open) return;
+    if (_conflictFocusTimer) { clearTimeout(_conflictFocusTimer); _conflictFocusTimer = null; }
     conflictState.open = false;
+    if (_conflictOverlayEntry && window.OKFOverlayStack) window.OKFOverlayStack.remove(_conflictOverlayEntry);
     conflictState.overlay.hidden = true;
     // Re-enable buttons for the next conflict.
     $$("button", conflictState.overlay).forEach((b) => { b.disabled = false; });
-    // Restore focus to the trigger.
-    if (conflictState.lastFocus && typeof conflictState.lastFocus.focus === "function") {
-      try { conflictState.lastFocus.focus({ preventScroll: true }); } catch (e) {}
-    }
+    // Safe focus restoration: validate saved trigger or use fallback chain.
+    safeFocus(conflictState.lastFocus);
     conflictState.lastFocus = null;
     const resolve = conflictState._resolve;
     conflictState._resolve = null;
@@ -4376,6 +4604,7 @@
     openPanel,
     closePanel,
     openPalette,
+    closePalette,
     setView,
     toggleFocus,
     get state() { return state; },

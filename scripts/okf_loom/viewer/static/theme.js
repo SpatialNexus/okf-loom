@@ -57,6 +57,35 @@
   // override setups; the first execution wins.
   if (window.OKFLoomTheme) return;
 
+  // ---- Shared topmost-overlay / Escape layer -----------------------------
+  // ONE Escape closes only the TOPMOST registered overlay and stops
+  // background mutation (preventDefault + stopPropagation in capture phase,
+  // so it fires before any overlay's own handler). theme.js is loaded first
+  // on every surface (wiki, graph, studio, static, single-file), so this
+  // global is always available. studio.js registers its panel/palette/
+  // conflict overlays via window.OKFOverlayStack.push/remove.
+  if (!window.OKFOverlayStack) {
+    var _overlayStack = [];
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var top = _overlayStack.length ? _overlayStack[_overlayStack.length - 1] : null;
+      if (top) { e.preventDefault(); e.stopPropagation(); top.close(); }
+    }, true); // capture: topmost-layer-first, before any bubble-phase handler
+    window.OKFOverlayStack = {
+      push: function (entry) {
+        // Idempotent: never allow the same entry twice.
+        if (_overlayStack.indexOf(entry) >= 0) return;
+        _overlayStack.push(entry);
+      },
+      remove: function (entry) {
+        // Remove ALL instances (guards against accidental duplicate pushes).
+        var i;
+        while ((i = _overlayStack.indexOf(entry)) >= 0) _overlayStack.splice(i, 1);
+      },
+      depth: function () { return _overlayStack.length; },
+    };
+  }
+
   var root = document.documentElement;
 
   var FAMILIES = ["swiss", "technical"];
@@ -268,6 +297,11 @@
   // Server-rendered by render.py:_theme_button_html on wiki, graph, and
   // single-file pages; wired here once instead of per surface. aria-checked
   // is corrected at boot (the server cannot read localStorage).
+  //
+  // Geometry: the menu is position:fixed (wiki.css) so it escapes ancestor
+  // overflow clipping (the topbar controls scroller at <=900px). Its top/left
+  // are computed from the trigger's bounding rect on every open + on
+  // resize/scroll/visualViewport change, then flipped/clamped to an 8px inset.
   var trigger = document.getElementById("okf-theme");
   var menu = document.getElementById("okf-appearance-menu");
   var wrap = trigger && trigger.closest ? trigger.closest(".okf-appearance") : null;
@@ -281,26 +315,105 @@
     var opts = menu.querySelectorAll(".okf-appearance__opt"), i, o;
     for (i = 0; i < opts.length; i++) {
       o = opts[i];
-      o.setAttribute("aria-checked",
-        state[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
+      var isChecked = state[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val");
+      o.setAttribute("aria-checked", isChecked ? "true" : "false");
+    }
+    syncTabindex();
+  }
+
+  // Roving tabindex: exactly one tabindex=0 per radiogroup (the checked
+  // option); all peers are tabindex=-1. Tab enters the menu once per group
+  // and arrows move within.
+  function syncTabindex() {
+    if (!menu) return;
+    var groups = menu.querySelectorAll('.okf-appearance__group[role="radiogroup"]'), g;
+    for (g = 0; g < groups.length; g++) {
+      var opts = groups[g].querySelectorAll(".okf-appearance__opt");
+      var foundChecked = false;
+      for (var i = 0; i < opts.length; i++) {
+        if (!foundChecked && opts[i].getAttribute("aria-checked") === "true") {
+          opts[i].setAttribute("tabindex", "0");
+          foundChecked = true;
+        } else {
+          opts[i].setAttribute("tabindex", "-1");
+        }
+      }
+      // Fallback: if nothing is checked (shouldn't happen), first option.
+      if (!foundChecked && opts.length) opts[0].setAttribute("tabindex", "0");
     }
   }
+
+  // ---- Fixed-position geometry -------------------------------------------
+  function positionMenu() {
+    if (!menu || !trigger || menu.hidden) return;
+    menu.style.width = "min(22rem, 100vw - 16px)";
+    // Measure natural content height: temporarily remove max-height/overflow
+    // WITHOUT moving the element (left/top stay at current values during
+    // measurement). The browser batches style changes within a synchronous
+    // function, so only the final painted state is visible.
+    menu.style.maxHeight = "none";
+    menu.style.overflowY = "visible";
+    var r = trigger.getBoundingClientRect();
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var vv = window.visualViewport;
+    if (vv) { vw = vv.width; vh = vv.height; }
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var availH = vh - 16;
+    if (mh > availH) {
+      menu.style.overflowY = "auto";
+      menu.style.maxHeight = availH + "px";
+      mh = availH;
+    }
+    var left = r.right - mw;
+    var top = r.bottom + 4;
+    if (top + mh > vh - 8) top = r.top - mh - 4;
+    left = Math.max(8, Math.min(left, vw - mw - 8));
+    top = Math.max(8, Math.min(top, vh - mh - 8));
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top = Math.round(top) + "px";
+  }
+
+  var _menuOverlay = null;
   function openMenu() {
     if (!menu) return;
     menu.hidden = false;
     if (trigger) trigger.setAttribute("aria-expanded", "true");
     reflectMenu();
+    positionMenu();
+    // Register with the shared overlay stack so ONE Escape closes only this
+    // topmost layer and stops propagation to background handlers.
+      if (!_menuOverlay) _menuOverlay = { close: function () { closeMenu(true); } };
+    window.OKFOverlayStack.push(_menuOverlay);
+    // Focus the checked option in the FIRST group (Family).
+    var firstGroup = menu.querySelector('.okf-appearance__group[role="radiogroup"]');
+    if (firstGroup) {
+      var checked = firstGroup.querySelector('.okf-appearance__opt[aria-checked="true"]')
+        || firstGroup.querySelector(".okf-appearance__opt");
+      if (checked) { try { checked.focus(); } catch (e) {} }
+    }
   }
-  function closeMenu() {
+  function closeMenu(restoreFocus) {
     if (!menu) return;
+    if (_menuOverlay) window.OKFOverlayStack.remove(_menuOverlay);
     menu.hidden = true;
+    menu.style.left = "";
+    menu.style.top = "";
+    menu.style.maxHeight = "";
+    menu.style.overflowY = "";
+    menu.style.width = "";
+    _menuRafPending = false; // cancel any pending rAF reposition
     if (trigger) trigger.setAttribute("aria-expanded", "false");
+    // Only Escape/overlay-stack dismissal restores focus to the trigger.
+    // Outside-click keeps focus on the clicked destination; focus-exit keeps
+    // focus on the element the user Tabbed to.
+    if (restoreFocus && trigger) { try { trigger.focus(); } catch (e) {} }
   }
+  function isMenuOpen() { return menu && !menu.hidden; }
 
-  if (trigger) trigger.addEventListener("click", function (e) {
-    e.stopPropagation();
-    if (menu && menu.hidden) openMenu(); else closeMenu();
-  });
+    if (trigger) trigger.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (isMenuOpen()) closeMenu(false); else openMenu();
+    });
   if (menu) menu.addEventListener("click", function (e) {
     var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
     if (!opt) return;
@@ -309,15 +422,99 @@
     else if (k === "mode") setMode(v);
     else setModifier(k, v); // contrast | border
   });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && menu && !menu.hidden) {
-      closeMenu();
-      if (trigger) trigger.focus();
+
+  // ---- Radiogroup keyboard navigation -----------------------------------
+  // Arrows wrap + select + focus within the same radiogroup. Home/End focus
+  // first/last. Only fires when focus is inside a radiogroup option — never
+  // suppresses keys elsewhere (editable inputs, search, etc.).
+  if (menu) menu.addEventListener("keydown", function (e) {
+    var opt = e.target;
+    if (!opt || !opt.classList || !opt.classList.contains("okf-appearance__opt")) return;
+    var group = opt.closest('.okf-appearance__group[role="radiogroup"]');
+    if (!group) return;
+    var opts = Array.prototype.slice.call(group.querySelectorAll(".okf-appearance__opt"));
+    var idx = opts.indexOf(opt);
+    var key = e.key;
+    if (key === "ArrowRight" || key === "ArrowDown") {
+      e.preventDefault();
+      var next = opts[(idx + 1) % opts.length];
+      selectOpt(next);
+    } else if (key === "ArrowLeft" || key === "ArrowUp") {
+      e.preventDefault();
+      next = opts[(idx - 1 + opts.length) % opts.length];
+      selectOpt(next);
+    } else if (key === "Home") {
+      e.preventDefault();
+      selectOpt(opts[0]);
+    } else if (key === "End") {
+      e.preventDefault();
+      selectOpt(opts[opts.length - 1]);
     }
+    // Enter/Space: native button activation fires click → handler above.
   });
-  document.addEventListener("click", function (e) {
-    if (menu && !menu.hidden && wrap && !wrap.contains(e.target)) closeMenu();
-  });
+  function selectOpt(opt) {
+    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
+    if (k === "family") setFamily(v);
+    else if (k === "mode") setMode(v);
+    else setModifier(k, v);
+    try { opt.focus(); } catch (e) {}
+  }
+
+  // ---- Outside-click / focus-exit close ---------------------------------
+  // Escape is handled by the shared overlay stack (capture-phase keydown on
+  // document) — no separate Escape handler here.
+    document.addEventListener("click", function (e) {
+      if (isMenuOpen() && wrap && !wrap.contains(e.target)) closeMenu(false);
+    });
+    // Focus-exit: close when focus moves to a specific element OUTSIDE the
+    // trigger+menu wrapper (genuine user Tab navigation). relatedTarget is null
+    // during programmatic blur/focus, so those never close. Focus stays on
+    // the destination the user moved to.
+    document.addEventListener("focusout", function (e) {
+      if (!isMenuOpen()) return;
+      var related = e.relatedTarget;
+      if (related && wrap && !wrap.contains(related)) closeMenu(false);
+    }, true);
+
+  // Lightweight reposition (scroll/resize): only updates left/top from the
+  // trigger's current rect. Does NOT touch max-height/overflow (which would
+  // force a reflow and create a feedback loop with scrollIntoView). The
+  // constraints are set once by positionMenu() on open.
+  function repositionMenu() {
+    if (!menu || !trigger || menu.hidden) return;
+    var r = trigger.getBoundingClientRect();
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var vv = window.visualViewport;
+    if (vv) { vw = vv.width; vh = vv.height; }
+    var left = r.right - mw;
+    var top = r.bottom + 4;
+    if (top + mh > vh - 8) top = r.top - mh - 4;
+    left = Math.max(8, Math.min(left, vw - mw - 8));
+    top = Math.max(8, Math.min(top, vh - mh - 8));
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top = Math.round(top) + "px";
+  }
+
+  // rAF-throttled reposition (scroll/resize/visualViewport): coalesces
+  // bursts of scroll events into one reposition per animation frame.
+  var _menuRafPending = false;
+  function scheduleReposition() {
+    if (!isMenuOpen() || _menuRafPending) return;
+    _menuRafPending = true;
+    (window.requestAnimationFrame || function (fn) { setTimeout(fn, 16); })(function () {
+      _menuRafPending = false;
+      if (isMenuOpen()) repositionMenu();
+    });
+  }
+  if (menu) {
+    window.addEventListener("resize", scheduleReposition, { passive: true });
+    window.addEventListener("scroll", scheduleReposition, { passive: true, capture: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", scheduleReposition);
+      window.visualViewport.addEventListener("scroll", scheduleReposition);
+    }
+  }
 
   // ---- Boot ---------------------------------------------------------------
   // Post-paint, same timing as the previous per-surface reads (inline
