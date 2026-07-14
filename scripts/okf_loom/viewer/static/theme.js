@@ -57,6 +57,12 @@
   // override setups; the first execution wins.
   if (window.OKFLoomTheme) return;
 
+  // Mark the root as JS-enabled at the earliest possible moment. This
+  // distinguishes "JS is on" from "JS is off" for the fallback banner
+  // system: the <noscript> banner renders only when JS is off; the
+  // --js variant renders only when JS is on but the studio hasn't booted.
+  document.documentElement.classList.add("okf-js-enabled");
+
   // ---- Shared topmost-overlay / Escape layer -----------------------------
   // ONE Escape closes only the TOPMOST registered overlay and stops
   // background mutation (preventDefault + stopPropagation in capture phase,

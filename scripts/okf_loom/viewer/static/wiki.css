@@ -2063,10 +2063,14 @@ details.okf-frontmatter th { background: var(--okf-bg-inset); }
 
 /* ---- Fallback banner visibility (loaded on ALL surfaces) -------------- */
 /* The noscript banner shows when JS is off. The --js variant is hidden by
-   default and shown only when JS is on but studio.js failed to boot.
-   This prevents duplicate banners when JS is off. */
+   default and shown only when JS is on (okf-js-enabled) but studio.js
+   failed to boot (okf-studio-booted absent). This prevents the duplicate
+   banner seen when JS is off (noscript + this p).
+   Static mode intentionally shows no banner (read-only by design). */
 html.okf-studio-booted .okf-studio-fallback-banner { display: none; }
 [data-okf-mode="static"] .okf-studio-fallback-banner { display: none; }
 .okf-studio-fallback-banner--js { display: none; }
-html:not(.okf-studio-booted) .okf-studio-fallback-banner--js { display: block; }
-body[data-okf-mode="static"] .okf-studio-fallback-banner--js { display: none; }
+html.okf-js-enabled:not(.okf-studio-booted) .okf-studio-fallback-banner--js { display: block; }
+/* Static mode: no --js banner (static is read-only by design). */
+html.okf-js-enabled body[data-okf-mode="static"] .okf-studio-fallback-banner--js,
+[data-okf-mode="static"] .okf-studio-fallback-banner--js { display: none !important; }
