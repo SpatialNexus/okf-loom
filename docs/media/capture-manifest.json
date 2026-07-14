@@ -1,0 +1,375 @@
+{
+  "browser_source": "system-channel:chrome",
+  "captures": [
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 2,
+      "environment": {},
+      "file": "studio-home.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "visible rendered content",
+        "state": "valid",
+        "target": "index",
+        "title": "okf-loom Documentation",
+        "url": "http://127.0.0.1:41265/"
+      },
+      "route": "/",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {},
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 2,
+      "environment": {},
+      "file": "showcase-rendering.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "visible rendered content",
+        "state": "valid",
+        "target": "rendering",
+        "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+        "url": "http://127.0.0.1:41265/demo/showcase"
+      },
+      "route": "/demo/showcase",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {},
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 2,
+      "environment": {},
+      "file": "comment-composer.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "visible rendered content",
+        "state": "valid",
+        "target": "rendering",
+        "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+        "url": "http://127.0.0.1:41265/demo/showcase"
+      },
+      "route": "/demo/showcase",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {},
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 2,
+      "environment": {},
+      "file": "graph-map.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "readable valid-uniform graph canvas",
+        "state": "valid",
+        "target": "graph",
+        "title": "Graph \u2014 okf-loom Documentation",
+        "uniform": true,
+        "url": "http://127.0.0.1:41265/__graph"
+      },
+      "route": "/__graph",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {},
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 2,
+      "environment": {},
+      "file": "graph-bridges-dark.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "readable valid-uniform graph canvas",
+        "state": "valid",
+        "target": "graph",
+        "title": "Graph \u2014 okf-loom Documentation",
+        "uniform": true,
+        "url": "http://127.0.0.1:41265/__graph"
+      },
+      "route": "/__graph?lens=bridges",
+      "source": "live",
+      "theme": "swiss-dark",
+      "themes": [
+        "swiss-dark"
+      ],
+      "variants": {},
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 2,
+      "environment": {},
+      "file": "search.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "visible rendered content",
+        "state": "valid",
+        "target": "search",
+        "title": "Search: studio \u2014 okf-loom Documentation",
+        "url": "http://127.0.0.1:41265/__search?q=studio"
+      },
+      "route": "/__search?q=studio",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {},
+      "viewport": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    {
+      "artifact_type": "animation",
+      "device_scale_factor": 1,
+      "environment": {},
+      "file": "themes.gif",
+      "modifiers": {},
+      "readiness": {
+        "detail": "all frames ready",
+        "frames": [
+          {
+            "detail": "visible rendered content",
+            "state": "valid",
+            "target": "rendering",
+            "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+            "url": "http://127.0.0.1:41265/demo/showcase"
+          },
+          {
+            "detail": "visible rendered content",
+            "state": "valid",
+            "target": "rendering",
+            "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+            "url": "http://127.0.0.1:41265/demo/showcase"
+          },
+          {
+            "detail": "visible rendered content",
+            "state": "valid",
+            "target": "rendering",
+            "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+            "url": "http://127.0.0.1:41265/demo/showcase"
+          },
+          {
+            "detail": "visible rendered content",
+            "state": "valid",
+            "target": "rendering",
+            "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+            "url": "http://127.0.0.1:41265/demo/showcase"
+          }
+        ],
+        "state": "valid"
+      },
+      "route": "/demo/showcase",
+      "source": "live",
+      "theme": null,
+      "themes": [
+        "swiss-light",
+        "swiss-dark",
+        "technical-light",
+        "technical-dark"
+      ],
+      "variants": {
+        "playback": {
+          "autoplay": "finite-one-cycle",
+          "final_frame": "technical-dark",
+          "final_frame_duration_ms": 2400,
+          "final_frame_retained": true,
+          "frame_count": 4,
+          "frame_duration_ms": 1600,
+          "infinite_loop": false,
+          "loop_count": 1,
+          "loop_extension": false
+        }
+      },
+      "viewport": {
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "artifact_type": "animation",
+      "device_scale_factor": 1,
+      "environment": {},
+      "file": "graph-lenses.gif",
+      "modifiers": {},
+      "readiness": {
+        "detail": "all frames ready",
+        "frames": [
+          {
+            "detail": "readable valid-uniform graph canvas",
+            "state": "valid",
+            "target": "graph",
+            "title": "Graph \u2014 okf-loom Documentation",
+            "uniform": true,
+            "url": "http://127.0.0.1:41265/__graph"
+          },
+          {
+            "detail": "readable valid-uniform graph canvas",
+            "state": "valid",
+            "target": "graph",
+            "title": "Graph \u2014 okf-loom Documentation",
+            "uniform": true,
+            "url": "http://127.0.0.1:41265/__graph"
+          },
+          {
+            "detail": "readable valid-uniform graph canvas",
+            "state": "valid",
+            "target": "graph",
+            "title": "Graph \u2014 okf-loom Documentation",
+            "uniform": true,
+            "url": "http://127.0.0.1:41265/__graph"
+          },
+          {
+            "detail": "readable valid-uniform graph canvas",
+            "state": "valid",
+            "target": "graph",
+            "title": "Graph \u2014 okf-loom Documentation",
+            "uniform": true,
+            "url": "http://127.0.0.1:41265/__graph"
+          },
+          {
+            "detail": "readable valid-uniform graph canvas",
+            "state": "valid",
+            "target": "graph",
+            "title": "Graph \u2014 okf-loom Documentation",
+            "uniform": true,
+            "url": "http://127.0.0.1:41265/__graph"
+          }
+        ],
+        "state": "valid"
+      },
+      "route": "/__graph",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {
+        "lenses": [
+          "Map",
+          "Themes",
+          "Flow",
+          "Bridges",
+          "Recent"
+        ],
+        "playback": {
+          "autoplay": "finite-one-cycle",
+          "final_frame": "Recent",
+          "final_frame_duration_ms": 2400,
+          "final_frame_retained": true,
+          "frame_count": 5,
+          "frame_duration_ms": 1600,
+          "infinite_loop": false,
+          "loop_count": 1,
+          "loop_extension": false
+        }
+      },
+      "viewport": {
+        "height": 800,
+        "width": 1280
+      }
+    },
+    {
+      "artifact_type": "still",
+      "device_scale_factor": 1,
+      "environment": {},
+      "file": "social-preview.png",
+      "modifiers": {},
+      "readiness": {
+        "detail": "readable valid-uniform graph canvas",
+        "state": "valid",
+        "target": "graph",
+        "title": "Graph \u2014 okf-loom Documentation",
+        "uniform": true,
+        "url": "http://127.0.0.1:41265/__graph"
+      },
+      "route": "/__graph",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {
+        "state": "social-preview",
+        "surface": "graph-map"
+      },
+      "viewport": {
+        "height": 640,
+        "width": 1280
+      }
+    },
+    {
+      "artifact_type": "video",
+      "device_scale_factor": 1,
+      "environment": {},
+      "file": "comment-loop.mp4",
+      "modifiers": {},
+      "readiness": {
+        "detail": "all interaction frames ready",
+        "frames": [
+          {
+            "detail": "visible rendered content",
+            "state": "valid",
+            "target": "rendering",
+            "title": "Rendering & Feature Showcase \u2014 okf-loom Documentation",
+            "url": "http://127.0.0.1:41265/demo/showcase"
+          }
+        ],
+        "state": "valid"
+      },
+      "route": "/demo/showcase",
+      "source": "live",
+      "theme": "swiss-light",
+      "themes": [
+        "swiss-light"
+      ],
+      "variants": {
+        "duration_seconds": 6.734,
+        "format": "h264-yuv420p",
+        "semantic_frames": 3,
+        "state": "comment-loop"
+      },
+      "viewport": {
+        "height": 720,
+        "width": 1280
+      }
+    }
+  ],
+  "created_at": "2026-07-14T12:55:03Z",
+  "revision": "5aecb28cb95379bd62efdfd1875954440bc37c76",
+  "schema": "okf-loom-capture-manifest-v1"
+}
