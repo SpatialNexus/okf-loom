@@ -97,42 +97,115 @@
   }
 
   // --- Mermaid ---
+  // One controller owns initial, theme, and body-patch renders. A monotonic
+  // generation counter gates async completion: a stale mermaid.run() result
+  // (from a fast light→dark→light toggle or a body patch during render) is
+  // discarded BEFORE it can mutate live DOM.
+  //
+  // Commit gating: mermaid.run() renders to off-DOM CLONES of the target
+  // divs. Only if the generation is still current when the render completes
+  // are the clone SVGs swapped into the live DOM. This guarantees a stale
+  // render can NEVER overwrite a newer one.
+  var _mermaidGen = 0;
+  var _mermaidMod = null;
+  var _mermaidIdCounter = 0;
+
+  // Test seam: if set, used instead of dynamic import() so tests can inject
+  // a controlled mock renderer without a CDN dependency.
+  // Set window.__okfMermaidTestImport to {default: mockMermaid} to use.
+  function _importMermaid() {
+    if (window.__okfMermaidTestImport) return Promise.resolve(window.__okfMermaidTestImport);
+    return import(PINS.mermaidEsm);
+  }
+
+  function _nextMermaidId() { return "okf-mermaid-" + (++_mermaidIdCounter); }
+
   function initMermaid() {
-    // Only process mermaid divs that haven't been rendered yet (no SVG child).
-    // This prevents re-rendering diagrams that are already shown, which would
-    // cause a visible flash on live updates that don't change the diagram.
     var allDivs = document.querySelectorAll("div.mermaid");
     if (allDivs.length === 0) return;
     var mermaidDivs = Array.from(allDivs).filter(function (el) {
-      return !el.querySelector("svg"); // skip already-rendered
+      return !el.querySelector("svg");
     });
-    if (mermaidDivs.length === 0) return; // nothing to render
-    // Stamp the original source text as data-source BEFORE mermaid
-    // replaces it with SVG output.
-    mermaidDivs.forEach(function (el, i) {
-      if (!el.getAttribute("data-source")) {
-        el.setAttribute("data-source", el.textContent);
-      }
-      if (!el.id) el.id = "okf-mermaid-" + i;
+    if (mermaidDivs.length === 0) return;
+    // Stamp source + page-global unique IDs (never per-call index, which
+    // would collide across body patches).
+    mermaidDivs.forEach(function (el) {
+      if (!el.getAttribute("data-source")) el.setAttribute("data-source", el.textContent);
+      if (!el.id) el.id = _nextMermaidId();
     });
-    // Mermaid v11 is ESM-only. Use dynamic import() so the module loads
-    // asynchronously and we get the mermaid object as a named export.
-    // CSP allows this because cdn.jsdelivr.net is in script-src.
-    import(PINS.mermaidEsm)
+    _renderMermaidGeneration(mermaidDivs);
+  }
+
+  // Start a new render generation. Increments the counter ONLY when there is
+  // non-empty work (avoids spurious generation bumps on no-op calls).
+  function _renderMermaidGeneration(divs) {
+    if (!divs || !divs.length) return;
+    var gen = ++_mermaidGen;
+    _importMermaid()
       .then(function (mod) {
-        var mermaid = mod.default || window.mermaid;
-        if (!mermaid) return;
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: isDark() ? "dark" : "default",
+        if (gen !== _mermaidGen) return null; // stale before start
+        var mermaid = mod && (mod.default || window.mermaid);
+        if (!mermaid) throw new Error("mermaid module unavailable"); // triggers fallback
+        _mermaidMod = mermaid;
+        mermaid.initialize({ startOnLoad: false, theme: isDark() ? "dark" : "default" });
+        // Render to clones in a hidden container — mermaid.run may require
+        // nodes to be in the document tree. Commit to live DOM only if gen
+        // is still current.
+        var scratch = document.createElement("div");
+        scratch.style.position = "absolute";
+        scratch.style.left = "-9999px";
+        scratch.style.visibility = "hidden";
+        document.body.appendChild(scratch);
+        var clones = divs.map(function (el, idx) {
+          var c = el.cloneNode(false);
+          c.textContent = el.getAttribute("data-source") || el.textContent;
+          // Unique temp ID distinct from live ID (avoids duplicate-ID while
+          // scratch is attached to the document).
+          c.id = (el.id || _nextMermaidId()) + "--scratch-" + gen + "-" + idx;
+          c.removeAttribute("data-source"); // don't duplicate on clone
+          scratch.appendChild(c);
+          return c;
         });
-        return mermaid.run({ nodes: mermaidDivs });
+        return mermaid.run({ nodes: clones }).then(function () {
+          scratch.remove();
+          return clones;
+        }).catch(function (err) {
+          scratch.remove();
+          throw err;
+        });
+      })
+      .then(function (clones) {
+        if (!clones) return;
+        if (gen !== _mermaidGen) return; // stale — discard clones, never touch live DOM
+        // Commit: swap rendered content from clones into live nodes.
+        divs.forEach(function (el, i) {
+          if (i < clones.length && clones[i].querySelector("svg")) {
+            el.innerHTML = clones[i].innerHTML;
+            el.classList.remove("mermaid--fallback");
+          }
+        });
       })
       .catch(function () {
-        mermaidDivs.forEach(function (el) {
-          el.classList.add("mermaid--fallback");
-        });
+        if (gen !== _mermaidGen) return; // stale failure — don't mutate
+        divs.forEach(function (el) { el.classList.add("mermaid--fallback"); });
       });
+  }
+
+  // Rerender on resolved light↔dark transition only. Family-only (same
+  // resolvedMode) does NOT rerender.
+  function rerenderMermaidOnThemeChange(e) {
+    var detail = e.detail || {};
+    var prevMode = detail.previousResolvedMode;
+    var newMode = detail.resolvedMode;
+    if (!prevMode || prevMode === newMode) return;
+    var allDivs = document.querySelectorAll("div.mermaid");
+    if (!allDivs.length) return;
+    var toRender = Array.from(allDivs).filter(function (el) {
+      return el.getAttribute("data-source");
+    });
+    if (!toRender.length) return; // no work — don't bump generation
+    // Source text stays on live DOM until the new render commits.
+    _renderMermaidGeneration(toRender);
   }
 
   // --- Syntax highlighting (highlight.js) ---
@@ -647,4 +720,8 @@
 
   // Re-run on live studio patches (when the concept body is re-rendered).
   window.addEventListener("okf-loom:bodyPatched", initAll);
+
+  // Rerender Mermaid diagrams on resolved light↔dark theme changes only.
+  // Family-only changes (same resolvedMode) do NOT trigger a rerender.
+  window.addEventListener("okf-loom:themeChanged", rerenderMermaidOnThemeChange);
 })();

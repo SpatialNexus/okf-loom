@@ -434,7 +434,7 @@
  * bump so the cue survives even without borders. (Outline already survives
  * because it is not derived from --okf-border-strong.) */
 :root[data-okf-border="off"] .okf-panel__tab[aria-selected="true"] { font-weight: 700; }
-:root[data-okf-border="off"] .okf-viewswitch__btn[aria-pressed="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-viewswitch__btn[aria-pressed="true"] { font-weight: 700; text-decoration: underline; }
 :root[data-okf-border="off"] .okf-nav__link[aria-current="page"] { font-weight: 700; }
 :root[data-okf-border="off"] .okf-appearance__opt[aria-checked="true"] { font-weight: 700; }
 :root[data-okf-border="off"] .okf-studiobtn[aria-pressed="true"] { font-weight: 700; }

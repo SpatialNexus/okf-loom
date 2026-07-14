@@ -333,17 +333,18 @@
 
   // View-mode switch (concept pages only)
   const viewSwitch = el("div", { class: "okf-viewswitch", role: "group", "aria-label": "View mode" });
-  function viewBtn(mode, label) {
+  function viewBtn(mode, label, desc) {
     const b = el("button", { type: "button", class: "okf-viewswitch__btn",
-      "aria-pressed": state.view === mode ? "true" : "false", text: label });
+      "aria-pressed": state.view === mode ? "true" : "false", text: label,
+      title: desc || label });
     b.addEventListener("click", () => setView(mode));
     b.dataset.mode = mode;
     return b;
   }
   const viewBtns = {
-    rendered: viewBtn("rendered", "Rendered"),
-    source: viewBtn("source", "Source"),
-    split: viewBtn("split", "Split"),
+    rendered: viewBtn("rendered", "Rendered", "Show the rendered page"),
+    source: viewBtn("source", "Source", "Show the raw markdown source"),
+    split: viewBtn("split", "Split", "Show rendered and source side by side"),
   };
   Object.keys(viewBtns).forEach((k) => viewSwitch.appendChild(viewBtns[k]));
 
@@ -1057,6 +1058,34 @@
     affordance.style.left = left + "px";
     affordance.style.top = top + "px";
   }
+  // Central cleanup for abandoned comment draft state. Removes the optimistic
+  // pending mark from the DOM, clears transient selection/range/anchor.
+  // opts.preserveDraftBody: when true (panel close/navigation), keeps the
+  // typed draft text so the user doesn't lose their work. When false/absent
+  // (Cancel), clears draftBody too.
+  function clearPendingCommentDraft(opts) {
+    // Remove ALL matching optimistic marks via the existing helper (handles
+    // cross-element marks — a pending ID may have marks in multiple roots).
+    if (state._pendingMarkId) {
+      removeCommentMark(state._pendingMarkId);
+      state._pendingMarkId = null;
+    }
+    state.selectionDraft = null;
+    if (!opts || !opts.preserveDraftBody) {
+      state.draftBody = "";
+    }
+    state.draftAnchor = { kind: "concept", ref: state.conceptId };
+    hideAffordance();
+    try {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        var r = sel.getRangeAt(0);
+        var body = $(".okf-page__body");
+        if (body && body.contains(r.commonAncestorContainer)) sel.removeAllRanges();
+      }
+    } catch (e) {}
+  }
+
   function hideAffordance() {
     if (affordance) affordance.hidden = true;
     state.selectionDraft = null;
@@ -1369,23 +1398,51 @@
   // the card for a given comment id. Mirrors jumpToActivity (Changes panel,
   // ~line 3507). Requires cards to carry data-comment-id (tagged in
   // commentCard below) so the pin's click target can be found post-render.
+  // Single-owner jump state: only one active comment-id/card/timer at a time.
+  // New jump, close, rerender, or resolve cancels the previous and clears
+  // transient state without detached-node mutation.
+  var _jumpState = { id: null, card: null, timer: null, retryTimer: null, prevTabindex: null };
+
+  function _clearJumpContext() {
+    if (_jumpState.timer) { clearTimeout(_jumpState.timer); _jumpState.timer = null; }
+    if (_jumpState.retryTimer) { clearTimeout(_jumpState.retryTimer); _jumpState.retryTimer = null; }
+    if (_jumpState.card && _jumpState.card.isConnected) {
+      _jumpState.card.classList.remove("okf-comment--jumped");
+      if (_jumpState.prevTabindex === null) _jumpState.card.removeAttribute("tabindex");
+      else _jumpState.card.setAttribute("tabindex", _jumpState.prevTabindex);
+    }
+    _jumpState.id = null;
+    _jumpState.card = null;
+    _jumpState.prevTabindex = null;
+  }
+
   function jumpToCommentCard(commentId) {
+    _clearJumpContext();
     openPanel("comments");
     const body = panelBodyEl();
     if (!body) return false;
-    // The card renders synchronously inside openPanel's p.render() call, but
-    // poll briefly anyway (defensive, mirrors jumpToActivity's setTimeout
-    // lookup) in case a future render path makes it async.
+    _jumpState.id = commentId;
     let tries = 0;
     (function find() {
+      if (_jumpState.id !== commentId) return; // superseded by new jump/close
       const card = body.querySelector('.okf-comment[data-comment-id="' + cssEscape(commentId) + '"]');
-      if (!card) { if (tries++ < 20) setTimeout(find, 25); return; }
+      if (!card) {
+        if (tries++ < 20) _jumpState.retryTimer = setTimeout(find, 25);
+        return;
+      }
+      if (_jumpState.id !== commentId) return; // superseded
       card.scrollIntoView({ block: "center", behavior: REDUCED_MOTION ? "auto" : "smooth" });
       if (!REDUCED_MOTION) {
         card.classList.remove("okf-pulse");
         void card.offsetWidth;
         card.classList.add("okf-pulse");
       }
+      _jumpState.prevTabindex = card.getAttribute("tabindex");
+      card.setAttribute("tabindex", "-1");
+      try { card.focus({ preventScroll: true }); } catch (e) {}
+      card.classList.add("okf-comment--jumped");
+      _jumpState.card = card;
+      _jumpState.timer = setTimeout(_clearJumpContext, 4000);
     })();
     return true;
   }
@@ -1425,8 +1482,7 @@
     }
     refreshAnchor();
     cancel.addEventListener("click", () => {
-      state.draftAnchor = { kind: "concept", ref: state.conceptId };
-      state.draftBody = "";
+      clearPendingCommentDraft(); // Cancel: clear draftBody too
       textarea.value = "";
       refreshAnchor();
     });
@@ -2405,9 +2461,10 @@
       var c = state.comments.find(function (x) { return x.id === commentId; });
       if (c) {
         c.state = newState;
-        // Stamp a fresh updated_at so "newest"/"updated" sorts reorder
-        // correctly before the SSE echo arrives.
         c.updated_at = new Date().toISOString();
+        // Clear jump context if the resolved/canceled comment was the active
+        // jump target — its card will be destroyed by renderCommentsPanel.
+        if (_jumpState.id === commentId) _clearJumpContext();
         renderCommentsPanel();
       }
     } catch (e) {
@@ -3476,6 +3533,10 @@
         if (!_panelOverlay) _panelOverlay = { close: function () { closePanel(); } };
         if (window.OKFOverlayStack) window.OKFOverlayStack.push(_panelOverlay);
       }
+      // Clear jump context before DOM replacement (card element will be
+      // destroyed by innerHTML="" below). Unconditional — even tab-switches
+      // and re-renders within the same panel destroy the jumped card.
+      _clearJumpContext();
       // Render.
       panelBody.innerHTML = "";
       panelBody._focusComposer = !!opts.focusComposer;
@@ -3495,6 +3556,11 @@
       }
     }
     function closePanel() {
+      // Clear any active jump context (timer, transient classes, tabindex).
+      _clearJumpContext();
+      // Clear abandoned comment draft state (preserve typed draftBody per
+      // existing contract — user may reopen the panel and continue typing).
+      clearPendingCommentDraft({ preserveDraftBody: true });
       // Release mobile modal ownership BEFORE hiding so focus restoration lands
       // on a non-inert element.
       if (_modalActive) _releaseModal();
@@ -3945,6 +4011,10 @@
     window.okfLoomLive.on("presence", renderPresence);
     window.okfLoomLive.on("comment", (c) => {
       if (!c || !c.id) return;
+      // Clear jump context if this comment was the active jump target and its
+      // state changed (agent resolved/dismissed it server-side — the card will
+      // be rebuilt by renderCommentsPanel below).
+      if (_jumpState.id === c.id && c.state && c.state !== "open") _clearJumpContext();
       upsertComment(c);
       if (state.openPanel === "comments") renderCommentsPanel();
       updateBadges();

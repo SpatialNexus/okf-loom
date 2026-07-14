@@ -58,7 +58,7 @@
       select: "#0c7373",
     },
     "technical-dark": {
-      nodeText: "#e6edf3", nodeBorder: "#0f1319", bridgeBorder: "#e6edf3",
+      nodeText: "#e6edf3", nodeBorder: "#161b22", bridgeBorder: "#e6edf3",
       edge: "#3b444f", edgeLabel: "#8b949e", edgeLabelBg: "#161b22",
       select: "#2dd4bf",
     },
@@ -68,15 +68,38 @@
       select: "#0c7373",
     },
     "swiss-dark": {
-      nodeText: "#f0f2f4", nodeBorder: "#121417", bridgeBorder: "#f0f2f4",
+      nodeText: "#f0f2f4", nodeBorder: "#181b1f", bridgeBorder: "#f0f2f4",
       edge: "#f0f2f4", edgeLabel: "#9aa1a9", edgeLabelBg: "#181b1f",
       select: "#2dd4bf",
     },
   };
 
-  // Resolve the palette for the CURRENT data-theme (swiss-light fallback).
+  // Resolve the palette for the CURRENT data-theme. Tries computed CSS custom
+  // properties first (so the canvas tracks theme/modifier changes without
+  // duplicated literals); falls back to the categorical GRAPH_COLORS block.
   function graphPalette() {
     var t = document.documentElement.getAttribute("data-theme") || "swiss-light";
+    // Try computed CSS tokens first.
+    try {
+      var cs = getComputedStyle(document.documentElement);
+      var fg = cs.getPropertyValue("--okf-fg").trim();
+      var fgMuted = cs.getPropertyValue("--okf-fg-muted").trim();
+      var bgElev = cs.getPropertyValue("--okf-bg-elev").trim();
+      var borderStrong = cs.getPropertyValue("--okf-border-strong").trim();
+      var select = cs.getPropertyValue("--okf-select").trim();
+      var border = cs.getPropertyValue("--okf-border").trim();
+      if (fg && select) {
+        return {
+          nodeText: fg,
+          nodeBorder: /-dark$/.test(t) ? bgElev : fg,
+          bridgeBorder: fg,
+          edge: borderStrong || border || fg,
+          edgeLabel: fgMuted || fg,
+          edgeLabelBg: bgElev,
+          select: select,
+        };
+      }
+    } catch (e) { /* getComputedStyle may fail in some contexts */ }
     return GRAPH_COLORS[t] || GRAPH_COLORS["swiss-light"];
   }
 
@@ -982,8 +1005,8 @@
             // Signal "Primary signal" + boost controls compute. mapData keeps
             // the mapping in the stylesheet so .dim / :selected class selectors
             // still override (an inline ele.style() bypass would not).
-            "width": "mapData(weight, 0, 1, 1.2, 4.8)",
-            "opacity": "mapData(weight, 0, 1, 0.5, 1)",
+            "width": "mapData(weight, 0, 1, 1, 4)",
+            "opacity": "mapData(weight, 0, 1, 0.3, 0.8)",
             "line-color": GRAPH_COLORS["technical-light"].edge,
             "target-arrow-color": GRAPH_COLORS["technical-light"].edge,
             "target-arrow-shape": "triangle",
@@ -1132,7 +1155,9 @@
     //   block (mirrors wiki.css theme tokens). Selection border + edge
     //   selection line/arrow are also re-synced here so a theme change
     //   updates them to the active theme's --okf-select value.
+    var _syncCount = 0;
     function syncLabelColour() {
+      _syncCount++;
       var pal = graphPalette();
       cy.style().selector("node").style("color", pal.nodeText).update();
       cy.style().selector("node").style("border-color", pal.nodeBorder).update();
@@ -1144,6 +1169,13 @@
       cy.style().selector("node:selected").style("border-color", pal.select).update();
       cy.style().selector("edge:selected").style("line-color", pal.select).update();
       cy.style().selector("edge:selected").style("target-arrow-color", pal.select).update();
+      // Resync path-node, path-edge, and focus/bridge cues from the CURRENT
+      // palette (they were initialized with technical-light literals and
+      // must follow theme/modifier changes).
+      cy.style().selector("node.okf-path").style("border-color", pal.select).update();
+      cy.style().selector("node.okf-path").style("underlay-color", pal.select).update();
+      cy.style().selector("edge.okf-path").style("line-color", pal.select).update();
+      cy.style().selector("edge.okf-path").style("target-arrow-color", pal.select).update();
       syncBridgeColour();
     }
     syncLabelColour();
@@ -1152,6 +1184,15 @@
     // never persists the Auto result, so consecutive OS flips keep landing
     // here) recolours the canvas from the new data-theme.
     window.addEventListener("okf-loom:themeChanged", syncLabelColour);
+
+    // Also re-sync canvas palette when contrast/border modifiers change.
+    // Theme transitions are owned by okf-loom:themeChanged above — NOT this
+    // observer (avoids duplicate sync on data-theme mutation).
+    var _modifierObserver = new MutationObserver(function () { syncLabelColour(); });
+    _modifierObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-okf-contrast", "data-okf-border"],
+    });
 
     // Legend. Rebuilt by updateLegend() so it reflects the active "Colour by"
     // mode. Lives in the RIGHT DETAIL PANE as a native <details>/<summary>.
@@ -3315,8 +3356,10 @@
     // not affect rendering. Field shape may change with the implementation.
     try {
       window.__okfLoomGraph = {
-        cy: cy,   // live, mutable Cytoscape core — for tests/diagnostics only
+        cy: cy,
         getState: function () { try { return JSON.parse(JSON.stringify(controlState)); } catch (e) { return null; } },
+        syncCount: function () { return _syncCount; },
+        fallbackColors: function (theme) { return JSON.parse(JSON.stringify(GRAPH_COLORS[theme] || GRAPH_COLORS["swiss-light"])); },
         applyLens: applyLens,
         communityOf: function () { try { return JSON.parse(JSON.stringify(communityOf)); } catch (e) { return {}; } },
         focusRoot: function () { return focusRoot; },
