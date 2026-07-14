@@ -434,8 +434,8 @@
   background: var(--okf-accent);
   color: var(--okf-accent-on);
 }
-.okf-toast[data-tone="error"]   .okf-toast__icon { background: var(--okf-error); color: #fff; }
-.okf-toast[data-tone="success"] .okf-toast__icon { background: var(--okf-ok);    color: #fff; }
+.okf-toast[data-tone="error"]   .okf-toast__icon { background: var(--okf-error); color: var(--okf-on-error); }
+.okf-toast[data-tone="success"] .okf-toast__icon { background: var(--okf-ok);    color: var(--okf-on-ok); }
 .okf-toast__msg { flex: 1 1 auto; min-width: 0; }
 .okf-toast__close {
   font: inherit;
@@ -511,8 +511,8 @@
   outline-offset: 1px;
 }
 /* iter1 CRI-011: marker state colours now theme-aware tokens. */
-.okf-comment-marker[data-state="resolved"] { background: var(--okf-ok); color: #fff; border-color: var(--okf-ok); }
-.okf-comment-marker[data-state="claimed"]  { background: var(--okf-warn); color: #fff; border-color: var(--okf-warn); }
+.okf-comment-marker[data-state="resolved"] { background: var(--okf-ok); color: var(--okf-on-ok); border-color: var(--okf-ok); }
+.okf-comment-marker[data-state="claimed"]  { background: var(--okf-warn); color: var(--okf-on-warn); border-color: var(--okf-warn); }
 .okf-comment-marker[data-state="dismissed"] { opacity: 0.5; }
 /* A small "resolved" stub for collapsed resolved marks (no count). iter2
  * CRI2-010: 16×16 is below the 24×24 AA target but stubs were claimed to
@@ -571,6 +571,19 @@
   background: transparent;
   text-decoration: underline dotted var(--okf-fg-muted);
   text-underline-offset: 2px;
+}
+/* Stale anchor paragraph: a discrete indicator at the end of the body. */
+.okf-comment-stale-anchor {
+  margin: var(--okf-space-3) 0 0;
+  padding: var(--okf-space-1) var(--okf-space-2);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+  border-top: 1px dashed var(--okf-border);
+  cursor: pointer;
+}
+.okf-comment-stale-anchor:focus-within {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 2px;
 }
 .okf-comment-mark.okf-pulse, .okf-comment-marker.okf-pulse, .okf-comment.okf-pulse {
   animation: okf-pulse-highlight 1.4s ease-out 1;

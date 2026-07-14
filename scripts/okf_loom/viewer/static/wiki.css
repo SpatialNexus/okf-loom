@@ -73,18 +73,27 @@
    * never reads as generic SaaS-collab colours. Each role ships a
    * matching *-bg tint for surfaces (chips, toast fills, comment state).
    * Approx. WCAG ratios vs --okf-bg-elev (#ffffff):
-   *   --okf-ok   oklch(0.52 0.10 165)  ≈ 4.7:1 (AA)
-   *   --okf-warn oklch(0.55 0.12 70)   ≈ 4.6:1 (AA)
-   *   --okf-info oklch(0.46 0.09 235)  ≈ 5.4:1 (AA)
-   *   --okf-error oklch(0.50 0.17 27)  ≈ 4.9:1 (AA) */
+ *   --okf-ok   oklch(0.52 0.10 165)  ≈ 4.7:1 (AA)
+ *   --okf-warn oklch(0.50 0.13 70)   ≈ 5.4:1 (AA)
+ *   --okf-info oklch(0.46 0.09 235)  ≈ 6.3:1 (AA)
+ *   --okf-error oklch(0.50 0.17 27)  ≈ 5.7:1 (AA) */
   --okf-ok: oklch(0.52 0.10 165);
   --okf-ok-bg: oklch(0.96 0.03 165);
-  --okf-warn: oklch(0.55 0.12 70);
+  --okf-warn: oklch(0.50 0.13 70);
   --okf-warn-bg: oklch(0.96 0.04 70);
   --okf-info: oklch(0.46 0.09 235);
   --okf-info-bg: oklch(0.96 0.03 235);
   --okf-error: oklch(0.50 0.17 27);
   --okf-error-bg: oklch(0.96 0.03 27);
+  /* Foreground for text/icons placed ON a solid status fill (toast icons,
+   * comment markers, presence dots, validation chips). NOT for body text on
+   * the pastel -bg tints — use the status token itself there. White passes
+   * ≥3:1 (UI graphics) and ≥4.5:1 (normal text) on all four light-theme
+   * fills at L≈0.50; near-black passes on the dark-theme fills at L≈0.72. */
+  --okf-on-ok: #ffffff;
+  --okf-on-warn: #ffffff;
+  --okf-on-info: #ffffff;
+  --okf-on-error: #ffffff;
   --okf-shadow: none;               /* Swiss fallback: flat, no elevation */
   /* Radii */
   --okf-radius: 8px;
@@ -194,12 +203,21 @@
   --okf-broken: #b91c1c;
   --okf-ok: oklch(0.52 0.10 165);
   --okf-ok-bg: oklch(0.96 0.03 165);
-  --okf-warn: oklch(0.55 0.12 70);
+  --okf-warn: oklch(0.50 0.13 70);
   --okf-warn-bg: oklch(0.96 0.04 70);
   --okf-info: oklch(0.46 0.09 235);
   --okf-info-bg: oklch(0.96 0.03 235);
   --okf-error: oklch(0.50 0.17 27);
   --okf-error-bg: oklch(0.96 0.03 27);
+  /* Foreground for text/icons placed ON a solid status fill (toast icons,
+   * comment markers, presence dots, validation chips). NOT for body text on
+   * the pastel -bg tints — use the status token itself there. White passes
+   * ≥3:1 (UI graphics) and ≥4.5:1 (normal text) on all four light-theme
+   * fills at L≈0.50; near-black passes on the dark-theme fills at L≈0.72. */
+  --okf-on-ok: #ffffff;
+  --okf-on-warn: #ffffff;
+  --okf-on-info: #ffffff;
+  --okf-on-error: #ffffff;
   --okf-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   --okf-radius: 6px;
   --okf-radius-sm: 5px;
@@ -249,8 +267,14 @@
   --okf-warn-bg: oklch(0.32 0.06 70);
   --okf-info: oklch(0.72 0.11 235);
   --okf-info-bg: oklch(0.30 0.05 235);
-  --okf-error: oklch(0.68 0.17 27);
+  --okf-error: oklch(0.72 0.17 27);
   --okf-error-bg: oklch(0.32 0.08 27);
+  /* Dark-theme status fills are light (L≈0.72): use near-black (matching the
+   * theme bg) for foreground text/icons on solid fills. Passes ≥4.5:1. */
+  --okf-on-ok: #0f1319;
+  --okf-on-warn: #0f1319;
+  --okf-on-info: #0f1319;
+  --okf-on-error: #0f1319;
   --okf-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --okf-radius: 6px;
   --okf-radius-sm: 5px;
@@ -296,12 +320,21 @@
   --okf-broken: #b91c1c;
   --okf-ok: oklch(0.52 0.10 165);
   --okf-ok-bg: oklch(0.96 0.03 165);
-  --okf-warn: oklch(0.55 0.12 70);
+  --okf-warn: oklch(0.50 0.13 70);
   --okf-warn-bg: oklch(0.96 0.04 70);
   --okf-info: oklch(0.46 0.09 235);
   --okf-info-bg: oklch(0.96 0.03 235);
   --okf-error: oklch(0.50 0.17 27);
   --okf-error-bg: oklch(0.96 0.03 27);
+  /* Foreground for text/icons placed ON a solid status fill (toast icons,
+   * comment markers, presence dots, validation chips). NOT for body text on
+   * the pastel -bg tints — use the status token itself there. White passes
+   * ≥3:1 (UI graphics) and ≥4.5:1 (normal text) on all four light-theme
+   * fills at L≈0.50; near-black passes on the dark-theme fills at L≈0.72. */
+  --okf-on-ok: #ffffff;
+  --okf-on-warn: #ffffff;
+  --okf-on-info: #ffffff;
+  --okf-on-error: #ffffff;
   --okf-shadow: none;
   --okf-radius: 0;
   --okf-radius-sm: 0;
@@ -351,8 +384,13 @@
   --okf-warn-bg: oklch(0.32 0.06 70);
   --okf-info: oklch(0.72 0.11 235);
   --okf-info-bg: oklch(0.30 0.05 235);
-  --okf-error: oklch(0.68 0.17 27);
+  --okf-error: oklch(0.72 0.17 27);
   --okf-error-bg: oklch(0.32 0.08 27);
+  /* Dark-theme status fills are light (L≈0.72): use near-black foreground. */
+  --okf-on-ok: #121417;
+  --okf-on-warn: #121417;
+  --okf-on-info: #121417;
+  --okf-on-error: #121417;
   --okf-shadow: none;
   --okf-radius: 0;
   --okf-radius-sm: 0;
@@ -390,6 +428,20 @@
 }
 :root[data-okf-border="muted"] { --okf-border-strong: var(--okf-border); }
 :root[data-okf-border="off"]   { --okf-border-strong: transparent; }
+
+/* Border Off non-color cue reinforcement: selected/pressed/current/focus
+ * states that lost a border-defined container get a font-weight or underline
+ * bump so the cue survives even without borders. (Outline already survives
+ * because it is not derived from --okf-border-strong.) */
+:root[data-okf-border="off"] .okf-panel__tab[aria-selected="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-viewswitch__btn[aria-pressed="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-nav__link[aria-current="page"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-appearance__opt[aria-checked="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-studiobtn[aria-pressed="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-rail__btn[aria-pressed="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-index-chip[aria-pressed="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-palette__item[aria-selected="true"] { font-weight: 700; }
+:root[data-okf-border="off"] .okf-graph-legend__item--chip[aria-pressed="true"] { font-weight: 700; }
 
 /* ---- Reset / base ------------------------------------------------------ */
 * { box-sizing: border-box; }
@@ -957,6 +1009,24 @@ details.okf-frontmatter td code {
  * readability is preserved by capping the page shell itself
  * (--okf-page-maxw) rather than the body. */
 .okf-page__body { max-width: none; overflow-x: auto; }
+/* Prose measure: cap paragraph/list/heading width at --okf-prose-maxw (76ch)
+ * centered within the page__body column. Wide content (tables, pre, code,
+ * diagrams, wide media) uses the full column width. Measured: body was 85ch
+ * at 1280px; this brings text elements to 76ch while keeping tables/code full. */
+.okf-prose > p,
+.okf-prose > ul,
+.okf-prose > ol,
+.okf-prose > blockquote {
+  max-width: var(--okf-prose-maxw);
+  margin-inline: auto;
+}
+/* Headings: same measure but not auto-centered (they read better left-aligned
+ * in the column). */
+.okf-prose > h2,
+.okf-prose > h3,
+.okf-prose > h4 {
+  max-width: var(--okf-prose-maxw);
+}
 .okf-prose h2 { font-family: var(--okf-font-display); letter-spacing: -0.01em; }
 /* Heading deep-link anchors (phase 2): invisible until heading hover. */
 .okf-heading-anchor {
@@ -1683,13 +1753,12 @@ sup.okf-footnote-ref { line-height: 0; }
 :root[data-okf-focus] .okf-page__main {
   max-width: none;                          /* drop the split trap */
 }
-/* Rendered view re-centers at the ~76ch prose measure even in Focus. The view
- * wrap always exists on concept pages (ensureViewWrap runs at boot), so target
- * it. NB: cap on the *prose-maxw* alone (not the +2*space-6 form used by
- * .okf-page__main): .okf-view has no internal padding, so the bare measure keeps
- * the text column at ~76ch — matching Workbench — rather than ~83ch. */
+/* Rendered view in Focus: NO ancestor 76ch cap on the view wrap (it would
+ * also cap tables/pre/code/diagrams). Paragraphs/headings/lists stay at 76ch
+ * via the .okf-prose > p/h2/h3/ul/ol/blockquote max-width rule (above), while
+ * tables, pre, code, and wide media can use the full available body width.
+ * margin-inline:auto on the view wrap centers the column visually. */
 :root[data-okf-focus] .okf-view[data-okf-view="rendered"] {
-  max-width: var(--okf-prose-maxw);
   margin-inline: auto;
 }
 /* Flat concept header (Editorial Workbench §3.3): the type identity now lives
@@ -1832,8 +1901,8 @@ details.okf-frontmatter th { background: var(--okf-bg-inset); }
   border-radius: var(--okf-radius);
   box-shadow: var(--okf-shadow);
 }
-.okf-search__title { font-size: var(--okf-text-xl); margin: 0 0 var(--okf-space-4); font-family: var(--okf-font-display); letter-spacing: -0.015em; }
-.okf-search__results { display: grid; gap: 0; }
+.okf-search__title { font-size: var(--okf-text-xl); margin: 0 0 var(--okf-space-4); font-family: var(--okf-font-display); letter-spacing: -0.015em; max-width: 72ch; }
+.okf-search__results { display: grid; gap: 0; max-width: 72ch; }
 /* P2-8 (iter-1): search results use dividers (like the index concept-list)
  * instead of identical cards - breaks the card monoculture. */
 .okf-search-result {
@@ -1842,6 +1911,9 @@ details.okf-frontmatter th { background: var(--okf-bg-inset); }
   border: none;
   border-bottom: 1px solid var(--okf-border);
   border-radius: 0;
+  /* Long concept paths / URLs must wrap, not overflow horizontally. */
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .okf-search-result:last-child { border-bottom: none; }
 .okf-search-result h3 { margin: 0 0 var(--okf-space-1); font-size: var(--okf-text-base); }

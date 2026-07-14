@@ -1153,13 +1153,43 @@
     // here) recolours the canvas from the new data-theme.
     window.addEventListener("okf-loom:themeChanged", syncLabelColour);
 
-    // Legend overlay. Rebuilt by updateLegend() so it reflects the
-    // active "Colour by" mode (type palette, per-group colours, or an
-    // importance ramp) — never a stale key that disagrees with the canvas.
+    // Legend. Rebuilt by updateLegend() so it reflects the active "Colour by"
+    // mode. Lives in the RIGHT DETAIL PANE as a native <details>/<summary>.
+    // Initial default: open on desktop (>=901px), closed on mobile. After
+    // load, breakpoint transitions follow the default UNLESS the user has
+    // explicitly toggled the legend — their choice is preserved.
+    var legendHost = document.createElement("details");
+    legendHost.className = "okf-graph-legend";
+    legendHost.setAttribute("aria-label", "Graph colour key");
+    var legendSummary = document.createElement("summary");
+    legendSummary.textContent = "Colour key";
+    legendHost.appendChild(legendSummary);
     var legend = document.createElement("div");
-    legend.className = "okf-graph-legend";
-    legend.setAttribute("aria-label", "Graph colour key");
-    container.appendChild(legend);
+    legend.className = "okf-graph-legend__body";
+    legendHost.appendChild(legend);
+    // Initial default follows breakpoint.
+    var _legendUserToggled = false;
+    if (!window.matchMedia("(max-width: 900px)").matches) legendHost.setAttribute("open", "");
+    // Track explicit user toggles via summary CLICK (not the toggle event,
+    // which also fires for programmatic attribute changes and can't be
+    // reliably distinguished from user actions in async dispatch).
+    legendSummary.addEventListener("click", function () {
+      _legendUserToggled = true;
+    });
+    // Breakpoint transition: if the user hasn't explicitly toggled, follow the
+    // breakpoint default (open desktop, closed mobile).
+    var _legendMq = window.matchMedia("(max-width: 900px)");
+    var _legendBpHandler = function (e) {
+      if (_legendUserToggled) return;
+      if (e.matches) legendHost.removeAttribute("open");
+      else legendHost.setAttribute("open", "");
+    };
+    if (_legendMq.addEventListener) _legendMq.addEventListener("change", _legendBpHandler);
+    else if (_legendMq.addListener) _legendMq.addListener(_legendBpHandler);
+    // Append to the detail pane (right panel), after signal controls.
+    var detailEl = document.getElementById("okf-detail");
+    if (detailEl) detailEl.appendChild(legendHost);
+    else container.appendChild(legendHost); // fallback (single-file without detail pane)
     function legendRow(swatchBg, text) {
       var item = document.createElement("div");
       item.className = "okf-graph-legend__item";
@@ -1175,14 +1205,20 @@
     // type's visibility, alt-click solos it (alt-click again shows all).
     // State lives in controlState.hiddenTypes; applyFilters consumes it.
     function legendTypeChip(swatchBg, t) {
-      var item = legendRow(swatchBg, t);
-      item.classList.add("okf-graph-legend__item--chip");
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "okf-graph-legend__item okf-graph-legend__item--chip";
       var off = !!controlState.hiddenTypes[t];
       item.classList.toggle("okf-graph-legend__item--off", off);
-      item.setAttribute("role", "button");
-      item.setAttribute("tabindex", "0");
       item.setAttribute("aria-pressed", String(!off));
       item.title = "Click: show/hide " + t + " · Alt-click: only " + t;
+      var sw = document.createElement("span");
+      sw.className = "okf-graph-legend__swatch";
+      sw.style.background = swatchBg;
+      sw.setAttribute("aria-hidden", "true");
+      var label = document.createElement("span");
+      label.textContent = t;
+      item.appendChild(sw); item.appendChild(label);
       function toggle(alt) {
         var ht = controlState.hiddenTypes;
         if (alt) {
@@ -1200,9 +1236,6 @@
         updateStatus();
       }
       item.addEventListener("click", function (e) { toggle(e.altKey); });
-      item.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e.altKey); }
-      });
       return item;
     }
     // A legend row whose swatch is a coloured line segment (for edge keys),
@@ -2584,12 +2617,19 @@
     (function buildZoomCluster() {
       var wrap = document.createElement("div");
       wrap.className = "okf-graph-zoom";
-      function zbtn(label, title, fn) {
+      // Inline SVG icons for zoom/action buttons (deterministic, not font-dependent).
+      var ZOOM_SVG = {
+        plus: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+        minus: '<path d="M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+        fit: '<path d="M3 3h4M3 3v4M13 3h-4M13 3v4M3 13h4M3 13v-4M13 13h-4M13 13v-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+        rerun: '<path d="M4 8a4 4 0 0 1 7-2.6M12 2v3.5h-3.5M12 8a4 4 0 0 1-7 2.6M4 14v-3.5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+      };
+      function zbtn(iconName, title, fn) {
         var b = document.createElement("button");
         b.type = "button";
-        b.textContent = label;
         b.title = title;
         b.setAttribute("aria-label", title);
+        b.innerHTML = '<svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;pointer-events:none">' + (ZOOM_SVG[iconName] || '') + '</svg>';
         b.addEventListener("click", fn);
         wrap.appendChild(b);
         return b;
@@ -2599,10 +2639,10 @@
         cy.zoom({ level: Math.min(MAX_ZOOM, Math.max(0.06, z)),
                   renderedPosition: { x: container.clientWidth / 2, y: container.clientHeight / 2 } });
       }
-      zbtn("+", "Zoom in", function () { zoomBy(1.3); });
-      zbtn("−", "Zoom out", function () { zoomBy(1 / 1.3); });
-      zbtn("⤢", "Fit graph (f)", function () { overlayAwareFit(); });
-      zbtn("↻", "Re-run layout", function () { runLayoutNow(true); });
+      zbtn("plus", "Zoom in", function () { zoomBy(1.3); });
+      zbtn("minus", "Zoom out", function () { zoomBy(1 / 1.3); });
+      zbtn("fit", "Fit graph (f)", function () { overlayAwareFit(); });
+      zbtn("rerun", "Re-run layout", function () { runLayoutNow(true); });
       container.appendChild(wrap);
     })();
 

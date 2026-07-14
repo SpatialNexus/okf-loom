@@ -428,8 +428,9 @@
     const btn = el("button", {
       type: "button", class: "okf-navtoggle",
       "aria-label": "Toggle navigation", "aria-pressed": collapsed ? "true" : "false",
-      title: "Collapse navigation for a full-width read", text: "☰",
+      title: "Collapse navigation for a full-width read",
     });
+    btn.innerHTML = svgIcon("navCollapse");
     btn.addEventListener("click", function () {
       collapsed = !collapsed;
       document.body.classList.toggle("okf-nav-collapsed", collapsed);
@@ -1272,7 +1273,15 @@
       if (!found) {
         // Try the full body as a last resort (block may have been renamed).
         const found2 = block ? findTextNode(body, c.anchor.ref) : null;
-        if (!found2) { c._stale = true; return; }
+        if (!found2) {
+          c._stale = true;
+          // Render a visible stale anchor indicator at the end of the body
+          // so users can see the comment exists even though its text was
+          // edited/removed. Uses the production .okf-comment-mark--stale
+          // class (non-color dotted underline cue) with an accessible label.
+          appendStaleMark(body, c);
+          return;
+        }
         wrapTextNode(found2, c.id, c.state || "open");
         return;
       }
@@ -1308,6 +1317,35 @@
       if (commentState) mark.setAttribute("data-comment-state", commentState);
       range.surroundContents(mark);
     } catch (e) { /* selection crossed a boundary; skip this mark */ }
+  }
+  // Render a visible stale anchor indicator at the end of the body. The
+  // comment's original text was edited or removed; this mark gives users a
+  // non-color cue (dotted underline via .okf-comment-mark--stale) and a
+  // clickable pin to jump to the comment card. Does NOT falsify exact text
+  // anchoring — it is clearly appended at the end with its own label.
+  function appendStaleMark(body, c) {
+    // Don't duplicate if a stale mark for this comment already exists.
+    var existing = body.querySelector('.okf-comment-mark--stale[data-comment-id="' + cssEscape(c.id) + '"]');
+    if (existing) return;
+    var ref = (c.anchor && c.anchor.ref) || "";
+    var mark = el("mark", {
+      class: "okf-comment-mark okf-comment-mark--stale",
+      "data-comment-id": c.id,
+      "data-comment-state": c.state || "open",
+      role: "button",
+      tabindex: "0",
+      title: "Comment anchor: \"" + ref + "\" (text was edited or removed)",
+      "aria-label": "Stale comment anchor: " + ref.substring(0, 60) + (ref.length > 60 ? "…" : ""),
+    });
+    mark.textContent = "💬 " + ref.substring(0, 40) + (ref.length > 40 ? "…" : "");
+    mark.addEventListener("click", function () { jumpToCommentCard(c.id); });
+    mark.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpToCommentCard(c.id); }
+    });
+    // Wrap in a subtle paragraph so it flows as a separate line at the end.
+    var p = el("p", { class: "okf-comment-stale-anchor" });
+    p.appendChild(mark);
+    body.appendChild(p);
   }
   function jumpToCommentMark(commentId) {
     const mark = document.querySelector('.okf-comment-mark[data-comment-id="' + cssEscape(commentId) + '"]');
@@ -3577,31 +3615,51 @@
 
   // Editorial Workbench Round 2: the thin studio rail. Always docked on
   // concept pages (>=900px); each icon opens the matching overlay tab. The
+  // ---- Deterministic inline SVG icon factory -----------------------------
+  // Replaces font-dependent Unicode glyphs (💬 ↻ ☰ ⓘ) that render as tofu in
+  // capture/minimal-font environments. Every icon: viewBox 0 0 16 16, 1em,
+  // currentColor, fill none, aria-hidden=true, focusable=false.
+  var SVG_ICONS = {
+    comments: '<path d="M2 3h12v8H6l-3 3v-3H2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>',
+    changes: '<path d="M4 8a4 4 0 0 1 7-2.6M12 2v3.5h-3.5M12 8a4 4 0 0 1-7 2.6M4 14v-3.5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+    outline: '<path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+    metadata: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+    navCollapse: '<path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+    plus: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+  };
+  function svgIcon(name) {
+    var inner = SVG_ICONS[name];
+    if (!inner) return "";
+    return '<svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;pointer-events:none">' + inner + '</svg>';
+  }
+
   // Comments icon carries a live count badge (synced by updateBadges).
   var railCommentBadge = null;
   function buildRail() {
     // role="group" (not "toolbar") to match the sibling view-switch: the rail
     // has no roving-focus arrow handling, so "toolbar" would over-promise.
     var railEl = el("aside", { class: "okf-rail", role: "group", "aria-label": "Studio" });
-    function railBtn(id, glyph, label) {
+    function railBtn(id, icon, label) {
       var b = el("button", { type: "button", class: "okf-rail__btn",
         "aria-pressed": "false", "aria-controls": "okf-panel",
-        title: label, "aria-label": label, text: glyph });
+        title: label, "aria-label": label });
+      b.innerHTML = svgIcon(icon);
       b.dataset.railId = id;
       b.addEventListener("click", function () { togglePanel(id); });
       railEl.appendChild(b);
       return b;
     }
-    var cBtn = railBtn("comments", "💬", "Comments");   // 💬
+    var cBtn = railBtn("comments", "comments", "Comments");
     railCommentBadge = el("span", { class: "okf-rail__badge", "aria-hidden": "true", hidden: "", text: "0" });
     cBtn.appendChild(railCommentBadge);
-    railBtn("changes", "↻", "Changes");                      // ↻
-    railBtn("outline", "☰", "Outline");                      // ☰
-    railBtn("metadata", "ⓘ", "Metadata");                    // ⓘ
+    railBtn("changes", "changes", "Changes");
+    railBtn("outline", "outline", "Outline");
+    railBtn("metadata", "metadata", "Metadata");
     railEl.appendChild(el("span", { class: "okf-rail__spacer", "aria-hidden": "true" }));
-    // Quick-actions (+) jumps to the Comments overlay (its intents toolbar).
+    // Quick-actions jumps to the Comments overlay (its intents toolbar).
     var plus = el("button", { type: "button", class: "okf-rail__btn",
-      title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel", text: "+" });
+      title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel" });
+    plus.innerHTML = svgIcon("plus");
     plus.addEventListener("click", function () { openPanel("comments", { focusComposer: false }); });
     railEl.appendChild(plus);
     document.body.appendChild(railEl);
