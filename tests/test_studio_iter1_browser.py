@@ -3832,9 +3832,11 @@ def test_start_server_cleans_up_on_timeout(tmp_path: Path, monkeypatch) -> None:
         stdout=sp.DEVNULL, stderr=sp.DEVNULL,
     )
 
-    # Monkey-patch subprocess.Popen and shorten the timeout.
+    # Monkey-patch subprocess.Popen and shorten the timeout. Patch the
+    # current module object directly (not a string path) because `tests`
+    # is not an importable package in the uv full-suite environment.
     monkeypatch.setattr(sp, "Popen", lambda *a, **kw: real_proc)
-    monkeypatch.setattr("tests.test_studio_iter1_browser._SERVER_STARTUP_TIMEOUT", 1.0)
+    monkeypatch.setattr(sys.modules[__name__], "_SERVER_STARTUP_TIMEOUT", 1.0)
 
     with pytest.raises(RuntimeError, match="not ready within"):
         _start_server(tmp_path / "fake_bundle")
