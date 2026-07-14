@@ -816,10 +816,11 @@ def test_static_search_page_loads_client_side_searcher(
     assert "static-search.js" in html, (
         "static __search.html must reference __static/static-search.js"
     )
-    # The script tag must be properly formed (not inside a comment).
+    # The script tag must be properly formed (not inside a comment). The
+    # src may carry a content-derived ?v= cache-busting query (Phase 6).
     import re
     script_match = re.search(
-        r'<script\s+src="[^"]*static-search\.js"[^>]*></script>', html
+        r'<script\s+src="[^"]*static-search\.js(?:\?[^"]*)?"[^>]*></script>', html
     )
     assert script_match, (
         "static __search.html missing valid <script> tag for static-search.js"

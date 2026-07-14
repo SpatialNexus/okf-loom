@@ -252,6 +252,19 @@ active-code gate is open (bundle declares
 `--allow-active-code` / `OKF_LOOM_ALLOW_ACTIVE_CODE`). Path traversal is
 rejected (`..` and separators after normalisation; NUL bytes).
 
+**Cache-busting.** Every external asset URL the viewer emits into live,
+SPA, and static-build HTML carries a content-derived `?v=<16-hex>` query —
+the first 16 hex chars of the SHA-256 of the resolved asset content (builtin
+or effective override). Same content yields the same version deterministically
+across runs and machines; any content change yields a different version, so
+browsers and CDNs fetch fresh bytes after an edit. The query is **ignored for
+routing** (the live server routes on the path component, static webservers
+ignore query strings on files), so a versioned URL and the plain URL resolve
+to the identical bytes. The single-file viewer inlines its CSS/JS and carries
+no version query. The version is a pure function of the resolved bytes — no
+per-process timestamp or random salt — so it is identical across the live,
+SPA, and static emit paths.
+
 ## `/<path>.<media ext>`
 
 Bundle-local media file, so `![shot](/research/assets/shot.png)`

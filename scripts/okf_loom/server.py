@@ -54,12 +54,13 @@ from .render import (
 )
 from .viewer.assets import (
     BUNDLE_MEDIA_EXTENSIONS,
-    list_builtin_static,
     load_config,
     load_static,
     resolve_palette,
     effective_allow_active_code,
     clear_overrides_cache,
+    versioned_asset_url,
+    is_known_static_asset,
 )
 from .viewer.markdown import markdown_to_html, rewrite_internal_links, url_for_concept
 
@@ -1609,6 +1610,13 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         name = posixpath.normpath("/" + name).lstrip("/")
         if "/" in name or ".." in name or not name:
             return self._send_text(404, "Not found", content_type="text/plain")
+        # Single explicit scope (STATIC_ASSET_NAMES): only built-in viewer
+        # asset names may be served here, whether from a bundle override or
+        # the built-ins. This closes the previous gap where the override
+        # branch served ANY file under .okf-loom/viewer/static/ regardless of
+        # whether it was a real viewer asset.
+        if not is_known_static_asset(name):
+            return self._send_text(404, f"Unknown static asset: {name}", content_type="text/plain")
         # Bundle override first — gated on the effective active-code gate
         # (security: overrides can carry arbitrary JS/HTML, same trust
         # boundary as plugins/templates). The operator must consent via
@@ -1630,11 +1638,9 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
                 body = override.read_bytes()
                 ctype = _content_type_for(name)
                 return self._send_bytes(200, body, content_type=ctype)
-        if name in list_builtin_static():
-            body = load_static(name, self.bundle).encode("utf-8")
-            ctype = _content_type_for(name)
-            return self._send_bytes(200, body, content_type=ctype)
-        return self._send_text(404, f"Unknown static asset: {name}", content_type="text/plain")
+        body = load_static(name, self.bundle).encode("utf-8")
+        ctype = _content_type_for(name)
+        return self._send_bytes(200, body, content_type=ctype)
 
     def _handle_bundle_asset(self, rel: str) -> None:
         """Serve a bundle-local media file (screenshots, diagrams, video, PDF).
@@ -1751,6 +1757,12 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             "theme": getattr(self.server, "studio_theme", "auto"),
         }
         payload = json.dumps(cfg, default=str)
+        # Asset URLs carry a content-derived ``?v=`` cache-busting query
+        # (viewer/assets.versioned_asset_url) so an edited studio.css/live.js/
+        # studio.js invalidates browser/CDN caches. The live router parses
+        # ``urlparse().path`` for routing, so the query is ignored; CSP
+        # ``'self'`` is unaffected. The version is the same digest the
+        # rendered pages emit for their assets (single contract).
         bits = [
             # CSP-safe bootstrap: a non-executable JSON data block. The
             # served CSP is ``script-src 'self' ...`` with NO 'unsafe-inline',
@@ -1761,9 +1773,9 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             # modules (live.js/studio.js) read it on boot and expose it as
             # ``window.__OKF_LOOM_STUDIO__`` for parity with the documented API.
             f'<script type="application/json" id="okf-studio-bootstrap">{payload}</script>',
-            '<link rel="stylesheet" href="/__static/studio.css">',
-            '<script type="module" src="/__static/live.js"></script>',
-            '<script type="module" src="/__static/studio.js"></script>',
+            f'<link rel="stylesheet" href="{versioned_asset_url("studio.css", "/__static", self.bundle)}">',
+            f'<script type="module" src="{versioned_asset_url("live.js", "/__static", self.bundle)}"></script>',
+            f'<script type="module" src="{versioned_asset_url("studio.js", "/__static", self.bundle)}"></script>',
         ]
         return "\n".join(bits)
 

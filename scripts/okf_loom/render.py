@@ -39,6 +39,7 @@ from .viewer.assets import (
     type_icon_svg,
     type_icon_key,
     type_icon_paths,
+    versioned_asset_url,
 )
 from .viewer.markdown import (
     markdown_to_html,
@@ -562,7 +563,7 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 _THEMES: tuple[str, ...] = EXPLICIT_THEMES
 
 
-def _theme_js_link(static_prefix: str) -> str:
+def _theme_js_link(static_prefix: str, bundle: Bundle | None = None) -> str:
     """``<script>`` tag for the canonical theme-state asset.
 
     Emitted in ``<head>`` so theme.js executes BEFORE every consumer: the
@@ -570,8 +571,13 @@ def _theme_js_link(static_prefix: str) -> str:
     studio module scripts the live server injects before ``</head>``
     (deferred classic scripts and module scripts share one in-document-order
     execution queue).
+
+    The URL carries a content-derived ``?v=`` cache-busting query
+    (:func:`versioned_asset_url`) so a theme.js edit invalidates browser/CDN
+    caches. The version is computed from the same resolved content in every
+    emit path (serve/SPA/static), keeping the digest contract uniform.
     """
-    return f'<script src="{static_prefix}/theme.js" defer></script>'
+    return f'<script src="{versioned_asset_url("theme.js", static_prefix, bundle)}" defer></script>'
 
 
 def _theme_button_html(initial_theme: str) -> str:
@@ -1609,10 +1615,10 @@ def _render_concept_page(
         theme_attr = f' data-theme="{initial_theme}"'
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    theme_js_link = _theme_js_link(static_prefix)
-    js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
-    renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    theme_js_link = _theme_js_link(static_prefix, bundle)
+    js_link = f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>'
+    renderers_link = f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
 
     # P2-22: render aliases as a subtitle paragraph immediately after the
     # page title (SPEC §7.1 wording: "show as subtitles"). The subtitle is
@@ -2271,10 +2277,10 @@ def _render_index_page(
     # pages, so the notice never appeared on the index/search surfaces).
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    theme_js_link = _theme_js_link(static_prefix)
-    js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
-    renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    theme_js_link = _theme_js_link(static_prefix, bundle)
+    js_link = f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>'
+    renderers_link = f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
     graph_link = "/__graph" if mode in ("serve", "spa") else (
         ("../" * len(sub_parts)) + "__graph.html" if sub_parts else "__graph.html"
     )
@@ -2444,10 +2450,10 @@ def _render_search_page(
     # detects static mode and shows the static-search-note there as well.
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    theme_js_link = _theme_js_link(static_prefix)
-    js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
-    renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    theme_js_link = _theme_js_link(static_prefix, bundle)
+    js_link = f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>'
+    renderers_link = f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
     # Current spec §9: in static mode also load the client-side
     # searcher so the static __search.html page is functional (no /__search
     # backend available). The live `serve`/`spa` paths are unchanged — they
@@ -2455,8 +2461,8 @@ def _render_search_page(
     # emitted under __static/ by _emit_site (it iterates list_builtin_static).
     if mode == "static":
         js_link = (
-            f'<script src="{static_prefix}/wiki.js" defer></script>\n'
-            f'<script src="{static_prefix}/static-search.js" defer></script>'
+            f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>\n'
+            f'<script src="{versioned_asset_url("static-search.js", static_prefix, bundle)}" defer></script>'
         )
 
     # P2-61: shared topbar nav. Search page lives at the bundle root, so
@@ -2534,15 +2540,15 @@ def _render_graph_page(
     # concept/index/search pages.
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    graph_css_link = f'<link rel="stylesheet" href="{static_prefix}/graph.css">'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    graph_css_link = f'<link rel="stylesheet" href="{versioned_asset_url("graph.css", static_prefix, bundle)}">'
     # The graph detail panel renders the same
     # server-produced concept HTML as the wiki pages, so it needs the SAME
     # progressive renderers (mermaid/hljs/KaTeX). graph.js dispatches
     # okf-loom:bodyPatched after each showDetail() so renderers.js re-scans.
     graph_js = (
-        f'<script src="{static_prefix}/graph.js" defer></script>\n'
-        f'<script src="{static_prefix}/renderers.js" defer></script>'
+        f'<script src="{versioned_asset_url("graph.js", static_prefix, bundle)}" defer></script>\n'
+        f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
     )
 
     return (
@@ -2555,7 +2561,7 @@ def _render_graph_page(
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
         .replace("__GRAPH_CSS_LINK__", graph_css_link)
-        .replace("__THEME_JS_LINK__", _theme_js_link(static_prefix))
+        .replace("__THEME_JS_LINK__", _theme_js_link(static_prefix, bundle))
         .replace("__GRAPH_JS_SRC__", graph_js)
         .replace("__CDN_SCRIPTS__", cdn_scripts)
         .replace("__INITIAL_THEME__", initial_theme)
