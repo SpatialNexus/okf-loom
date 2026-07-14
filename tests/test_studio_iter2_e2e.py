@@ -515,8 +515,8 @@ def test_full_agent_loop_e2e(server_url: str, page, e2e_bundle: Path) -> None:
             break
         time.sleep(0.3)
     assert doc_check, (
-        "server did not reload tables/orders with the Refund flow link "
-        "within 5s after link-add (watcher not detecting .md change?)"
+        "server did not expose the Refund flow link in rendered data HTML "
+        "within 5s after link-add (watcher reload or visible-link placement failed)"
     )
 
     # Drive a doc re-fetch so the browser picks up the CLI's disk write.

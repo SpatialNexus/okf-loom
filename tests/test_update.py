@@ -117,6 +117,145 @@ def test_add_link_idempotent(tmp_path: Path) -> None:
     assert s2["results"][0][1]["reason"] == "already_linked"
 
 
+def test_add_link_defaults_before_terminal_body_citations_appendix(
+    tmp_path: Path,
+) -> None:
+    """Implicit links stay visible when a duplicate Citations appendix exists."""
+    (tmp_path / "orders.md").write_text(
+        "---\n"
+        "type: Table\n"
+        "title: Orders\n"
+        "custom_key: preserve_me\n"
+        "citations:\n"
+        "  - id: source-1\n"
+        "    text: Authoritative source\n"
+        "---\n"
+        "# Orders\n\n"
+        "Authorized order details.\n\n"
+        "# Citations\n\n"
+        "- Authored body citation.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "refund_flow.md").write_text(
+        "---\ntype: Playbook\ntitle: Refund flow\n---\nRefund steps.\n",
+        encoding="utf-8",
+    )
+    bundle = Bundle.load(tmp_path)
+    original_suffix = bundle.concept_at("orders").body.split("# Citations", 1)[1]
+    plan = _plan([
+        UpdateOp("add_link", ("orders",), {
+            "label": "Refund flow", "target_concept_id": "refund_flow",
+        }),
+    ])
+
+    first = apply_plan(bundle, plan)
+    added_body = bundle.concept_at("orders").body
+    assert first["applied"] == 1
+    assert added_body.index("* [Refund flow](/refund_flow.md)") < added_body.index(
+        "# Citations"
+    )
+    assert added_body.split("# Citations", 1)[1] == original_suffix
+
+    persisted = Bundle.load(tmp_path)
+    assert persisted.concept_at("orders").frontmatter["custom_key"] == "preserve_me"
+    assert persisted.concept_at("orders").frontmatter["citations"] == [
+        {"id": "source-1", "text": "Authoritative source"}
+    ]
+    assert any(
+        link.target == ("refund_flow",)
+        for link in persisted.concept_at("orders").links(bundle_root=tmp_path)
+    )
+
+    before_reapply = (tmp_path / "orders.md").read_bytes()
+    second = apply_plan(bundle, plan)
+    assert second["applied"] == 0
+    assert second["results"][0][1]["reason"] == "already_linked"
+    assert (tmp_path / "orders.md").read_bytes() == before_reapply
+
+
+def test_add_link_without_citations_keeps_existing_eof_placement(tmp_path: Path) -> None:
+    root = _make_bundle(tmp_path)
+    bundle = Bundle.load(root)
+    apply_plan(bundle, _plan([
+        UpdateOp("add_link", ("a",), {
+            "label": "go B", "target_concept_id": "b",
+        }),
+    ]))
+    assert bundle.concept_at("a").body == "# A\n\nbody of A\n* [go B](/b.md)\n"
+
+
+def test_add_link_defaults_before_body_citations_without_frontmatter_citations(
+    tmp_path: Path,
+) -> None:
+    root = _make_bundle(tmp_path)
+    (root / "a.md").write_text(
+        "---\ntype: T\ntitle: AAA\n---\n"
+        "# Overview\n\nVisible body.\n\n"
+        "# Citations\n\n- Body citation.\n",
+        encoding="utf-8",
+    )
+    bundle = Bundle.load(root)
+    apply_plan(bundle, _plan([
+        UpdateOp("add_link", ("a",), {
+            "label": "go B", "target_concept_id": "b",
+        }),
+    ]))
+    body = bundle.concept_at("a").body
+    assert body.index("* [go B](/b.md)") < body.index("# Citations")
+
+
+@pytest.mark.parametrize(
+    ("fence", "near_match"),
+    [("````", "```python"), ("~~~~", "~~~python")],
+    ids=["long-backtick", "long-tilde"],
+)
+def test_add_link_ignores_citations_inside_renderer_fences(
+    tmp_path: Path,
+    fence: str,
+    near_match: str,
+) -> None:
+    root = _make_bundle(tmp_path)
+    (root / "a.md").write_text(
+        "---\ntype: T\ntitle: AAA\n---\n"
+        "# Overview\n\n"
+        f"{fence}example\n"
+        f"{near_match}\n"
+        "# Citations\n"
+        f"{fence}\n",
+        encoding="utf-8",
+    )
+    bundle = Bundle.load(root)
+    apply_plan(bundle, _plan([
+        UpdateOp("add_link", ("a",), {
+            "label": "go B", "target_concept_id": "b",
+        }),
+    ]))
+    body = bundle.concept_at("a").body
+    assert body.index("* [go B](/b.md)") > body.rindex(fence)
+
+
+def test_add_link_explicit_section_ignores_terminal_citations_placement(
+    tmp_path: Path,
+) -> None:
+    root = _make_bundle(tmp_path)
+    (root / "a.md").write_text(
+        "---\ntype: T\ntitle: AAA\n---\n"
+        "# Overview\n\nOverview text.\n\n"
+        "# Related\n\nRelated text.\n\n"
+        "# Citations\n\n- Authored citation.\n",
+        encoding="utf-8",
+    )
+    bundle = Bundle.load(root)
+    apply_plan(bundle, _plan([
+        UpdateOp("add_link", ("a",), {
+            "label": "go B", "target_concept_id": "b", "section": "Overview",
+        }),
+    ]))
+    body = bundle.concept_at("a").body
+    assert body.index("* [go B](/b.md)") < body.index("# Related")
+    assert body.index("# Related") < body.index("# Citations")
+
+
 def test_add_link_target_not_found(tmp_path: Path) -> None:
     root = _make_bundle(tmp_path)
     b = Bundle.load(root)
