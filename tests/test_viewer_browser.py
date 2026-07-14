@@ -253,7 +253,527 @@ def test_graph_appearance_menu_sets_contrast_and_theme(server_url, page):
     assert page.evaluate("document.documentElement.getAttribute('data-theme')").endswith("-dark")
 
 
-def test_graph_theme_resolves_swiss_first(server_url, page):
+def test_graph_tour_defers_while_appearance_open(server_url: str, page) -> None:
+    """Regression: a late first-visit graph tour must NOT steal focus and close
+    a user-opened Appearance popover. The tour defers until Appearance closes,
+    then activates exactly once with its existing focus/dialog behaviour.
+
+    The first-visit tour initializes from graph.js's async data fetch
+    (``acquireBundle().then(init)``), which can resolve AFTER the user opened
+    Appearance. Before the fix the late tour appended + focused itself, tripped
+    theme.js's correct focus-exit close, and hid the Soft control mid-click.
+
+    Deterministic — no sleeps/timeouts: the boot graph-JSON fetch is HELD by an
+    init-script fetch gate (the same proven pattern as
+    ``test_graph_refresh_latest_wins``) until AFTER Appearance is open, so init
+    (and the tour gate) provably runs against an already-open popover.
+    """
+    # Hold the boot graph.json fetch so init/tour cannot run until released.
+    gate = """
+    (() => {
+      const realFetch = window.fetch.bind(window);
+      window.__graphGate = { on: true, pending: [], real: realFetch };
+      window.fetch = function (input, init) {
+        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+        const el = document.getElementById('okf-graph');
+        const dataUrl = el && el.getAttribute('data-graph-url');
+        if (window.__graphGate.on && dataUrl && url.indexOf(dataUrl) !== -1) {
+          return new Promise((resolve) => { window.__graphGate.pending.push(resolve); });
+        }
+        return realFetch(input, init);
+      };
+    })();
+    """
+    # Deliberately NOT setting okfGraphTourDone — the first-visit tour must
+    # attempt to show so the defer/resume ownership path is exercised.
+    page.add_init_script(gate)
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+
+    # The Appearance trigger is static markup; it works before graph init.
+    page.wait_for_selector("#okf-theme", timeout=10000).click()
+    page.wait_for_selector(".okf-appearance__menu:not([hidden])", timeout=5000)
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 1, (
+        "Appearance should register exactly one overlay"
+    )
+
+    # Wait for Cytoscape (a graph.js init precondition) and the held boot fetch
+    # to both be ready, then release the fetch with the REAL graph.json. init
+    # runs; the tour gate observes the open overlay and MUST defer.
+    # NOTE: on ``okf serve`` the graph page boots TWO graph.json consumers
+    # (graph.js ``acquireBundle`` AND studio.js ``loadGraph``); both are held
+    # by the gate. Release EVERY pending fetch with a FRESH Response body (a
+    # Response body is single-consume), so init completes regardless of how
+    # many consumers exist now or later.
+    page.wait_for_function("() => typeof window.cytoscape === 'function'", timeout=15000)
+    page.wait_for_function("() => window.__graphGate.pending.length >= 1", timeout=5000)
+    released = page.evaluate(
+        """async () => {
+            const el = document.getElementById('okf-graph');
+            const dataUrl = el.getAttribute('data-graph-url');
+            const resp = await window.__graphGate.real(dataUrl);
+            const body = await resp.text();
+            window.__graphGate.on = false;
+            const pending = window.__graphGate.pending.slice();
+            window.__graphGate.pending.length = 0;
+            pending.forEach((resolve) => {
+                resolve(new Response(body, { headers: { 'Content-Type': 'application/json' } }));
+            });
+            return pending.length;
+        }"""
+    )
+    assert released >= 1, "no held graph fetch was released"
+
+    # Prove init executed PAST the microTour gate (the diagnostic hook is
+    # registered after the tour block) — the gate has made its decision.
+    page.wait_for_function(
+        "() => !!(window.__okfLoomGraph && window.__okfLoomGraph.cy "
+        "&& window.__okfLoomGraph.cy.nodes().length > 0)",
+        timeout=15000,
+    )
+
+    # Contract: the open Appearance popover is untouched by the deferred tour.
+    expect(page.locator("#okf-theme")).to_have_attribute("aria-expanded", "true")
+    assert page.locator(".okf-appearance__menu:not([hidden])").count() == 1, (
+        "the deferred tour must not close the open Appearance popover"
+    )
+    # The tour has NOT mounted / stolen focus while Appearance owns it.
+    assert page.locator(".okf-graph-tour").count() == 0, (
+        "tour mounted while a user-owned overlay was open (focus would be stolen)"
+    )
+
+    # Soft contrast stays visible, operable, and persisted mid-defer.
+    soft = page.locator('.okf-appearance__opt[data-okf-set="contrast"][data-okf-val="soft"]')
+    expect(soft).to_be_visible()
+    soft.click()
+    assert page.evaluate("document.documentElement.getAttribute('data-okf-contrast')") == "soft"
+
+    # Contract: intentionally closing Appearance releases the deferred tour
+    # EXACTLY ONCE, with its existing focus-in / modal-dialog behaviour.
+    page.keyboard.press("Escape")  # overlay stack closes Appearance only
+    tour = page.locator(".okf-graph-tour")
+    tour.wait_for(state="visible", timeout=5000)
+    assert tour.count() == 1, "deferred tour must activate exactly once"
+    expect(tour).to_have_attribute("role", "dialog")
+    expect(tour).to_have_attribute("aria-modal", "true")
+    # Focus moved INTO the tour on open (its primary action), not left behind.
+    page.wait_for_function(
+        "() => { const c = document.querySelector('.okf-graph-tour');"
+        " return c && c.contains(document.activeElement); }",
+        timeout=4000,
+    )
+
+    # Contract: first-visit completion state stays authoritative — dismissing
+    # marks the tour done and removes it (never double-activated).
+    page.locator(".okf-graph-tour__skip").click()
+    expect(tour).to_have_count(0)
+    assert page.evaluate("localStorage.getItem('okfGraphTourDone')") == "1"
+
+
+def _graph_tour_fetch_gate() -> str:
+    """The init-script fetch gate used by the tour ownership tests.
+
+    Holds the boot ``graph.json`` fetch until the test releases it, so graph
+    init (and the tour gate) provably runs against whatever overlay state the
+    test has arranged first. Same proven pattern as
+    ``test_graph_refresh_latest_wins`` / ``test_graph_tour_defers_while_appearance_open``.
+    """
+    return """
+    (() => {
+      const realFetch = window.fetch.bind(window);
+      window.__graphGate = { on: true, pending: [], real: realFetch };
+      window.fetch = function (input, init) {
+        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+        const el = document.getElementById('okf-graph');
+        const dataUrl = el && el.getAttribute('data-graph-url');
+        if (window.__graphGate.on && dataUrl && url.indexOf(dataUrl) !== -1) {
+          return new Promise((resolve) => { window.__graphGate.pending.push(resolve); });
+        }
+        return realFetch(input, init);
+      };
+    })();
+    """
+
+
+def _release_graph_fetch(page) -> int:
+    """Release the held boot graph fetch(es) with the real body and return how
+    many were released. Drains via an awaited Promise so the release + any
+    downstream init microtasks complete before the call returns."""
+    released = page.evaluate(
+        """async () => {
+            const el = document.getElementById('okf-graph');
+            const dataUrl = el.getAttribute('data-graph-url');
+            const resp = await window.__graphGate.real(dataUrl);
+            const body = await resp.text();
+            window.__graphGate.on = false;
+            const pending = window.__graphGate.pending.slice();
+            window.__graphGate.pending.length = 0;
+            pending.forEach((resolve) => {
+                resolve(new Response(body, { headers: { 'Content-Type': 'application/json' } }));
+            });
+            return pending.length;
+        }"""
+    )
+    return released
+
+
+def test_graph_tour_rechecks_ownership_before_activating(server_url: str, page) -> None:
+    """P1 #1 + non-timer scheduling proof.
+
+    A deferred tour must RECHECK overlay ownership at the instant of
+    activation. If another overlay opens between the depth-0 notify and the
+    scheduled activation, the tour must NOT mount — it re-defers and waits for
+    the next real depth-0, then resumes EXACTLY ONCE.
+
+    Also proves the resume is scheduled via ``queueMicrotask`` (deterministic,
+    pre-paint), NOT a ``setTimeout`` timer: the tour is absent the instant
+    after the depth-0 ``remove`` (activation is queued, not synchronous, so the
+    closing overlay's own focus restore runs first) and present inside the SAME
+    task's microtask queue (a ``setTimeout(0)`` macrotask could not have run
+    there). No sleeps/timeouts are used anywhere.
+
+    The "another overlay" is a synthetic ``OKFOverlayStack`` entry — the shared
+    stack is the authority, so any registered entry (Appearance popover, studio
+    panel/palette/conflict modal, a future graph popover) exercises the exact
+    same ownership path; the graph page has no studio overlays to drive.
+    """
+    page.add_init_script(_graph_tour_fetch_gate())
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    page.wait_for_function("() => typeof window.cytoscape === 'function'", timeout=15000)
+    page.wait_for_function("() => window.__graphGate.pending.length >= 1", timeout=5000)
+
+    # Open overlay A (depth 1) BEFORE releasing the fetch, so init's tour gate
+    # observes a non-empty stack and defers.
+    assert page.evaluate("""() => {
+        window.__tourProbeA = { close: () => {} };
+        window.OKFOverlayStack.push(window.__tourProbeA);
+        return window.OKFOverlayStack.depth();
+    }""") == 1
+
+    # Release -> init runs -> tour gate sees depth 1 -> defers (subscribes).
+    assert _release_graph_fetch(page) >= 1
+    page.wait_for_function(
+        "() => !!(window.__okfLoomGraph && window.__okfLoomGraph.cy "
+        "&& window.__okfLoomGraph.cy.nodes().length > 0)",
+        timeout=15000,
+    )
+    assert page.locator(".okf-graph-tour").count() == 0, (
+        "tour mounted while a user-owned overlay was open"
+    )
+
+    # P1 #1: stale queued activation across an overlay transition. Close A
+    # (depth 0 -> subscriber queues the activation microtask + unsubscribes)
+    # and open B (depth 1) in the SAME task, before the microtask runs. The
+    # Promise resolves from a microtask that runs AFTER the activation
+    # microtask, so by return the re-defer decision has been made.
+    depth_after = page.evaluate("""() => {
+        window.__tourProbeB = { close: () => {} };
+        window.OKFOverlayStack.remove(window.__tourProbeA);  // depth 0 -> queue M1
+        window.OKFOverlayStack.push(window.__tourProbeB);    // depth 1 (pre-microtask)
+        return new Promise((resolve) => {
+            window.queueMicrotask(() => resolve(window.OKFOverlayStack.depth())); // M2 > M1
+        });
+    }""")
+    # M1 (activateTour) ran, RE-CHECKED ownership, saw depth 1 (B), re-deferred.
+    assert depth_after == 1
+    assert page.locator(".okf-graph-tour").count() == 0, (
+        "tour mounted from a stale queued activation after a new overlay opened"
+    )
+
+    # Non-timer scheduling + exactly-once resume. Close B and observe the
+    # activation inside the same task's microtask queue.
+    result = page.evaluate("""() => {
+        // After remove(), the subscriber queues M1 = activateTour (it does NOT
+        // run synchronously — the closing overlay's focus restore must run first).
+        window.OKFOverlayStack.remove(window.__tourProbeB);
+        const afterRemoveBeforeDrain = !!document.querySelector('.okf-graph-tour');
+        return new Promise((resolve) => {
+            window.queueMicrotask(() => {  // M2: runs AFTER M1 (FIFO microtasks)
+                resolve({
+                    afterRemoveBeforeDrain: afterRemoveBeforeDrain,
+                    afterMicrotask: !!document.querySelector('.okf-graph-tour'),
+                    depth: window.OKFOverlayStack.depth(),
+                });
+            });
+        });
+    }""")
+    # Activation is queued, not synchronous inside remove().
+    assert result["afterRemoveBeforeDrain"] is False, (
+        "tour mounted synchronously inside the depth transition "
+        "(closing overlay's focus restore would be preempted)"
+    )
+    # Activation IS a microtask: it ran before M2. A setTimeout(0) macrotask
+    # could not have run before M2, so this proves non-timer scheduling.
+    assert result["afterMicrotask"] is True, (
+        "tour did not activate via microtask after depth-0 "
+        "(timer/polling suspected)"
+    )
+    assert result["depth"] == 1, "active tour must register in the overlay stack"
+
+    # P1 #2 (resume path): the resumed tour is a proper registered dialog.
+    tour = page.locator(".okf-graph-tour")
+    expect(tour).to_have_attribute("role", "dialog")
+    expect(tour).to_have_attribute("aria-modal", "true")
+    page.wait_for_function(
+        "() => { const c = document.querySelector('.okf-graph-tour');"
+        " return c && c.contains(document.activeElement); }",
+        timeout=4000,
+    )
+
+    # Cleanup: skip -> finish -> stack slot released, completion authoritative.
+    page.locator(".okf-graph-tour__skip").click()
+    expect(tour).to_have_count(0)
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 0
+    assert page.evaluate("localStorage.getItem('okfGraphTourDone')") == "1"
+
+
+def test_graph_tour_registered_as_overlay_escape_restores_focus(server_url: str, page) -> None:
+    """P1 #2 + Esc/focus restoration proof (happy path).
+
+    The active modal tour is represented in ``OKFOverlayStack`` for
+    authoritative bookkeeping: while mounted it is the registered topmost
+    overlay (``depth() == 1``), one Escape closes ONLY the tour (the shared
+    stack's capture-phase handler calls ``finish`` and ``stopPropagation``
+    blocks the graph's global Escape handler, so the selection is NOT cleared),
+    and the tour removes itself from the stack on dismiss (``depth() == 0``)
+    while restoring focus to a stable graph control.
+    """
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    tour = page.locator(".okf-graph-tour")
+    tour.wait_for(state="visible")
+
+    # The tour is registered as the active overlay (authoritative bookkeeping).
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 1, (
+        "active tour must be present in the overlay stack"
+    )
+
+    # Give the graph a selection so we can prove Escape closed ONLY the tour
+    # and did not leak to the graph's global Escape handler.
+    page.wait_for_function(
+        "() => window.__okfLoomGraph && window.__okfLoomGraph.cy "
+        "&& window.__okfLoomGraph.cy.nodes().length > 0",
+        timeout=15000,
+    )
+    page.evaluate("() => { window.__okfLoomGraph.cy.nodes().first().select(); }")
+    assert page.evaluate("() => window.__okfLoomGraph.cy.nodes(':selected').length") == 1
+
+    # Escape: the shared stack closes its topmost entry (the tour) via finish();
+    # capture-phase stopPropagation blocks the graph's bubble-phase handler.
+    page.keyboard.press("Escape")
+    expect(tour).to_have_count(0)
+    # The tour removed itself from the stack on dismiss.
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 0, (
+        "dismissed tour must release its overlay-stack slot"
+    )
+    # Global graph Escape (clear selection/path) did NOT fire.
+    assert page.evaluate("() => window.__okfLoomGraph.cy.nodes(':selected').length") == 1, (
+        "Escape leaked past the tour and cleared the graph selection"
+    )
+    # Focus restored to a stable graph control.
+    assert page.evaluate(
+        "() => document.activeElement && document.activeElement.id"
+    ) == "okf-search"
+
+
+def test_graph_tour_no_reactivation_after_dismissal(server_url: str, page) -> None:
+    """P1: post-dismissal subscriber cleanup / non-reactivation.
+
+    After the tour is dismissed (``finish``), no defer subscription leaks and
+    later overlay transitions never reactivate it. ``localStorage`` completion
+    stays authoritative. Covers both the happy-path dismissal and the
+    deferred-then-activated dismissal (the defer subscription is released at
+    activation time, before any dismissal, so the same invariant holds).
+    """
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    tour = page.locator(".okf-graph-tour")
+    tour.wait_for(state="visible")
+
+    # Dismiss via the skip button (finish path: stack release + completion).
+    page.locator(".okf-graph-tour__skip").click()
+    expect(tour).to_have_count(0)
+    assert page.evaluate("localStorage.getItem('okfGraphTourDone')") == "1"
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 0
+
+    # Overlay transitions AFTER dismissal must NOT reactivate the tour — a
+    # leaked defer subscriber would fire on this depth 1 -> 0 transition.
+    page.evaluate("""() => {
+        const e = { close: () => {} };
+        window.OKFOverlayStack.push(e);    // depth 1
+        window.OKFOverlayStack.remove(e);  // depth 0 -> would fire a leaked subscriber
+    }""")
+    assert page.locator(".okf-graph-tour").count() == 0, (
+        "tour reactivated after dismissal — a defer subscription leaked"
+    )
+    assert page.evaluate("localStorage.getItem('okfGraphTourDone')") == "1"
+
+
+def test_appearance_over_active_tour_escape_restores_tour_focus(server_url: str, page) -> None:
+    """P1 #1: real layered Appearance-over-active-tour focus lifecycle.
+
+    When the first-visit graph tour is an ACTIVE registered modal (depth 1)
+    and the Appearance popover opens ABOVE it (depth 2), Escape must close
+    ONLY Appearance and restore focus INSIDE the still-active tour (its focus
+    trap) — NOT to the Appearance trigger left behind the modal (which would
+    bypass the trap). A second Escape then closes the tour and restores focus
+    to a stable graph control; the graph selection is preserved (Escape does
+    not leak to the graph's bubble-phase handler).
+
+    This is the REAL layered case the synthetic-probe tests model: both
+    overlays are genuine product surfaces (radio popover + first-visit modal
+    dialog) driven through their real open/close/focus paths.
+    """
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    tour = page.locator(".okf-graph-tour")
+    tour.wait_for(state="visible")
+    # The active tour is the registered topmost modal (depth 1).
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 1, (
+        "active tour must be present in the overlay stack"
+    )
+
+    # Wait for the graph to be ready so the selection / Escape-leak proof holds.
+    page.wait_for_function(
+        "() => window.__okfLoomGraph && window.__okfLoomGraph.cy "
+        "&& window.__okfLoomGraph.cy.nodes().length > 0",
+        timeout=15000,
+    )
+    page.evaluate("() => { window.__okfLoomGraph.cy.nodes().first().select(); }")
+    assert page.evaluate("() => window.__okfLoomGraph.cy.nodes(':selected').length") == 1
+
+    # Open Appearance ON TOP of the active tour (depth 1 -> 2). A programmatic
+    # click on the trigger is deterministic and independent of coach-mark
+    # geometry (the tour card never covers the topbar control).
+    page.evaluate("() => document.getElementById('okf-theme').click()")
+    page.wait_for_selector("#okf-appearance-menu:not([hidden])", timeout=5000)
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 2, (
+        "Appearance must register as a second overlay above the tour"
+    )
+
+    # Escape 1: closes ONLY Appearance (topmost). Focus must return INSIDE the
+    # still-active tour (its focus trap), NOT to #okf-theme behind it.
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#okf-appearance-menu[hidden]", state="attached")
+    # Appearance is dismissed but the tour stays mounted and registered.
+    expect(tour).to_have_count(1)
+    expect(page.locator("#okf-theme")).to_have_attribute("aria-expanded", "false")
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 1, (
+        "tour must remain the registered topmost overlay after Appearance closed"
+    )
+    # Focus is INSIDE the tour, not on the Appearance trigger behind it.
+    page.wait_for_function(
+        "() => { const c = document.querySelector('.okf-graph-tour');"
+        " return c && c.contains(document.activeElement); }",
+        timeout=4000,
+    )
+    assert page.evaluate("document.activeElement.id") != "okf-theme", (
+        "focus restored to the Appearance trigger behind the still-open tour "
+        "(focus trap bypassed)"
+    )
+
+    # Escape 2: closes the tour (now topmost). Selection is preserved (Escape
+    # did not leak to the graph's global handler) and focus lands on a stable
+    # graph control.
+    page.keyboard.press("Escape")
+    expect(tour).to_have_count(0)
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 0, (
+        "dismissed tour must release its overlay-stack slot"
+    )
+    assert page.evaluate("() => window.__okfLoomGraph.cy.nodes(':selected').length") == 1, (
+        "Escape leaked past the tour and cleared the graph selection"
+    )
+    assert page.evaluate(
+        "() => document.activeElement && document.activeElement.id"
+    ) == "okf-search"
+
+
+def test_graph_tour_resume_microtask_without_queueMicrotask(server_url: str, page) -> None:
+    """P1 #2: deferred tour activation is microtask-only even when
+    ``queueMicrotask`` is absent.
+
+    The no-timer/sleep/retry policy requires activation scheduling to ALWAYS
+    be a microtask. When ``window.queueMicrotask`` is unavailable, graph.js
+    must fall back to a resolved ``Promise`` (also a microtask) — NEVER a
+    ``setTimeout`` timer. Proven deterministically (no sleeps): the
+    activation runs inside the same task's microtask queue, observable via a
+    ``Promise.resolve().then`` observer queued AFTER the activation (FIFO
+    microtasks). A ``setTimeout(0)`` macrotask could not have run before that
+    observer (microtasks drain before macrotasks), so this proves non-timer
+    scheduling on the fallback path. Also re-proves the stale-depth recheck
+    and exactly-once resume.
+    """
+    # Absent/disable queueMicrotask BEFORE any page script runs (init scripts
+    # run before graph.js/theme.js). Assignment is always honored (the property
+    # is writable); delete additionally models the genuinely-absent case on
+    # engines where it is configurable. graph.js MUST then use its Promise
+    # microtask fallback.
+    page.add_init_script("""
+    (() => {
+      try { delete window.queueMicrotask; } catch (e) {}
+      try { window.queueMicrotask = undefined; } catch (e) {}
+      window.__noQMT = (typeof window.queueMicrotask !== "function");
+    })();
+    """ + _graph_tour_fetch_gate())
+    page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
+    page.wait_for_function("() => window.__noQMT === true", timeout=5000)
+    page.wait_for_function("() => typeof window.cytoscape === 'function'", timeout=15000)
+    page.wait_for_function("() => window.__graphGate.pending.length >= 1", timeout=5000)
+
+    # Defer: open overlay A before releasing the fetch so the tour gate sees a
+    # non-empty stack and defers (subscribing via the Promise fallback path).
+    assert page.evaluate("""() => {
+        window.__tourProbeA = { close: () => {} };
+        window.OKFOverlayStack.push(window.__tourProbeA);
+        return window.OKFOverlayStack.depth();
+    }""") == 1
+
+    assert _release_graph_fetch(page) >= 1
+    page.wait_for_function(
+        "() => !!(window.__okfLoomGraph && window.__okfLoomGraph.cy "
+        "&& window.__okfLoomGraph.cy.nodes().length > 0)",
+        timeout=15000,
+    )
+    assert page.locator(".okf-graph-tour").count() == 0, (
+        "tour mounted while a user-owned overlay was open"
+    )
+
+    # Close A (depth 0 -> Promise fallback queues the activation microtask).
+    # Observe via Promise.resolve().then (also a microtask, queued AFTER the
+    # activation): if activation were a setTimeout macrotask, the tour would be
+    # ABSENT when the observer runs (microtasks drain before macrotasks).
+    result = page.evaluate("""() => {
+        window.OKFOverlayStack.remove(window.__tourProbeA);
+        const afterRemoveBeforeDrain = !!document.querySelector('.okf-graph-tour');
+        return Promise.resolve().then(() => ({  // queued AFTER activation
+            afterRemoveBeforeDrain: afterRemoveBeforeDrain,
+            afterMicrotask: !!document.querySelector('.okf-graph-tour'),
+            depth: window.OKFOverlayStack.depth(),
+        }));
+    }""")
+    # Activation is queued, not synchronous inside remove() — the closing
+    # overlay's own focus restore completes first.
+    assert result["afterRemoveBeforeDrain"] is False, (
+        "tour mounted synchronously inside the depth transition "
+        "(closing overlay's focus restore would be preempted)"
+    )
+    # Activation IS a microtask on the Promise fallback: it ran before the
+    # observer. A setTimeout(0) macrotask could not have, so this proves
+    # non-timer scheduling even without queueMicrotask.
+    assert result["afterMicrotask"] is True, (
+        "tour did not activate via microtask on the Promise fallback "
+        "(timer/polling suspected)"
+    )
+    assert result["depth"] == 1, "active tour must register in the overlay stack"
+
+    # The resumed tour is a proper registered modal dialog; dismiss -> finish
+    # -> completion authoritative, stack released.
+    tour = page.locator(".okf-graph-tour")
+    expect(tour).to_have_attribute("role", "dialog")
+    expect(tour).to_have_attribute("aria-modal", "true")
+    page.locator(".okf-graph-tour__skip").click()
+    expect(tour).to_have_count(0)
+    assert page.evaluate("window.OKFOverlayStack.depth()") == 0
+    assert page.evaluate("localStorage.getItem('okfGraphTourDone')") == "1"
+
+
+def test_graph_theme_resolves_swiss_first(server_url: str, page) -> None:
     """Consistency: the graph page resolves swiss-first (like the reading pages), not a legacy theme."""
     page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
     page.wait_for_selector("#okf-graph", timeout=15000)

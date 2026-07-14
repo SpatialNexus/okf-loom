@@ -72,6 +72,19 @@
   // conflict overlays via window.OKFOverlayStack.push/remove.
   if (!window.OKFOverlayStack) {
     var _overlayStack = [];
+    // Additive observation channel: subscribers are told when the stack depth
+    // changes. Used ONLY so graph.js can defer its first-visit tour while a
+    // user-owned overlay (Appearance popover, command palette, …) is open.
+    // It NEVER alters any overlay's open/close or focus-exit behaviour — it
+    // just reports depth. Subscribers are isolated in try/catch so a faulty
+    // listener can never break the Escape stack.
+    var _overlaySubscribers = [];
+    function _notifyOverlayDepth() {
+      var d = _overlayStack.length;
+      for (var i = 0; i < _overlaySubscribers.length; i++) {
+        try { _overlaySubscribers[i](d); } catch (e) {}
+      }
+    }
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
       var top = _overlayStack.length ? _overlayStack[_overlayStack.length - 1] : null;
@@ -82,13 +95,46 @@
         // Idempotent: never allow the same entry twice.
         if (_overlayStack.indexOf(entry) >= 0) return;
         _overlayStack.push(entry);
+        _notifyOverlayDepth();
       },
       remove: function (entry) {
         // Remove ALL instances (guards against accidental duplicate pushes).
-        var i;
-        while ((i = _overlayStack.indexOf(entry)) >= 0) _overlayStack.splice(i, 1);
+        var i, changed = false;
+        while ((i = _overlayStack.indexOf(entry)) >= 0) { _overlayStack.splice(i, 1); changed = true; }
+        if (changed) _notifyOverlayDepth();
       },
       depth: function () { return _overlayStack.length; },
+      // Stack/top-owner focus-restoration protocol (additive + optional).
+      // When a higher popover closes above an underlying overlay that is an
+      // INTENTIONAL focus owner (e.g. an active modal dialog with its own
+      // focus trap, like the first-visit graph tour), the closer calls this so
+      // focus lands INSIDE that overlay instead of on its own trigger — which
+      // would otherwise be left behind the still-open modal and bypass the
+      // trap. An entry OPTS IN by exposing a `restoreFocus` function that
+      // returns truthy when it claimed focus. Entries without the capability
+      // (the common case: panels, palettes, radio popovers) leave behaviour
+      // unchanged and the closer restores to its own trigger. Pure query —
+      // never alters open/close or stack contents.
+      restoreTopFocus: function () {
+        var top = _overlayStack.length ? _overlayStack[_overlayStack.length - 1] : null;
+        if (top && typeof top.restoreFocus === "function") {
+          try { if (top.restoreFocus()) return true; } catch (e) {}
+        }
+        return false;
+      },
+      // Subscribe to depth changes; returns an unsubscribe function. The
+      // callback is invoked once immediately with the current depth, so a new
+      // subscriber can decide without a separate read. Pure observation — no
+      // effect on open/close/focus.
+      subscribe: function (fn) {
+        if (typeof fn !== "function") return function () {};
+        _overlaySubscribers.push(fn);
+        try { fn(_overlayStack.length); } catch (e) {}
+        return function () {
+          var j = _overlaySubscribers.indexOf(fn);
+          if (j >= 0) _overlaySubscribers.splice(j, 1);
+        };
+      },
     };
   }
 
@@ -412,7 +458,18 @@
     // Only Escape/overlay-stack dismissal restores focus to the trigger.
     // Outside-click keeps focus on the clicked destination; focus-exit keeps
     // focus on the element the user Tabbed to.
-    if (restoreFocus && trigger) { try { trigger.focus(); } catch (e) {} }
+    if (restoreFocus) {
+      // Stack/top-owner focus-restoration protocol: after our removal, if the
+      // new topmost overlay is an INTENTIONAL focus owner (e.g. an active
+      // modal tour with its own focus trap), let it claim focus INSIDE itself
+      // so we never leave focus on our trigger behind a still-open modal (the
+      // trap would be bypassed). Otherwise restore to our trigger as before.
+      var handedOff = false;
+      if (window.OKFOverlayStack && typeof window.OKFOverlayStack.restoreTopFocus === "function") {
+        try { handedOff = !!window.OKFOverlayStack.restoreTopFocus(); } catch (e) {}
+      }
+      if (!handedOff && trigger) { try { trigger.focus(); } catch (e) {} }
+    }
   }
   function isMenuOpen() { return menu && !menu.hidden; }
 

@@ -3388,7 +3388,9 @@
       var idx = 0;
       // Remember what had focus so the tour can restore it on close (a11y:
       // dialogs must move focus in on open and hand it back on dismiss).
-      var previousFocus = document.activeElement;
+      // Captured at ACTIVATION (see activateTour) — after any deferred wait
+      // — so finish() hands focus back to whoever truly owned it then.
+      var previousFocus = null;
       var card = document.createElement("div");
       card.className = "okf-graph-tour";
       card.setAttribute("role", "dialog");
@@ -3433,11 +3435,33 @@
           catch (e) { try { target.focus(); } catch (e2) {} }
         }
       }
+      var finished = false;
       function finish() {
+        if (finished) return;
+        finished = true;
         try { window.localStorage.setItem(KEY, "1"); } catch (e) {}
+        // Authoritative bookkeeping: while mounted the tour is a registered
+        // overlay (see activateTour), so release its slot on dismiss BEFORE the
+        // card is detached. The depth-0 notify this fires has no active defer
+        // subscriber (that subscription was released when the tour activated),
+        // so it can never re-trigger activation — and the idempotent guard
+        // above makes finish() safe from any double-invocation path.
+        if (canTrack) { try { overlayStack.remove(tourOverlayEntry); } catch (e) {} }
         card.removeEventListener("keydown", onKey);
         if (card.parentNode) card.parentNode.removeChild(card);
         restoreFocus();
+      }
+      // Claim focus INSIDE the still-mounted tour for the stack/top-owner
+      // focus-restoration protocol: when a higher popover (e.g. Appearance)
+      // closes above this active modal tour, focus must land inside the tour
+      // (its focus trap) rather than on the popover's trigger left behind it.
+      // Mirrors the activation focus-in (the dialog's primary action). Returns
+      // true when the tour claimed focus, false when it cannot (finished or
+      // unmounted) so the caller falls back to its own trigger restoration.
+      function claimTourFocus() {
+        if (finished || !card.parentNode) return false;
+        try { next.focus({ preventScroll: true }); return true; }
+        catch (e) { try { next.focus(); return true; } catch (e2) { return false; } }
       }
       function render() {
         var s = steps[idx];
@@ -3474,13 +3498,113 @@
       });
       skip.addEventListener("click", finish);
       card.addEventListener("keydown", onKey);
-      render();
-      container.appendChild(card);
-      // Move focus into the dialog (the primary action) so keyboard + screen
-      // reader users land inside the trapped tour rather than behind it.
-      try { next.focus({ preventScroll: true }); }
-      catch (e) { try { next.focus(); } catch (e2) {} }
-    })();
+
+      // ---- Activation is gated on focus ownership -----------------------
+      // The first-visit tour initializes from graph.js's async data fetch
+      // (acquireBundle().then(init)), which can resolve AFTER the user has
+      // already opened a transient surface like the Appearance popover. If
+      // the tour appended + focused itself then, it would steal focus from
+      // the open popover and trip theme.js's (correct) focus-exit close,
+      // slamming the menu shut mid-interaction. So we do NOT take focus
+      // while a user-owned overlay is open: the shared overlay stack is the
+      // single authority on who owns focus. The tour activates immediately
+      // when nobody is open, otherwise it defers and resumes exactly once
+      // when the stack empties (the user intentionally closed their popover).
+        var overlayStack = window.OKFOverlayStack;
+        var canTrack = !!(overlayStack && typeof overlayStack.depth === "function");
+        // While mounted, the tour IS an overlay: register it so the shared
+        // Escape layer treats it as the topmost surface — one Escape closes
+        // only the tour, and if a user-owned popover opens on top, THAT closes
+        // first (one-Escape-topmost semantics). `close` routes back into
+        // finish(), preserving the existing role=dialog, aria-modal, focus
+        // trap, Escape-only-tour, and focus-restore behaviour. The card's own
+        // onKey Escape handler remains as the fallback when the shared stack is
+        // unavailable. `restoreFocus` opts the tour INTO the stack/top-owner
+        // focus-restoration protocol: when a higher popover closes above us it
+        // hands focus INSIDE this active modal instead of to its own trigger
+        // (which would sit behind the still-open tour and bypass its trap).
+        var tourOverlayEntry = canTrack ? {
+          close: function () { finish(); },
+          restoreFocus: claimTourFocus
+        } : null;
+        var activated = false;
+
+        function activateTour() {
+          if (activated) return;
+          // Re-check ownership IMMEDIATELY before mounting. The deferred path
+          // schedules this call via a microtask on the depth-0 notify; another
+          // overlay may have opened in that window. The shared stack is the
+          // single authority: if it is non-empty now, do NOT steal focus —
+          // re-defer and wait for the next depth-0 transition. No timers, no
+          // polling: this is a synchronous state check at the instant of
+          // activation.
+          if (canTrack && overlayStack.depth() > 0) {
+            startDeferring();
+            return;
+          }
+          activated = true;
+          // Capture the real focus owner the instant the tour opens, so
+          // finish() restores focus to it (not to a stale pre-init element).
+          previousFocus = document.activeElement;
+          render();
+          container.appendChild(card);
+          // Register as the active overlay so Escape/focus bookkeeping is
+          // authoritative for the lifetime of the tour.
+          if (canTrack) { try { overlayStack.push(tourOverlayEntry); } catch (e) {} }
+          // Move focus into the dialog (the primary action) so keyboard + screen
+          // reader users land inside the trapped tour rather than behind it.
+          try { next.focus({ preventScroll: true }); }
+          catch (e) { try { next.focus(); } catch (e2) {} }
+        }
+
+        // Defer until every user-owned overlay has closed. subscribe fires once
+        // immediately with the current depth (>0 here → no-op) and then on every
+        // change. On the transition to depth 0 we unsubscribe and schedule
+        // activation as a microtask so the closing overlay's OWN focus restore
+        // (e.g. the Appearance trigger on Escape) completes first; the tour
+        // then takes focus as the final, intentional move. queueMicrotask runs
+        // after the current task unwinds and before paint — deterministic, NOT
+        // a timer/sleep. activateTour() re-checks depth before mounting, so an
+        // overlay that opens between the depth-0 notify and the microtask keeps
+        // the tour deferred (and re-subscribes for the next depth-0). Each call
+        // creates exactly one subscriber that unregisters itself before
+        // scheduling, so re-defer never leaks or double-activates.
+        function startDeferring() {
+          if (!canTrack || typeof overlayStack.subscribe !== "function") return;
+          var unsubscribe = overlayStack.subscribe(function (depth) {
+            if (depth > 0) return;
+            if (typeof unsubscribe === "function") { try { unsubscribe(); } catch (e) {} unsubscribe = null; }
+            // Microtask scheduling ONLY — deterministic, pre-paint, NEVER a
+            // timer/sleep/retry. Prefer the native queueMicrotask primitive;
+            // fall back to a resolved Promise (also a microtask) on engines
+            // where queueMicrotask is absent. Either way activateTour runs in
+            // the current task's microtask queue, after the closing overlay's
+            // own focus restore and before paint — never a setTimeout
+            // macrotask. activateTour() re-checks depth before mounting, so an
+            // overlay that opens between the depth-0 notify and the microtask
+            // keeps the tour deferred (and re-subscribes for the next depth-0).
+            if (typeof window.queueMicrotask === "function") {
+              window.queueMicrotask(activateTour);
+            } else {
+              Promise.resolve().then(activateTour);
+            }
+          });
+        }
+
+        if (!canTrack || overlayStack.depth() === 0) {
+          // Common first-visit path: nobody owns focus → open the tour now,
+          // exactly as before (no behaviour change for the happy path). When the
+          // shared stack is unavailable we also activate immediately and rely
+          // on the card's own Escape handler.
+          activateTour();
+        } else {
+          // An overlay is open. Defer; resume exactly once on the next depth-0.
+          startDeferring();
+        }
+        // (If an overlay is open but no subscribe channel exists, startDeferring
+        // is a no-op and the first-visit tour stays pending for the next load.
+        // This branch does not occur when theme.js provides OKFOverlayStack.)
+        })();
 
     // ---- Diagnostic / test hook (non-visual; NOT a public API) ---------
     // This is a TEST/DIAGNOSTIC hook, not a stable read-only runtime API. It
