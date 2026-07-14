@@ -101,6 +101,26 @@
   box-shadow: var(--okf-shadow);
   font-size: var(--okf-text-sm);
 }
+/* Mobile: node-index is in normal flow (reparented by JS), not an overlay. */
+.okf-node-index--mobile {
+  position: static;
+  width: 100%;
+  max-height: 50vh;
+  margin-bottom: var(--okf-space-3);
+  box-shadow: none;
+}
+.okf-node-index--mobile > summary {
+  font-size: var(--okf-text-base);
+}
+.okf-node-index--mobile .okf-node-index__list {
+  max-height: 40vh;
+}
+.okf-graph-explore-map {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--okf-space-3);
+  text-align: center;
+}
 .okf-node-index > summary {
   cursor: pointer;
   font-weight: 600;
@@ -639,6 +659,18 @@
     .okf-topbar__controls > * { min-width: 0; flex-shrink: 0; }
     .okf-topbar__controls #okf-search { flex: 1 1 100px; min-width: 90px; }
     .okf-topbar__controls select { flex: 0 1 auto; min-width: 7rem; }
+  }
+
+  /* Narrow viewport: graph topbar also wraps so all controls are visible. */
+  @media (max-width: 430px) {
+    .okf-topbar { flex-wrap: wrap; height: auto; min-height: var(--okf-topbar-h); }
+    .okf-topbar__brand { flex: 1 1 100%; }
+    .okf-topbar__controls {
+      flex: 1 1 100%; width: 100%; overflow-x: visible; flex-wrap: wrap;
+      gap: var(--okf-space-1); padding-top: var(--okf-space-1);
+    }
+    .okf-topbar__controls > * { min-width: 0; }
+    .okf-topbar__controls #okf-search { flex: 1 1 120px; }
   }
 
 @media (prefers-reduced-motion: reduce) {

@@ -304,9 +304,11 @@
   function setStatus(count, query) {
     if (titleEl) {
       var q = query || "";
-      // Match the server-side pluralisation (render.py _render_search_page):
-      // "No results for ...", "1 result for ...", "N results for ...".
-      if (count === 0) {
+      // Match the server-side pluralisation (render.py _render_search_page).
+      // Empty query shows neutral "Search" heading, not "No results for …".
+      if (count === 0 && !q) {
+        titleEl.textContent = "Search";
+      } else if (count === 0) {
         titleEl.textContent = "No results for \u201C" + q + "\u201D";
       } else if (count === 1) {
         titleEl.textContent = "1 result for \u201C" + q + "\u201D";

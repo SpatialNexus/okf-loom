@@ -121,6 +121,10 @@
   var REDUCED_MOTION = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  // Centralized min-zoomed-font-size constants for desktop/mobile.
+  var DESKTOP_MIN_FONT = 6;
+  var MOBILE_MIN_FONT = 8;
+
   // Layout parameters tuned for spread. The previous default
   // ({ name: 'cose', padding: 30 }) packed nodes too tightly — users
   // complained about everything being bunch up together. cose has many
@@ -979,11 +983,12 @@
             "text-margin-y": 4,
             "text-wrap": "wrap",
             "text-max-width": 110,
-            // Review feedback: a soft label plate keeps node names legible over
-            // edges and neighbouring nodes (reviewer blocker 1 collisions); the
-            // plate is a touch more opaque (0.72→0.85) so the bolder text stays
-            // crisp over edges at high spread. Padding stays 2 so the plate does
-            // not enlarge the label footprint at the compact default.
+            // Progressive label disclosure: base text-opacity is 0 (labels
+            // hidden). The .okf-label-on class (added by JS to top-degree
+            // visible nodes) and contextual states (selected, hovered,
+            // focused, path, bridge) set text-opacity to 1. This keeps the
+            // initial desktop Map readable while retaining all data.
+            "text-opacity": 0,
             "text-background-color": GRAPH_COLORS["technical-light"].edgeLabelBg,
             "text-background-opacity": 0.85,
             "text-background-padding": 2,
@@ -996,8 +1001,15 @@
         },
         {
           selector: "node:selected",
-          style: { "border-width": 3, "border-color": GRAPH_COLORS["technical-light"].select },
+          style: { "border-width": 3, "border-color": GRAPH_COLORS["technical-light"].select, "text-opacity": 1 },
         },
+        // Contextual label disclosure: selected, hovered, focused, path,
+        // bridge, and high-signal (top-degree) nodes show labels.
+        { selector: "node.okf-hover", style: { "text-opacity": 1 } },
+        { selector: "node.okf-focus-root", style: { "text-opacity": 1 } },
+        { selector: "node.okf-path", style: { "text-opacity": 1 } },
+        { selector: "node.okf-bridge", style: { "text-opacity": 1 } },
+        { selector: "node.okf-label-on", style: { "text-opacity": 1 } },
         {
           selector: "edge",
           style: {
@@ -1462,6 +1474,101 @@
     // graph access (WCAG 2.1.1).
     buildNodeIndex(bundle);
 
+    // ---- Mobile list-first graph experience --------------------------------
+    // On <=430px, reparent the node-index <details> from the canvas overlay
+    // into normal flow BEFORE the graph section, open it by default, and add
+    // an "Explore interactive map" button. On desktop (>=431px), restore the
+    // node-index to its canvas overlay position and collapsed state.
+    // Idempotent: re-inserts in [index, explore, graph] order every time.
+    // Lifecycle: a single disposeGraph() removes the matchMedia listener,
+    // the MutationObserver, and the pagehide handler exactly once.
+    var _nodeIndexEl = container.querySelector(".okf-node-index");
+    var _nodeIndexDesktopParent = _nodeIndexEl ? _nodeIndexEl.parentElement : null;
+    var _mobileExploreBtn = null;
+    var _mobileGraphMq = window.matchMedia("(max-width: 430px)");
+    var _mobileGraphListenerActive = false;
+    var _graphDisposed = false;
+
+    function _applyMobileNodeIndex(isMobile) {
+      if (!_nodeIndexEl || _graphDisposed) return;
+      if (isMobile) {
+        // Idempotent: always insert in [index, explore, graph] order.
+        container.parentNode.insertBefore(_nodeIndexEl, container);
+        _nodeIndexEl.setAttribute("open", "");
+        _nodeIndexEl.classList.add("okf-node-index--mobile");
+        // Create Explore button once.
+        if (!_mobileExploreBtn) {
+          _mobileExploreBtn = document.createElement("button");
+          _mobileExploreBtn.type = "button";
+          _mobileExploreBtn.className = "okf-studiobtn okf-graph-explore-map";
+          _mobileExploreBtn.textContent = "Explore interactive map";
+          _mobileExploreBtn.setAttribute("aria-label", "Open the interactive graph canvas");
+          _mobileExploreBtn.addEventListener("click", function () {
+            _nodeIndexEl.removeAttribute("open");
+            // Use 'auto' under reduced-motion, 'smooth' otherwise.
+            var behavior = REDUCED_MOTION ? "auto" : "smooth";
+            container.scrollIntoView({ behavior: behavior, block: "start" });
+            // Focus the graph container (now tabindex=-1).
+            try { container.focus({ preventScroll: true }); } catch(e) {}
+            // Fit after a frame so scroll/layout settles.
+            (window.requestAnimationFrame || function(fn) { setTimeout(fn, 16); })(function() {
+              overlayAwareFit();
+              try { cy.style().selector("node").style("min-zoomed-font-size", MOBILE_MIN_FONT).update(); } catch(e) {}
+            });
+          });
+        }
+        // Ensure explore button is after index, before graph.
+        container.parentNode.insertBefore(_mobileExploreBtn, container);
+        _mobileExploreBtn.hidden = false;
+        try { cy.style().selector("node").style("min-zoomed-font-size", MOBILE_MIN_FONT).update(); } catch(e) {}
+      } else {
+        // Desktop: restore to canvas overlay.
+        if (_nodeIndexEl.parentElement !== _nodeIndexDesktopParent && _nodeIndexDesktopParent) {
+          _nodeIndexDesktopParent.appendChild(_nodeIndexEl);
+        }
+        _nodeIndexEl.removeAttribute("open");
+        _nodeIndexEl.classList.remove("okf-node-index--mobile");
+        if (_mobileExploreBtn) _mobileExploreBtn.hidden = true;
+        try { cy.style().selector("node").style("min-zoomed-font-size", DESKTOP_MIN_FONT).update(); } catch(e) {}
+      }
+    }
+    _applyMobileNodeIndex(_mobileGraphMq.matches);
+    var _mobileGraphBpHandler = function (e) { _applyMobileNodeIndex(e.matches); };
+    if (_mobileGraphMq.addEventListener) {
+      _mobileGraphMq.addEventListener("change", _mobileGraphBpHandler);
+      _mobileGraphListenerActive = true;
+    } else if (_mobileGraphMq.addListener) {
+      _mobileGraphMq.addListener(_mobileGraphBpHandler);
+      _mobileGraphListenerActive = true;
+    }
+
+    // Lifecycle disposal: removes matchMedia listener, disconnect observers,
+    // and removes the pagehide listener — all exactly once (idempotent via
+    // _graphDisposed flag). Survives removal of the entire route subtree
+    // (observes documentElement with subtree:true).
+    var _pageHideHandler = function () { disposeGraph(); };
+    function disposeGraph() {
+      if (_graphDisposed) return;
+      _graphDisposed = true;
+      if (_mobileGraphListenerActive) {
+        if (_mobileGraphMq.removeEventListener) _mobileGraphMq.removeEventListener("change", _mobileGraphBpHandler);
+        else if (_mobileGraphMq.removeListener) _mobileGraphMq.removeListener(_mobileGraphBpHandler);
+        _mobileGraphListenerActive = false;
+      }
+      if (_bodyObserver) { _bodyObserver.disconnect(); _bodyObserver = null; }
+      if (_modifierObserver) { _modifierObserver.disconnect(); _modifierObserver = null; }
+      window.removeEventListener("pagehide", _pageHideHandler);
+    }
+    // Observe documentElement subtree so removing #okf-main (or any ancestor)
+    // triggers disposal even if the container's immediate parent is gone.
+    var _bodyObserver = new MutationObserver(function () {
+      if (_graphDisposed) return;
+      if (!document.contains(container)) disposeGraph();
+    });
+    _bodyObserver.observe(document.documentElement, { childList: true, subtree: true });
+    // Also clean up on pagehide (SPA navigation, browser back/forward).
+    window.addEventListener("pagehide", _pageHideHandler);
+
     // ====================================================================
     // Signal controls — apply layer (style / filter / layout / status)
     // ====================================================================
@@ -1497,6 +1604,11 @@
           // Phase 3: degree-zero concepts carry the "not yet linked" cue.
           n.toggleClass("okf-orphan", n.degree(false) === 0);
         });
+        // Progressive label disclosure is recomputed from visible nodes by
+        // _recomputeProgressiveLabels (called after applyFilters). This
+        // inline computation in applyVisualEncoding is a fallback for the
+        // initial render before any filter has been applied.
+        _recomputeProgressiveLabels();
         cy.edges().forEach(function (e) {
           e.data("weight", edgeWeight(e.id()));
           var cross = controlState.groupBy !== "none" && groupOf[e.source().id()] !== groupOf[e.target().id()];
@@ -1562,6 +1674,28 @@
     // ONE combined filter pass: search + type + focus-neighbourhood +
     // minimum-signal threshold, all expressed as `.dim`. Replaces the old
     // independent handlers that each cleared the others' dim state.
+    // Recompute progressive label disclosure from currently visible (non-dimmed)
+    // nodes. Called after applyFilters and from applyVisualEncoding. Determines
+    // the top-N by degree (tie-break: stable id) and marks them okf-label-on.
+    // Guarantees at least one label whenever visible nodes exist.
+    function _recomputeProgressiveLabels() {
+      var visibleNodes = cy.nodes().filter(function(n) { return !n.hasClass("dim"); });
+      cy.nodes().removeClass("okf-label-on");
+      if (!visibleNodes.length) return;
+      var degList = visibleNodes.map(function (n) {
+        return { id: n.id(), deg: n.degree(false) };
+      }).sort(function (a, b) {
+        if (b.deg !== a.deg) return b.deg - a.deg;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+      var labelCount = Math.min(8, Math.max(1, Math.floor(degList.length / 3)));
+      var labelIds = {};
+      for (var i = 0; i < labelCount && i < degList.length; i++) labelIds[degList[i].id] = true;
+      visibleNodes.forEach(function (n) {
+        if (labelIds[n.id()]) n.addClass("okf-label-on");
+      });
+    }
+
     function applyFilters() {
       var q = controlState.search, ty = controlState.type;
       var thresh = MIN_THRESH[controlState.minLevel] || 0;
@@ -1594,6 +1728,10 @@
           if (fr && fr.length) fr.addClass("okf-focus-root");
         }
       });
+      // Recompute progressive labels from the now-visible (non-dimmed) set
+      // so search/type/focus filters always leave at least one orientation
+      // label on the remaining visible nodes.
+      _recomputeProgressiveLabels();
     }
 
     // Debounced, stale-safe layout rerun. The latest control values always
@@ -3364,6 +3502,14 @@
         communityOf: function () { try { return JSON.parse(JSON.stringify(communityOf)); } catch (e) { return {}; } },
         focusRoot: function () { return focusRoot; },
         layoutStats: layoutStats,
+        dispose: disposeGraph,
+        progressiveLabelIds: function () {
+          var ids = [];
+          cy.nodes().forEach(function (n) {
+            if (n.hasClass("okf-label-on")) ids.push(n.id());
+          });
+          return ids;
+        },
         // Live-refresh fence counters (present only when the live layer wired
         // the DATA_URL refresh). Used to prove stale responses are dropped.
         refreshStats: (typeof refreshStats !== "undefined") ? refreshStats : null

@@ -89,7 +89,7 @@
 .okf-studio-bar--status .okf-conn,
 .okf-studio-bar--status .okf-presence {
   font-family: var(--okf-font-mono);
-  font-size: var(--okf-text-xs);
+  font-size: var(--okf-text-sm);
 }
 /* Ambient dash stat (e.g. "◆ 30 concepts"). */
 .okf-statseg {
@@ -1246,7 +1246,8 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   gap: var(--okf-space-1);
   padding: var(--okf-space-2) 0;
   background: var(--okf-bg-elev);
-  border-left: var(--okf-border-w) solid var(--okf-border);
+  border-left: var(--okf-border-w) solid var(--okf-border-strong);
+  border-top: var(--okf-border-w) solid var(--okf-border);
   z-index: 8;
 }
 .okf-rail[hidden] { display: none; }
@@ -1355,8 +1356,16 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
    * carries Comments/Changes, so the panel is opened from the Command Palette. */
   .okf-rail { display: none; }
   body.okf-has-rail { padding-right: 0; }
-  .okf-panel { top: 0; right: 0; bottom: 0; z-index: 71; }
-  .okf-panel-overlay { background: rgba(15, 23, 42, 0.35); z-index: 70; } /* modal dim on mobile */
+  .okf-panel {
+    top: 0; right: 0; bottom: 0; z-index: 71;
+    width: 100vw; max-width: 100vw; max-height: 100dvh;
+    display: flex; flex-direction: column;
+  }
+  .okf-panel-overlay { background: rgba(15, 23, 42, 0.35); z-index: 70; }
+  /* Sticky header + tabs; body scrolls within the panel. */
+  .okf-panel__header { position: sticky; top: 0; z-index: 2; }
+  .okf-panel__tabs { position: sticky; top: var(--okf-status-h); z-index: 1; }
+  .okf-panel__body { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 }
 .okf-panel__header {
   display: flex;
@@ -1541,8 +1550,7 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   text-align: center;
 }
 .okf-studio-fallback-banner a { color: inherit; font-weight: 600; }
-html.okf-studio-booted .okf-studio-fallback-banner { display: none; }
-[data-okf-mode="static"] .okf-studio-fallback-banner { display: none; }
+/* Visibility rules are in wiki.css (loaded on ALL surfaces including static). */
 
 /* ---- 9d. Change-list windowing sentinel (§13.7) --------------------- */
 .okf-changes__sentinel { height: 1px; }

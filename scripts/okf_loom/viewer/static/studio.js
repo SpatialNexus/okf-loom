@@ -3542,6 +3542,10 @@
       panelBody._focusComposer = !!opts.focusComposer;
       try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
 
+      // On fresh open (not tab-switch), reset panel body scroll to origin
+      // so the user starts at the top of the content.
+      if (!isTabSwitch && panelBody) panelBody.scrollTop = 0;
+
       if (isTabSwitch) {
         // Tab-switch: focus the newly active tab (keyboard activation keeps
         // focus on the tab list per the WAI-ARIA tabs pattern).

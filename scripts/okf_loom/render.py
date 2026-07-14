@@ -2439,7 +2439,11 @@ def _render_search_page(
             f'<div class="okf-search-snippet">{_highlight(desc, query)}</div>'
             f'</article>'
         )
-    results_html = "\n".join(result_parts) or '<p class="okf-search-empty">No results.</p>'
+    results_html = "\n".join(result_parts) or (
+        '<p class="okf-search-empty">' +
+        ('No results.' if query else 'Search the bundle by title, tag, or content.') +
+        '</p>'
+    )
 
     theme_attr = ""
     initial_theme = config.get("theme") or "auto"
@@ -2480,8 +2484,10 @@ def _render_search_page(
     # iter1 P3-13: proper pluralisation (no "result(s)" cop-out). The heading
     # also carries the query so the empty state reads naturally.
     count = len(results)
-    if count == 0:
+    if count == 0 and query:
         heading = f'No results for &ldquo;{_esc(query)}&rdquo;'
+    elif count == 0:
+        heading = "Search"
     elif count == 1:
         heading = f'1 result for &ldquo;{_esc(query)}&rdquo;'
     else:

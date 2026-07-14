@@ -120,6 +120,38 @@
 
   function _nextMermaidId() { return "okf-mermaid-" + (++_mermaidIdCounter); }
 
+  // Build Mermaid themeVariables from the current computed Editorial
+  // Workbench CSS tokens so diagrams match the page theme in all four
+  // themes (including dark). Mermaid reads these as the base palette for
+  // node fills, strokes, text, and lines.
+  function _mermaidThemeVars() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(name) { return cs.getPropertyValue(name).trim(); }
+    var dark = isDark();
+    return {
+      // Node fill/stroke/text from the page surface tokens.
+      primaryColor: v("--okf-bg-elev"),
+      primaryTextColor: v("--okf-fg"),
+      primaryBorderColor: v("--okf-border-strong"),
+      // Line/edge color from the border token.
+      lineColor: dark ? v("--okf-border-strong") : v("--okf-border"),
+      // Secondary (alt) nodes use the inset background.
+      secondaryColor: v("--okf-bg-inset"),
+      secondaryTextColor: v("--okf-fg-muted"),
+      secondaryBorderColor: v("--okf-border"),
+      // Tertiary nodes use the accent background tint.
+      tertiaryColor: v("--okf-accent-bg"),
+      tertiaryTextColor: v("--okf-accent"),
+      tertiaryBorderColor: v("--okf-accent"),
+      // Text and background for the whole diagram.
+      background: v("--okf-bg"),
+      mainBkg: v("--okf-bg-elev"),
+      textColor: v("--okf-fg"),
+      // Font family from the theme.
+      fontFamily: v("--okf-font-body"),
+    };
+  }
+
   function initMermaid() {
     var allDivs = document.querySelectorAll("div.mermaid");
     if (allDivs.length === 0) return;
@@ -147,7 +179,11 @@
         var mermaid = mod && (mod.default || window.mermaid);
         if (!mermaid) throw new Error("mermaid module unavailable"); // triggers fallback
         _mermaidMod = mermaid;
-        mermaid.initialize({ startOnLoad: false, theme: isDark() ? "dark" : "default" });
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: isDark() ? "dark" : "default",
+          themeVariables: _mermaidThemeVars(),
+        });
         // Render to clones in a hidden container — mermaid.run may require
         // nodes to be in the document tree. Commit to live DOM only if gen
         // is still current.

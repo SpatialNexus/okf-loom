@@ -580,15 +580,14 @@ def test_footer_actions_reachable_on_mobile(server_url, page):
             f"button {i} extends beyond viewport: {box}"
 
 
-def test_graph_topbar_single_row_on_mobile(server_url, page):
-    """At 390px the graph topbar stays a single row (no wrap-induced height
-    escape from the fixed bar)."""
+def test_graph_topbar_no_overflow_on_mobile(server_url, page):
+    """At 390px the graph topbar has no horizontal overflow (controls may wrap
+    to a second row at <=430px — that's the intended two-row header pattern)."""
     _set_width(page, 390)
     page.goto(f"{server_url}/__graph", wait_until="domcontentloaded")
     page.wait_for_selector("#okf-graph", timeout=10000)
-    info = page.evaluate("""() => {
-        const bar = document.querySelector('.okf-topbar');
-        return bar ? {height: bar.getBoundingClientRect().height} : null;
-    }""")
-    assert info, "topbar not found"
-    assert info["height"] <= 80, f"topbar too tall at 390px: {info['height']}px (wrap overflow)"
+    overflow = page.evaluate("""() => ({
+        sw: document.documentElement.scrollWidth,
+        cw: document.documentElement.clientWidth,
+    })""")
+    assert overflow["sw"] <= overflow["cw"] + 1, f"graph topbar overflow at 390px: sw={overflow['sw']} cw={overflow['cw']}"
