@@ -14,6 +14,8 @@ media is refreshed:
 * ``search.png``             — live search results
 * ``themes.gif``             — demo/showcase cycling all four canonical themes
 * ``graph-lenses.gif``       — the graph cycling Map→Themes→Flow→Bridges→Recent
+* ``social-preview.png``     — 1280×640 Swiss Light graph preview
+* ``comment-loop.mp4``       — deterministic semantic comment-composer sequence
 
 Requires Playwright plus a Chromium-family browser::
 
@@ -28,7 +30,8 @@ Chrome's sandbox stays enabled unless a constrained root container explicitly
 sets ``OKF_CAPTURE_NO_SANDBOX=1``.
 Without Pillow the two GIFs are skipped with a warning; the PNGs still
 capture. Stills are DPR-2 for crispness; GIF frames are DPR-1 to keep the
-files README-friendly.
+files README-friendly. GIFs autoplay exactly once, omit the infinite-loop
+extension, and remain on their final semantic frame (WCAG 2.2.2).
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:  # Supports both direct script execution and import via the repo namespace.
@@ -72,6 +76,7 @@ _CAPTURE_READY_TIMEOUT_MS = 12_000
 STILL_VIEWPORT = {"width": 1440, "height": 900}
 GIF_VIEWPORT = {"width": 1280, "height": 800}
 GIF_FRAME_MS = 1_600
+GIF_FINAL_FRAME_MS = 2_400
 THEMES = ("swiss-light", "swiss-dark", "technical-light", "technical-dark")
 LENSES = ("Map", "Themes", "Flow", "Bridges", "Recent")
 
@@ -156,7 +161,12 @@ def _new_page(browser, *, viewport: dict, dpr: int, theme: str | None = None):
     ctx = browser.new_context(viewport=viewport, device_scale_factor=dpr)
     boot = "try{localStorage.setItem('okfGraphTourDone','1');"
     if theme:
-        boot += f"localStorage.setItem('okf-theme','{theme}');"
+        family, mode = theme.rsplit("-", 1)
+        boot += (
+            f"localStorage.setItem('okf-theme-family','{family}');"
+            f"localStorage.setItem('okf-theme-mode','{mode}');"
+            "localStorage.removeItem('okf-theme');"
+        )
     boot += "}catch(e){}"
     ctx.add_init_script(boot)
     return ctx, ctx.new_page()
@@ -277,7 +287,12 @@ def _capture_stills(
 
 
 def _assemble_gif(frames: list, out_path: Path) -> None:
-    """Stitch PNG frame bytes into a looping GIF (adaptive palette)."""
+    """Stitch PNG bytes into a finite one-cycle GIF ending on the last frame.
+
+    Deliberately omit Pillow's ``loop`` argument: ``loop=0`` writes the
+    Netscape infinite-loop extension, while no extension means one autoplay
+    cycle and a retained static final frame.
+    """
     import io
 
     from PIL import Image
@@ -288,10 +303,24 @@ def _assemble_gif(frames: list, out_path: Path) -> None:
         out_path,
         save_all=True,
         append_images=images[1:],
-        duration=GIF_FRAME_MS,
-        loop=0,
+        duration=[GIF_FRAME_MS] * (len(images) - 1) + [GIF_FINAL_FRAME_MS],
         optimize=True,
     )
+
+
+def _gif_playback_metadata(frame_count: int, final_frame: str) -> dict:
+    """Manifest contract for finite GIF playback."""
+    return {
+        "autoplay": "finite-one-cycle",
+        "loop_count": 1,
+        "infinite_loop": False,
+        "loop_extension": False,
+        "frame_count": frame_count,
+        "frame_duration_ms": GIF_FRAME_MS,
+        "final_frame": final_frame,
+        "final_frame_duration_ms": GIF_FINAL_FRAME_MS,
+        "final_frame_retained": True,
+    }
 
 
 def _capture_gifs(browser, base: str, out_dir: Path, records: list[dict]) -> list[Path]:
@@ -321,7 +350,10 @@ def _capture_gifs(browser, base: str, out_dir: Path, records: list[dict]) -> lis
                     "themes": list(THEMES), "viewport": GIF_VIEWPORT,
                     "device_scale_factor": 1,
                     "readiness": {"state": "valid", "detail": "all frames ready",
-                                  "frames": frame_readiness}})
+                                  "frames": frame_readiness},
+                    "variants": {"playback": _gif_playback_metadata(
+                        len(THEMES), THEMES[-1]
+                    )}})
     _log("themes.gif assembled")
 
     # Lens cycle on the graph page (Focus is omitted: it needs a chosen node).
@@ -337,13 +369,115 @@ def _capture_gifs(browser, base: str, out_dir: Path, records: list[dict]) -> lis
     _assemble_gif(frames, path)
     shots.append(path)
     records.append({"file": path.name, "source": "live", "route": "/__graph",
-                    "theme": "swiss-light", "variants": {"lenses": list(LENSES)},
+                    "theme": "swiss-light", "variants": {
+                        "lenses": list(LENSES),
+                        "playback": _gif_playback_metadata(len(LENSES), LENSES[-1]),
+                    },
                     "viewport": GIF_VIEWPORT, "device_scale_factor": 1,
                     "readiness": {"state": "valid", "detail": "all frames ready",
                                   "frames": frame_readiness}})
     _log("graph-lenses.gif assembled")
 
     return shots
+
+
+def _capture_social_preview(browser, base: str, out_dir: Path, records: list[dict]) -> Path:
+    viewport = {"width": 1280, "height": 640}
+    ctx, page = _new_page(browser, viewport=viewport, dpr=1, theme="swiss-light")
+    try:
+        ready = _goto(page, f"{base}/__graph", "graph")
+        path = out_dir / "social-preview.png"
+        page.screenshot(path=str(path), full_page=False)
+        records.append({
+            "file": path.name, "artifact_type": "still", "source": "live",
+            "route": "/__graph", "theme": "swiss-light", "viewport": viewport,
+            "device_scale_factor": 1, "readiness": ready,
+            "variants": {"state": "social-preview", "surface": "graph-map"},
+        })
+        return path
+    finally:
+        ctx.close()
+
+
+def _capture_comment_video(browser, base: str, out_dir: Path, records: list[dict]) -> Path:
+    """Build an MP4 from semantically ready interaction frames via ffmpeg."""
+    viewport = {"width": 1280, "height": 720}
+    ctx, page = _new_page(browser, viewport=viewport, dpr=1, theme="swiss-light")
+    frame_readiness: list[dict] = []
+    try:
+        frame_readiness.append(_goto(page, f"{base}/demo/showcase", "rendering"))
+        with tempfile.TemporaryDirectory(prefix="okf-comment-video-") as tmp:
+            tmp_dir = Path(tmp)
+            frames = [tmp_dir / f"frame-{index}.png" for index in range(3)]
+            page.screenshot(path=str(frames[0]))
+            page.evaluate("""() => {
+              const body = document.querySelector('.okf-page__body');
+              const para = body && [...body.querySelectorAll('p')]
+                .find(p => p.textContent.length > 80);
+              if (!para) return;
+              para.scrollIntoView({block: 'center'});
+              const range = document.createRange(); range.selectNodeContents(para);
+              const selection = window.getSelection(); selection.removeAllRanges();
+              selection.addRange(range);
+            }""")
+            page.locator(".okf-comment-afford button").wait_for(
+                state="visible", timeout=_CAPTURE_READY_TIMEOUT_MS
+            )
+            page.screenshot(path=str(frames[1]))
+            page.locator(".okf-comment-afford button").click()
+            textarea = page.locator('textarea[aria-label="Comment for agent"]')
+            textarea.wait_for(state="visible", timeout=_CAPTURE_READY_TIMEOUT_MS)
+            textarea.fill("Cross-link this explanation to the graph lenses guide.")
+            page.screenshot(path=str(frames[2]))
+
+            concat = tmp_dir / "frames.txt"
+            concat.write_text(
+                "".join(
+                    f"file '{frame}'\nduration {duration}\n"
+                    for frame, duration in zip(frames, (1.5, 1.25, 2.5), strict=True)
+                ) + f"file '{frames[-1]}'\n",
+                encoding="utf-8",
+            )
+            path = out_dir / "comment-loop.mp4"
+            proc = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
+                 "-i", str(concat), "-vf", "format=yuv420p", "-r", "30",
+                 "-c:v", "libx264", "-movflags", "+faststart", "-map_metadata", "-1",
+                 str(path)],
+                capture_output=True, text=True,
+            )
+            if proc.returncode or not path.is_file() or path.stat().st_size == 0:
+                raise RuntimeError(
+                    f"ffmpeg could not generate {path} (rc={proc.returncode}): "
+                    f"{proc.stderr.strip()}"
+                )
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+                capture_output=True, text=True,
+            )
+            if probe.returncode:
+                raise RuntimeError(
+                    f"ffprobe could not verify {path} (rc={probe.returncode}): "
+                    f"{probe.stderr.strip()}"
+                )
+            duration_seconds = round(float(probe.stdout.strip()), 3)
+        records.append({
+            "file": path.name, "artifact_type": "video", "source": "live",
+            "route": "/demo/showcase", "theme": "swiss-light", "viewport": viewport,
+            "device_scale_factor": 1,
+            "readiness": {"state": "valid", "detail": "all interaction frames ready",
+                          "frames": frame_readiness},
+            "variants": {"state": "comment-loop", "format": "h264-yuv420p",
+                         "duration_seconds": duration_seconds, "semantic_frames": 3},
+        })
+        return path
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "ffmpeg and ffprobe are required to regenerate comment-loop.mp4"
+        ) from exc
+    finally:
+        ctx.close()
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
                     captured.extend(_capture_stills(browser, base, out_dir, records))
                     if not args.skip_gifs:
                         captured.extend(_capture_gifs(browser, base, out_dir, records))
+                    captured.append(_capture_social_preview(browser, base, out_dir, records))
+                    captured.append(_capture_comment_video(browser, base, out_dir, records))
             finally:
                 browser.close()
     except (RuntimeError, SystemExit) as exc:

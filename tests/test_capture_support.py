@@ -195,6 +195,8 @@ def test_manifest_records_revision_browser_route_theme_and_viewport(tmp_path, mo
         **record,
         "artifact_type": "still",
         "themes": ["swiss-light"],
+        "modifiers": {},
+        "environment": {},
         "variants": {},
     }]
 
@@ -218,10 +220,28 @@ def test_manifest_normalizes_gif_schema_and_keeps_readiness(tmp_path, monkeypatc
     capture = json.loads(path.read_text(encoding="utf-8"))["captures"][0]
 
     assert set(capture) == {
-        "artifact_type", "device_scale_factor", "file", "readiness", "route",
-        "source", "theme", "themes", "variants", "viewport",
+        "artifact_type", "device_scale_factor", "environment", "file", "modifiers",
+        "readiness", "route", "source", "theme", "themes", "variants", "viewport",
     }
     assert capture["artifact_type"] == "animation"
     assert capture["theme"] is None
     assert capture["themes"] == list(capture_support.CANONICAL_THEMES)
     assert capture["readiness"] == readiness
+
+
+def test_manifest_preserves_explicit_video_artifact_type(tmp_path, monkeypatch):
+    monkeypatch.setattr(capture_support, "git_revision", lambda _root: "c2d02d4")
+    record = {
+        "file": "comment-loop.mp4", "artifact_type": "video", "source": "live",
+        "route": "/demo/showcase", "theme": "swiss-light",
+        "viewport": {"width": 1280, "height": 720}, "device_scale_factor": 1,
+        "readiness": {"state": "valid", "detail": "semantic frames ready"},
+    }
+
+    path = capture_support.write_capture_manifest(
+        tmp_path, [record], repo_root=tmp_path, browser_source="system-channel:chrome"
+    )
+
+    capture = json.loads(path.read_text(encoding="utf-8"))["captures"][0]
+    assert capture["artifact_type"] == "video"
+    assert capture["readiness"]["state"] == "valid"

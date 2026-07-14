@@ -152,6 +152,7 @@ _INSPECT_TARGET_JS = r"""(target) => {
     concept: '#okf-main.okf-page',
     rendering: '#okf-main.okf-page',
     search: '#okf-main.okf-search',
+    studio: '.okf-panel:not([hidden])',
     graph: '#okf-graph'
   };
   const selector = selectors[target], root = selector && document.querySelector(selector);
@@ -288,12 +289,14 @@ def write_capture_manifest(
                 "route": str(record["route"]),
                 "theme": theme,
                 "themes": list(record.get("themes") or ([theme] if theme else [])),
+                "modifiers": dict(record.get("modifiers") or {}),
                 "viewport": dict(record["viewport"]),
                 "device_scale_factor": int(record["device_scale_factor"]),
                 "readiness": dict(
                     record.get("readiness")
                     or {"state": "not-recorded", "detail": "no readiness record"}
                 ),
+                "environment": dict(record.get("environment") or {}),
                 "variants": dict(record.get("variants") or {}),
             }
         )
