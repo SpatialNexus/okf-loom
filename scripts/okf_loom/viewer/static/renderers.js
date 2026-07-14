@@ -151,32 +151,32 @@
     var accent = toHex(v("--okf-accent"));
     var accentBg = toHex(v("--okf-accent-bg"));
     var bg = toHex(v("--okf-bg"));
-    var lineColor = dark ? borderStrong : border;
+    var lineColor = fgMuted;  // Use --okf-fg-muted for connectors/arrows: >=3:1 on bg in all themes
     return {
       // Flowchart nodes.
       primaryColor: bgElev,
       primaryTextColor: fg,
-      primaryBorderColor: borderStrong,
+      primaryBorderColor: fgMuted,  // Node borders need >=3:1 on bg-elev
       secondaryColor: bgInset,
-      secondaryTextColor: fgMuted,
-      secondaryBorderColor: border,
+      secondaryTextColor: fg,
+      secondaryBorderColor: fgMuted,
       tertiaryColor: accentBg,
-      tertiaryTextColor: accent,
+      tertiaryTextColor: fg,
       tertiaryBorderColor: accent,
       // Lines and edges.
       lineColor: lineColor,
       // Sequence diagram.
       actorBkg: bgElev,
-      actorBorder: borderStrong,
+      actorBorder: fgMuted,  // Actor borders >=3:1 on actorBkg
       actorTextColor: fg,
       actorLineColor: fgMuted,
-      noteBkgColor: accentBg,
-      noteBorderColor: accent,
-      noteTextColor: accent,
+      noteBkgColor: bgElev,          // Notes use bg-elev (not accent-bg) so border/text pass
+      noteBorderColor: fgMuted,     // Note borders >=3:1 on note bg
+      noteTextColor: fg,
       activationBkgColor: bgInset,
-      activationBorderColor: borderStrong,
+      activationBorderColor: fgMuted,
       signalColor: fg,
-      signalTextColor: fgMuted,
+      signalTextColor: fg,
       labelBoxBkgColor: bgElev,
       labelBoxBorderColor: borderStrong,
       labelTextColor: fg,
