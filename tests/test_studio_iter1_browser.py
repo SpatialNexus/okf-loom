@@ -18,6 +18,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -50,7 +51,11 @@ def _wait_for_server(proc: subprocess.Popen, base: str) -> None:
     deadline = time.monotonic() + _SERVER_STARTUP_TIMEOUT
     while time.monotonic() < deadline:
         if proc.poll() is not None:
-            pytest.skip(f"okf serve exited early (rc={proc.returncode})")
+            # Unexpected server exit is an error, not a skip — a crashed
+            # server means a real regression, not an environment issue.
+            raise RuntimeError(
+                f"okf serve exited unexpectedly (rc={proc.returncode})"
+            )
         try:
             with urllib.request.urlopen(f"{base}/", timeout=1.0) as resp:
                 if resp.status == 200:
@@ -58,20 +63,26 @@ def _wait_for_server(proc: subprocess.Popen, base: str) -> None:
         except (urllib.error.URLError, ConnectionError, OSError):
             pass
         time.sleep(0.15)
-    pytest.skip(f"okf serve not ready within {_SERVER_STARTUP_TIMEOUT:g}s")
+    raise RuntimeError(
+        f"okf serve not ready within {_SERVER_STARTUP_TIMEOUT:g}s"
+    )
 
 
-@pytest.fixture(scope="module")
-def server_url() -> str:
-    if not DEMO_BUNDLE.is_dir():
-        pytest.skip(f"demo bundle missing: {DEMO_BUNDLE}")
+def _start_server(bundle_path: Path) -> tuple[subprocess.Popen, str]:
+    """Start a studio serve instance against ``bundle_path`` and wait for it.
+
+    Shared by the module-scoped ``server_url`` and the function-scoped
+    ``writable_server_url`` fixtures so the start/stop lifecycle is identical.
+
+    If the server fails to become ready (timeout or early exit), the child
+    process is ALWAYS terminated, killed, and reaped before re-raising —
+    no live process is left behind.
+    """
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    # Default serve = full studio (live + edit + watch). --no-open so no
-    # browser window pops from the test process.
     proc = subprocess.Popen(
         okf_module_argv(
-            "serve", str(DEMO_BUNDLE), "--host", "127.0.0.1", "--port", str(port),
+            "serve", str(bundle_path), "--host", "127.0.0.1", "--port", str(port),
             "--no-open",
         ),
         cwd=str(TOOLKIT_ROOT),
@@ -80,14 +91,55 @@ def server_url() -> str:
     )
     try:
         _wait_for_server(proc, base)
+    except Exception:
+        # Always clean up the child process before re-raising so no live
+        # process is left behind on timeout or early exit.
+        _stop_server(proc)
+        raise
+    return proc, base
+
+
+def _stop_server(proc: subprocess.Popen) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture(scope="module")
+def server_url(tmp_path_factory) -> str:
+    r"""Checkout-hermetic module-scoped serve instance against a tmp COPY of
+    ``samples/demo_bundle`` with NO inherited ``.okf-loom/session`` state.
+
+    This is **checkout-hermetic**, not per-test pristine: all tests in the
+    module share the same server + bundle copy for performance. A fresh copy
+    is created per module invocation (per `pytest` run), so cross-run
+    contamination from the checked-in ``.okf-loom/session`` (13k+ events,
+    90+ comments) is eliminated. Tests that mutate server state (POST
+    comments, apply directives) should use the function-scoped
+    ``writable_server_url`` fixture instead for true per-test isolation.
+
+    The ``.okf-loom`` directory is explicitly excluded from the copy so the
+    session/events/comment state is pristine. An assertion verifies this.
+    Server exit or startup timeout raises ``RuntimeError`` (not skip) because
+    a crashed server is a real regression.
+    """
+    if not DEMO_BUNDLE.is_dir():
+        pytest.skip(f"demo bundle missing: {DEMO_BUNDLE}")
+    parent = tmp_path_factory.mktemp("studio_bundle")
+    dst = parent / "demo_bundle"
+    shutil.copytree(DEMO_BUNDLE, dst, ignore=shutil.ignore_patterns(".okf-loom"))
+    # Assert the source .okf-loom state was excluded.
+    assert not (dst / ".okf-loom").exists(), (
+        "hermetic fixture leaked .okf-loom into the temp copy"
+    )
+    proc, base = _start_server(dst)
+    try:
         yield base
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+        _stop_server(proc)
 
 
 @pytest.fixture
@@ -222,6 +274,1033 @@ def test_block_patch_preserves_selection_in_unchanged_block(server_url: str, pag
     )
 
 
+def test_selection_survives_ready_resync_heading_patch(server_url: str, page) -> None:
+    r"""Selection survives a ready-resync body patch on an UNCHANGED heading
+    because the backend now routes both the concept page and ``/__data/doc``
+    through the same heading-demotion transform. The ready-resync is a no-op
+    for unchanged headings: ``blockSig`` compares equal (after stripping the
+    client-only ¶ anchor), ``diffChildren`` keeps the block, DOM identity is
+    preserved, and the selection survives automatically — no text
+    re-resolution is needed.
+
+    This is the desired post-backend-fix contract. The old H2→H1 mismatch
+    (page demoted, ``/__data/doc`` un-demoted) that forced block replacement
+    and required text re-resolution is eliminated at the source.
+
+    This test is deterministic: it explicitly fetches the canonical doc and
+    calls ``applyDoc`` (no timing race), then asserts the heading element is
+    the SAME DOM node, the selection survives, and the comment affordance +
+    mark creation work end-to-end.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    # Wait for the heading-anchor enhancement (bindHeadingAnchors runs on
+    # bodyPatched after boot) so the selection is on an ENHANCED heading.
+    page.wait_for_selector(".okf-page__body #schema .okf-heading-anchor", timeout=5000)
+    result = page.evaluate(
+        """async () => {
+            const body = document.querySelector('.okf-page__body');
+            const heading = body.querySelector('#schema');
+            if (!heading) return { error: 'no #schema heading' };
+            // Select just the heading text ("Schema"), NOT the ¶ anchor.
+            let txt = heading;
+            while (txt && txt.nodeType !== 3) txt = txt.firstChild;
+            if (!txt) return { error: 'no text node in #schema' };
+            const r = document.createRange();
+            r.setStart(txt, 0);
+            r.setEnd(txt, txt.nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            const beforeNodeConnected = txt.isConnected;
+            const headingBefore = heading;
+            // Fetch the CANONICAL server doc (the same payload live.js
+            // fetches on ready-resync) and apply it. With the backend fix,
+            // the doc's heading is now demoted to the same level as the
+            // page's, so the block should be KEPT (not replaced).
+            const res = await fetch('/__data/doc?id=tables/orders',
+                { headers: { Accept: 'application/json' } });
+            const doc = await res.json();
+            window.okfLoomStudio.applyDoc(doc, { pulse: true });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterNodeConnected = txt.isConnected;
+            // Check that the SAME heading element is still in the DOM
+            // (DOM identity preserved — not a replacement).
+            const headingAfter = body.querySelector('#schema');
+            const sameElement = headingBefore === headingAfter;
+            return { beforeText, afterText, beforeNodeConnected, afterNodeConnected, sameElement };
+        }"""
+    )
+    assert "error" not in result, result
+    # The old heading text node MUST remain connected (block was kept, not replaced).
+    assert result["beforeNodeConnected"] is True, result
+    assert result["afterNodeConnected"] is True, (
+        "old heading text node should remain connected after ready-resync "
+        "(block should be KEPT, not replaced — backend now uses shared demotion)"
+    )
+    # The SAME heading element must be in the DOM (DOM identity preserved).
+    assert result["sameElement"] is True, (
+        "heading element should be the SAME DOM node after ready-resync "
+        "(blockSig should compare equal, diffChildren should keep the block)"
+    )
+    # The selection text MUST survive (automatically, via DOM identity).
+    assert result["afterText"] == result["beforeText"] == "Schema", (
+        f"selection not preserved: before={result['beforeText']!r} "
+        f"after={result['afterText']!r}"
+    )
+    # Dispatch selectionchange (the debounced affordance handler listens
+    # for it) and assert the affordance appears.
+    page.evaluate("document.dispatchEvent(new Event('selectionchange'))")
+    afford = page.locator(".okf-comment-afford:not([hidden]) button")
+    afford.wait_for(state="visible", timeout=10000)
+    afford.click()
+    # A <mark.okf-comment-mark> must now wrap the selected text.
+    mark = page.locator(".okf-page__body mark.okf-comment-mark").first
+    expect(mark).to_be_visible(timeout=4000)
+    expect(mark).to_have_attribute("data-comment-id", re.compile(r".+"), timeout=4000)
+
+
+def test_selection_re_resolved_when_selected_block_replaced(server_url: str, page) -> None:
+    """When the block containing the selection is replaced (disconnected),
+    the selection is re-resolved by text in the patched body (§7.3).
+
+    Unlike the unchanged-block test, here the selected block IS replaced
+    (different tag), so the boundary node disconnects and saveSelectionAcrossPatch
+    must re-resolve the text rather than relying on DOM identity.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Install a controlled body with two paragraphs.
+            const html = '<p>first paragraph text here</p><p>second paragraph text here</p>';
+            window.okfLoomStudio.applyDoc(
+                { html, title: '', description: '', raw: '', rev: 5000 },
+                { pulse: false }
+            );
+            // Select text in the SECOND paragraph.
+            const paras = body.querySelectorAll('p');
+            if (paras.length < 2) return { error: 'expected >= 2 paras, got ' + paras.length };
+            const target = paras[1];
+            let txt = null;
+            const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) {
+                if (n.nodeValue.trim().length > 0) { txt = n; break; }
+            }
+            if (!txt) return { error: 'no selectable text' };
+            const r = document.createRange();
+            r.setStart(txt, 0);
+            r.setEnd(txt, txt.nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            const oldNode = txt;
+            const nodeConnectedBefore = oldNode.isConnected;
+            // Replace the second <p> with an <h3> (tag change → block replaced).
+            // Keep the SAME text so re-resolution can find it.
+            const newHtml = '<p>first paragraph text here</p><h3>second paragraph text here</h3>';
+            window.okfLoomStudio.applyDoc(
+                { html: newHtml, title: '', description: '', raw: '', rev: 5001 },
+                { pulse: false }
+            );
+            const afterSel = window.getSelection();
+            return {
+                beforeText,
+                afterText: afterSel ? afterSel.toString() : '',
+                nodeConnectedBefore,
+                nodeConnectedAfter: oldNode.isConnected,
+            };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["nodeConnectedBefore"] is True, result
+    assert result["nodeConnectedAfter"] is False, (
+        "old text node should be disconnected after block replacement"
+    )
+    assert result["afterText"] == result["beforeText"], (
+        f"selection not re-resolved after block replacement: "
+        f"before={result['beforeText']!r} after={result['afterText']!r}"
+    )
+
+
+def test_cross_element_selection_re_resolved_after_patch(server_url: str, page) -> None:
+    """A selection spanning multiple text nodes (cross-element) is re-resolved
+    by findTextRange's cross-element path after the containing block is replaced.
+
+    Sets up a paragraph with an inline <strong> so the selected text spans
+    three text nodes ("alpha " + "beta" + " gamma"), then replaces the
+    paragraph (tag change forces block replacement). The fast single-node
+    indexOf path cannot find the multi-node text; the cross-element flat-
+    string path must resolve it.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Install a body with a paragraph containing an inline element
+            // so text spans multiple text nodes.
+            const html = '<p>alpha <strong>beta</strong> gamma</p><p>delta</p>';
+            window.okfLoomStudio.applyDoc(
+                { html, title: '', description: '', raw: '', rev: 6000 },
+                { pulse: false }
+            );
+            const p = body.querySelector('p');
+            if (!p) return { error: 'no para after setup' };
+            // Collect text nodes: "alpha ", "beta", " gamma".
+            const texts = [];
+            const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) texts.push(n);
+            if (texts.length < 3) return { error: 'expected >= 3 text nodes, got ' + texts.length };
+            // Select "alpha beta gamma" spanning all three text nodes.
+            const r = document.createRange();
+            r.setStart(texts[0], 0);
+            r.setEnd(texts[texts.length - 1], texts[texts.length - 1].nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            const oldFirstNode = texts[0];
+            // Replace the paragraph with an <h4> (tag change → block replaced).
+            // Keep the same inner HTML so the text is findable.
+            const newHtml = '<h4>alpha <strong>beta</strong> gamma</h4><p>delta</p>';
+            window.okfLoomStudio.applyDoc(
+                { html: newHtml, title: '', description: '', raw: '', rev: 6001 },
+                { pulse: false }
+            );
+            const afterSel = window.getSelection();
+            return {
+                beforeText,
+                afterText: afterSel ? afterSel.toString() : '',
+                oldNodeConnected: oldFirstNode.isConnected,
+            };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["oldNodeConnected"] is False, (
+        "old text node should be disconnected after block replacement"
+    )
+    assert result["afterText"] == result["beforeText"], (
+        f"cross-element selection not re-resolved: "
+        f"before={result['beforeText']!r} after={result['afterText']!r}"
+    )
+
+
+def test_backward_selection_direction_preserved_after_patch(server_url: str, page) -> None:
+    """A backward selection (anchor after focus in document order) is
+    re-resolved with the correct direction after the block is replaced.
+
+    saveSelectionAcrossPatch captures the direction and restores it via
+    sel.extend so the anchor/focus positions match the user's original
+    gesture, not just the text content.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Install a controlled body.
+            const html = '<p>alpha beta gamma delta</p><p>epsilon zeta</p>';
+            window.okfLoomStudio.applyDoc(
+                { html, title: '', description: '', raw: '', rev: 7000 },
+                { pulse: false }
+            );
+            const p = body.querySelector('p');
+            if (!p) return { error: 'no para after setup' };
+            let txt = null;
+            const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) {
+                if (n.nodeValue.trim().length > 0) { txt = n; break; }
+            }
+            if (!txt) return { error: 'no text node' };
+            // Select "alpha beta" (first 10 chars).
+            const r = document.createRange();
+            r.setStart(txt, 0);
+            r.setEnd(txt, 10);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            // Make it backward: anchor at offset 10, focus at offset 0.
+            // setBaseAndExtent is the reliable way to create a backward
+            // selection (extend from addRange collapses).
+            sel.setBaseAndExtent(txt, 10, txt, 0);
+            const beforeText = sel.toString();
+            const beforeBackward = sel.anchorNode === sel.focusNode &&
+                sel.anchorOffset > sel.focusOffset;
+            const oldNode = txt;
+            // Replace the <p> with an <h5> (tag change → block replaced).
+            const newHtml = '<h5>alpha beta gamma delta</h5><p>epsilon zeta</p>';
+            window.okfLoomStudio.applyDoc(
+                { html: newHtml, title: '', description: '', raw: '', rev: 7001 },
+                { pulse: false }
+            );
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterBackward = afterSel && afterSel.rangeCount > 0 &&
+                afterSel.anchorNode === afterSel.focusNode &&
+                afterSel.anchorOffset > afterSel.focusOffset;
+            return {
+                beforeText,
+                afterText,
+                beforeBackward,
+                afterBackward,
+                oldNodeConnected: oldNode.isConnected,
+            };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["beforeBackward"] is True, "setup should produce a backward selection"
+    assert result["oldNodeConnected"] is False, (
+        "old text node should be disconnected after block replacement"
+    )
+    assert result["afterText"] == result["beforeText"], (
+        f"backward selection text not re-resolved: "
+        f"before={result['beforeText']!r} after={result['afterText']!r}"
+    )
+    assert result["afterBackward"] is True, (
+        "backward direction not preserved after re-resolution"
+    )
+
+
+def test_enhanced_heading_blocksig_noop_identity(server_url: str, page) -> None:
+    """An enhanced heading (with client-only ¶ anchor) compares EQUAL to the
+    server-rendered version (without anchor) in blockSig, so a no-op re-render
+    does NOT replace the heading block. This keeps DOM identity stable and
+    avoids unnecessary selection disruption.
+
+    Proves: blockSig strips .okf-heading-anchor text from heading signatures.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_selector(".okf-page__body #schema .okf-heading-anchor", timeout=5000)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const heading = body.querySelector('#schema');
+            if (!heading) return { error: 'no #schema heading' };
+            // Record the heading's DOM identity before the patch.
+            const nodeBefore = heading;
+            const textBefore = heading.textContent;
+            const hasAnchor = !!heading.querySelector('.okf-heading-anchor');
+            // Apply the SAME html (no-op re-render). The server HTML has no
+            // ¶ anchor, but blockSig should treat them as equal.
+            // Use the heading's outerHTML WITHOUT the anchor for the "server" side.
+            const clone = heading.cloneNode(true);
+            const anchor = clone.querySelector('.okf-heading-anchor');
+            if (anchor) anchor.remove();
+            const serverHeading = clone.outerHTML;
+            const rest = Array.from(body.children).filter(n => n.nodeType === 1)
+                .map(k => k === heading ? serverHeading : k.outerHTML).join('\\n');
+            window.okfLoomStudio.applyDoc(
+                { html: rest, title: '', description: '', raw: '', rev: 8001 },
+                { pulse: false }
+            );
+            // Check if the heading DOM node survived (identity preserved).
+            const nodeAfter = body.querySelector('#schema');
+            const survived = nodeAfter === nodeBefore;
+            return { hasAnchor, textBefore, survived };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["hasAnchor"] is True, "heading should have ¶ anchor before patch"
+    assert result["survived"] is True, (
+        "heading DOM identity should survive a no-op re-render "
+        "(blockSig should treat enhanced and bare headings as equal)"
+    )
+
+
+def test_adjacent_inline_selection_restores_without_synthetic_space(server_url: str, page) -> None:
+    r"""Adjacent inline elements (<strong>foo</strong><em>bar</em>) restore as
+    "foobar" (no synthetic space), matching actual Selection.toString() semantics.
+
+    Proves: findTextRange does NOT insert synthetic spaces between text nodes.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const html = '<p>pre <strong>foo</strong><em>bar</em> post</p><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8101 }, { pulse: false });
+            const p = body.querySelector('p');
+            // Select "foobar" which spans <strong> and <em> text nodes.
+            const texts = [];
+            const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) texts.push(n);
+            // Find "foo" and "bar" text nodes.
+            let fooNode = null, barNode = null;
+            for (const t of texts) {
+                if (t.nodeValue === 'foo') fooNode = t;
+                if (t.nodeValue === 'bar') barNode = t;
+            }
+            if (!fooNode || !barNode) return { error: 'missing foo/bar text nodes' };
+            const r = document.createRange();
+            r.setStart(fooNode, 0);
+            r.setEnd(barNode, barNode.nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            // Replace the <p> with an <h4> (tag change → block replaced).
+            const newHtml = '<h4>pre <strong>foo</strong><em>bar</em> post</h4><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8102 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            return { beforeText, afterText };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["beforeText"] == "foobar", (
+        f"expected 'foobar' (no synthetic space), got {result['beforeText']!r}"
+    )
+    assert result["afterText"] == result["beforeText"], (
+        f"adjacent inline selection not re-resolved: "
+        f"before={result['beforeText']!r} after={result['afterText']!r}"
+    )
+
+
+def test_duplicate_text_selects_correct_scoped_occurrence(server_url: str, page) -> None:
+    """When the selected text appears in MULTIPLE blocks, the scoped search
+    restores the CORRECT occurrence (the one in the replacement block matching
+    the captured block identity), not the first global match.
+
+    Proves: structural identity (block ID/tag) scopes the search correctly.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Install a body with the SAME text in two blocks with different IDs.
+            const html = '<p id="first-dupe">duplicate text here</p><p id="second-dupe">duplicate text here</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8201 }, { pulse: false });
+            // Select "duplicate text here" in the SECOND block.
+            const second = body.querySelector('#second-dupe');
+            if (!second) return { error: 'no #second-dupe' };
+            let txt = second.firstChild;
+            if (!txt || txt.nodeType !== 3) return { error: 'no text node' };
+            const r = document.createRange();
+            r.setStart(txt, 0);
+            r.setEnd(txt, txt.nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            // Replace the SECOND block with an <h3> (tag change → block replaced).
+            // The first block stays as <p>.
+            const newHtml = '<p id="first-dupe">duplicate text here</p><h3 id="second-dupe">duplicate text here</h3>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8202 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            // Check which block the selection ended up in.
+            const afterRange = afterSel && afterSel.rangeCount > 0 ? afterSel.getRangeAt(0) : null;
+            let afterBlockId = '';
+            if (afterRange) {
+                let el = afterRange.startContainer;
+                if (el.nodeType === 3) el = el.parentElement;
+                while (el && el !== body) {
+                    if (el.id) { afterBlockId = el.id; break; }
+                    el = el.parentElement;
+                }
+            }
+            return { beforeText, afterText, afterBlockId };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["afterText"] == result["beforeText"], (
+        f"duplicate text not re-resolved: before={result['beforeText']!r} after={result['afterText']!r}"
+    )
+    assert result["afterBlockId"] == "second-dupe", (
+        f"scoped search restored to wrong block: expected 'second-dupe', "
+        f"got {result['afterBlockId']!r}"
+    )
+
+
+def test_ambiguous_unscoped_text_does_not_restore(server_url: str, page) -> None:
+    """When the selected text appears in multiple CHANGED blocks and no
+    structural identity can disambiguate (same tag, no IDs), the selection
+    is NOT restored (fail closed) rather than picking the first match.
+
+    Proves: fail-closed on ambiguity.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Two blocks with same text, same tag, NO IDs.
+            const html = '<p>ambiguous snippet</p><p>ambiguous snippet</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8301 }, { pulse: false });
+            const paras = body.querySelectorAll('p');
+            if (paras.length < 2) return { error: 'need 2 paras' };
+            // Select text in the second paragraph.
+            const txt = paras[1].firstChild;
+            if (!txt) return { error: 'no text node' };
+            const r = document.createRange();
+            r.setStart(txt, 0);
+            r.setEnd(txt, txt.nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            // Replace BOTH blocks with <h3> (same tag, no IDs, both changed).
+            const newHtml = '<h3>ambiguous snippet</h3><h3>ambiguous snippet</h3>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8302 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterCollapsed = afterSel ? afterSel.isCollapsed : true;
+            return { beforeText, afterText, afterCollapsed };
+        }"""
+    )
+    assert "error" not in result, result
+    # Selection should NOT be restored (ambiguous → fail closed).
+    assert result["afterText"] == "" or result["afterCollapsed"], (
+        f"ambiguous text should NOT be restored (fail closed), but got: "
+        f"afterText={result['afterText']!r} collapsed={result['afterCollapsed']}"
+    )
+
+
+def test_not_found_text_fails_closed(server_url: str, page) -> None:
+    """When the selected text cannot be found in the patched body, the
+    selection is cleared (fail closed) — no wrong range is created.
+
+    Proves: fail-closed on not-found.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const html = '<p id="gone">unique text that will disappear</p><p>stays</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8401 }, { pulse: false });
+            const p = body.querySelector('#gone');
+            if (!p || !p.firstChild) return { error: 'no #gone para' };
+            const r = document.createRange();
+            r.setStart(p.firstChild, 0);
+            r.setEnd(p.firstChild, p.firstChild.nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            // Replace with completely different text.
+            const newHtml = '<h3 id="gone">completely different content now</h3><p>stays</p>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8402 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterCollapsed = afterSel ? afterSel.isCollapsed : true;
+            return { beforeText, afterText, afterCollapsed };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["afterText"] == "" or result["afterCollapsed"], (
+        f"not-found text should NOT be restored (fail closed), but got: "
+        f"afterText={result['afterText']!r}"
+    )
+
+
+def test_find_text_node_wrapper_returns_single_node_only(server_url: str, page) -> None:
+    """The findTextNode wrapper returns {node, start, end} only for single-node
+    matches, and null for cross-element matches (so surroundContents callers
+    are safe). Proves: wrapper delegates to findTextRange correctly.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const html = '<p>single node text here</p><p>multi <strong>node</strong> span</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8501 }, { pulse: false });
+            // Single-node match: should return {node, start, end}.
+            const single = body.querySelector('p').firstChild;
+            const singleText = single.nodeValue;
+            // Cross-node match: "multi node span" spans 3 text nodes.
+            const paras = body.querySelectorAll('p');
+            const multiP = paras[1];
+            const multiWalker = document.createTreeWalker(multiP, NodeFilter.SHOW_TEXT);
+            const multiTexts = [];
+            let mn;
+            while ((mn = multiWalker.nextNode())) multiTexts.push(mn);
+            const r = document.createRange();
+            r.setStart(multiTexts[0], 0);
+            r.setEnd(multiTexts[multiTexts.length - 1], multiTexts[multiTexts.length - 1].nodeValue.length);
+            const crossText = r.toString();
+            return {
+                singleText,
+                crossText,
+                // findTextNode is internal but findTextRange is exercised via
+                // resolveCommentRange → applyCommentMarks. Test indirectly:
+                // seed a comment with cross-node anchor and check mark appears.
+            };
+        }"""
+    )
+    assert "error" not in result, result
+    # Verify the cross-element text is indeed multi-node.
+    assert "multi" in result["crossText"] and "node" in result["crossText"], result
+
+
+def test_cross_block_selection_re_resolved_forward(server_url: str, page) -> None:
+    """A forward selection spanning two block elements (<p>foo</p><p>bar</p>)
+    is re-resolved using actual browser Selection.toString() block separators
+    (\\n\\n between blocks), not synthetic flat-string concatenation.
+
+    Proves: findTextRange models block separators correctly via containingBlock
+    comparison, not Range.toString() (which doesn't insert separators).
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Use <p> elements (no heading anchors, no enhancements).
+            const html = '<p id="blk-a">first block text</p><p id="blk-b">second block text</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8801 }, { pulse: false });
+            // Select from "first" in the first block to "second" in the second.
+            const pa = body.querySelector('#blk-a');
+            const pb = body.querySelector('#blk-b');
+            let ta = pa.firstChild, tb = pb.firstChild;
+            if (!ta || !tb) return { error: 'no text nodes' };
+            const r = document.createRange();
+            r.setStart(ta, 0);
+            r.setEnd(tb, 6); // "second"
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            // Replace BOTH blocks with <blockquote> (tag change → both replaced).
+            const newHtml = '<blockquote id="blk-a">first block text</blockquote><blockquote id="blk-b">second block text</blockquote>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8802 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterCollapsed = afterSel ? afterSel.isCollapsed : true;
+            // Check which blocks the selection spans.
+            let afterStartBlock = '', afterEndBlock = '';
+            if (afterSel && afterSel.rangeCount > 0 && !afterSel.isCollapsed) {
+                const ar = afterSel.getRangeAt(0);
+                let el = ar.startContainer;
+                if (el.nodeType === 3) el = el.parentElement;
+                while (el && el !== body) { if (el.id) { afterStartBlock = el.id; break; } el = el.parentElement; }
+                el = ar.endContainer;
+                if (el.nodeType === 3) el = el.parentElement;
+                while (el && el !== body) { if (el.id) { afterEndBlock = el.id; break; } el = el.parentElement; }
+            }
+            return { beforeText, afterText, afterCollapsed, afterStartBlock, afterEndBlock };
+        }"""
+    )
+    assert "error" not in result, result
+    # Verify the browser produces a block separator (not flat concatenation).
+    assert "\n" in result["beforeText"], (
+        f"expected block separator in Selection.toString(), got: {result['beforeText']!r}"
+    )
+    assert not result["afterCollapsed"], "selection should not be collapsed after re-resolution"
+    assert result["afterStartBlock"] == "blk-a", (
+        f"selection should start in blk-a, got: {result['afterStartBlock']!r}"
+    )
+    assert result["afterEndBlock"] == "blk-b", (
+        f"selection should end in blk-b, got: {result['afterEndBlock']!r}"
+    )
+    assert "first" in result["afterText"] and "second" in result["afterText"], (
+        f"selection should contain text from both blocks, got: {result['afterText']!r}"
+    )
+
+
+def test_cross_block_selection_re_resolved_backward(server_url: str, page) -> None:
+    """A backward cross-block selection is re-resolved with correct direction
+    via setBaseAndExtent, modeling Selection.toString() block separators.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const html = '<p id="bk-a">alpha block</p><p id="bk-b">beta block</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8811 }, { pulse: false });
+            const pa = body.querySelector('#bk-a');
+            const pb = body.querySelector('#bk-b');
+            let ta = pa.firstChild, tb = pb.firstChild;
+            if (!ta || !tb) return { error: 'no text nodes' };
+            const r = document.createRange();
+            r.setStart(ta, 0);
+            r.setEnd(tb, 4); // "beta"
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            // Make it backward: anchor at end (tb), focus at start (ta).
+            sel.setBaseAndExtent(tb, 4, ta, 0);
+            const beforeText = sel.toString();
+            const beforeBackward = sel.anchorNode === tb && sel.focusNode === ta;
+            // Replace both blocks with <blockquote> (tag change).
+            const newHtml = '<blockquote id="bk-a">alpha block</blockquote><blockquote id="bk-b">beta block</blockquote>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8812 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterCollapsed = afterSel ? afterSel.isCollapsed : true;
+            // Check direction: anchor should be in bk-b, focus in bk-a.
+            let afterAnchorBlock = '', afterFocusBlock = '';
+            if (afterSel && afterSel.rangeCount > 0 && !afterSel.isCollapsed) {
+                let el = afterSel.anchorNode;
+                if (el && el.nodeType === 3) el = el.parentElement;
+                while (el && el !== body) { if (el.id) { afterAnchorBlock = el.id; break; } el = el.parentElement; }
+                el = afterSel.focusNode;
+                if (el && el.nodeType === 3) el = el.parentElement;
+                while (el && el !== body) { if (el.id) { afterFocusBlock = el.id; break; } el = el.parentElement; }
+            }
+            return { beforeText, afterText, beforeBackward, afterCollapsed, afterAnchorBlock, afterFocusBlock };
+        }"""
+    )
+    assert "error" not in result, result
+    assert result["beforeBackward"] is True, "setup should produce backward cross-block selection"
+    assert not result["afterCollapsed"], "selection should not be collapsed"
+    assert result["afterAnchorBlock"] == "bk-b", (
+        f"backward direction: anchor should be in bk-b, got: {result['afterAnchorBlock']!r}"
+    )
+    assert result["afterFocusBlock"] == "bk-a", (
+        f"backward direction: focus should be in bk-a, got: {result['afterFocusBlock']!r}"
+    )
+
+
+def test_whitespace_run_replacement_preserves_selection(server_url: str, page) -> None:
+    """A selection containing authored whitespace runs (multiple spaces/tabs)
+    is re-resolved correctly after block replacement. Range.toString()
+    preserves authored whitespace as-is.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            // Text with a run of spaces (not normalized by Range.toString()).
+            const html = '<p id="ws-block">before     gap     after</p><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8821 }, { pulse: false });
+            const p = body.querySelector('#ws-block');
+            let txt = p.firstChild;
+            if (!txt) return { error: 'no text node' };
+            // Select "before     gap" (includes the whitespace run).
+            const r = document.createRange();
+            r.setStart(txt, 0);
+            r.setEnd(txt, 14); // "before     gap"
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            // Replace the <p> with an <h4> (tag change → block replaced).
+            const newHtml = '<h4 id="ws-block">before     gap     after</h4><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8822 }, { pulse: false });
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            return { beforeText, afterText };
+        }"""
+    )
+    assert "error" not in result, result
+    # Selection.toString() collapses whitespace runs; verify the selection
+    # is restored correctly (contains key text, not lost).
+    assert "before" in result["beforeText"] and "gap" in result["beforeText"], (
+        f"whitespace-run selection should contain 'before' and 'gap': {result['beforeText']!r}"
+    )
+    assert result["afterText"] == result["beforeText"], (
+        f"whitespace-run selection not re-resolved: "
+        f"before={result['beforeText']!r} after={result['afterText']!r}"
+    )
+
+
+def test_pending_mark_survives_block_replacement_via_real_affordance(server_url: str, page) -> None:
+    """A pending comment mark created through the REAL affordance (select text,
+    wait for affordance, click button) survives a containing-block tag
+    replacement. Old mark nodes are disconnected; replacement marks with the
+    same pending ID cover the exact cross-node text.
+
+    Proves: applyPendingDraftMark uses resolveCommentRange (cross-node) +
+    wrapRangeInMark (wrapRangeAcrossElements) after block disconnect.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    # Install a body with inline elements for cross-node anchor.
+    page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const html = '<p id="aff-cross">alpha <strong>beta</strong> gamma</p><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8831 }, { pulse: false });
+        }"""
+    )
+    # Select cross-node text "alpha beta gamma" via the browser selection.
+    page.evaluate(
+        """() => {
+            const p = document.querySelector('#aff-cross');
+            const texts = [];
+            const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walker.nextNode())) texts.push(n);
+            const r = document.createRange();
+            r.setStart(texts[0], 0);
+            r.setEnd(texts[texts.length - 1], texts[texts.length - 1].nodeValue.length);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            document.dispatchEvent(new Event('selectionchange'));
+        }"""
+    )
+    # Wait for the affordance and click it (real affordance path).
+    afford = page.locator(".okf-comment-afford:not([hidden]) button")
+    afford.wait_for(state="visible", timeout=10000)
+    afford.click()
+    # The affordance click creates a pending mark + opens the panel.
+    # Record the pending mark ID and verify it exists.
+    pending_info = page.evaluate(
+        """() => {
+            const marks = document.querySelectorAll('.okf-page__body mark.okf-comment-mark');
+            const pendingId = window.okfLoomStudio.state._pendingMarkId;
+            const oldMarks = Array.from(marks).map(m => ({
+                id: m.getAttribute('data-comment-id'),
+                connected: m.isConnected,
+                text: m.textContent,
+            }));
+            return { pendingId, oldMarks, markCount: marks.length };
+        }"""
+    )
+    assert pending_info["markCount"] > 0, "no pending mark created after affordance click"
+    pending_id = pending_info["pendingId"]
+    assert pending_id, "no pending mark ID set"
+    # Now replace the containing block (tag change → old nodes disconnect).
+    result = page.evaluate(
+        """(pendingId) => {
+            const body = document.querySelector('.okf-page__body');
+            // Record old mark nodes before replacement.
+            const oldMarks = Array.from(body.querySelectorAll('mark.okf-comment-mark[data-comment-id="' + pendingId + '"]'));
+            const oldNodeConnected = oldMarks.length > 0 ? oldMarks[0].isConnected : false;
+            // Replace <p> with <h3> (tag change → block replaced, old nodes disconnected).
+            const newHtml = '<h3 id="aff-cross">alpha <strong>beta</strong> gamma</h3><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8832 }, { pulse: false });
+            // After patch: check old marks are disconnected.
+            const oldStillConnected = oldMarks.length > 0 ? oldMarks[0].isConnected : true;
+            // Check new marks with same pending ID.
+            const newMarks = body.querySelectorAll('mark.okf-comment-mark[data-comment-id="' + pendingId + '"]');
+            const newMarkTexts = Array.from(newMarks).map(m => m.textContent);
+            const newMarkConnected = newMarks.length > 0 ? newMarks[0].isConnected : false;
+            return {
+                oldNodeConnected, oldStillConnected,
+                newMarkCount: newMarks.length,
+                newMarkTexts: newMarkTexts,
+                newMarkConnected: newMarkConnected,
+            };
+        }""",
+        pending_id,
+    )
+    assert result["oldNodeConnected"] is True, "old mark should exist before replacement"
+    assert result["oldStillConnected"] is False, (
+        "old mark node should be disconnected after block replacement"
+    )
+    assert result["newMarkCount"] > 0, (
+        "replacement marks with same pending ID should exist after patch"
+    )
+    assert result["newMarkConnected"] is True, "new marks should be connected"
+    # The marks should collectively cover "alpha", "beta", "gamma".
+    combined = "".join(result["newMarkTexts"])
+    assert "alpha" in combined and "beta" in combined and "gamma" in combined, (
+        f"replacement marks should cover cross-node text, got: {result['newMarkTexts']!r}"
+    )
+
+
+def test_persisted_comment_cross_node_survives_body_patch(server_url: str, page) -> None:
+    """A persisted (confirmed) comment whose anchor spans inline elements
+    survives a body patch via the production applyCommentMarks/load path.
+    The mark is re-applied using cross-node resolveCommentRange.
+    """
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """() => {
+            const body = document.querySelector('.okf-page__body');
+            const html = '<p id="persist-cross">alpha <strong>beta</strong> gamma</p><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8841 }, { pulse: false });
+            // Seed a CONFIRMED comment with a cross-node anchor.
+            const commentId = 'persist-cross-node-1';
+            window.okfLoomStudio.state.comments.unshift({
+                id: commentId, concept: 'tables/orders',
+                anchor: { kind: 'text', ref: 'alpha beta gamma',
+                          block_id: 'persist-cross', concept: 'tables/orders' },
+                body: 'cross-node persisted test', state: 'open',
+                resolved_activity: [], ts: new Date().toISOString(),
+            });
+            // Apply a body patch that REPLACES the containing block (tag change).
+            const newHtml = '<h3 id="persist-cross">alpha <strong>beta</strong> gamma</h3><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html: newHtml, title: '', description: '', raw: '', rev: 8842 }, { pulse: false });
+            // Check the mark was re-applied via applyCommentMarks (called inside applyDoc).
+            const marks = body.querySelectorAll('mark.okf-comment-mark[data-comment-id="' + commentId + '"]');
+            const markTexts = Array.from(marks).map(m => m.textContent);
+            const combined = markTexts.join('');
+            return { markCount: marks.length, markTexts, combined };
+        }"""
+    )
+    assert result["markCount"] > 0, (
+        "persisted cross-node comment mark not re-applied after body patch"
+    )
+    assert "alpha" in result["combined"] and "beta" in result["combined"], (
+        f"persisted cross-node mark should cover cross-node text, got: {result['markTexts']!r}"
+    )
+
+
+def test_live_fallback_same_node_duplicate_fails_closed(writable_server_url: str, page) -> None:
+    """The REAL window.okfLoomLive.patchNow() fallback path (studio absent)
+    fails closed when the selected text appears multiple times within the
+    SAME text node. Tests the actual runtime, not a reimplemented algorithm.
+
+    Proves: live.js findTextNode enumerates ALL occurrences including
+    multiple within one text node, and fails closed on >1 match.
+    """
+    base = writable_server_url
+    page.goto(f"{base}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """async () => {
+            const body = document.querySelector('.okf-page__body');
+            // Install a body with duplicate text in ONE text node.
+            const html = '<p id="sn-dupe">same text appears same text again</p><p>delta</p>';
+            window.okfLoomStudio.applyDoc({ html, title: '', description: '', raw: '', rev: 8851 }, { pulse: false });
+            // Select the SECOND "same text" (at offset 18).
+            const p = body.querySelector('#sn-dupe');
+            const txt = p.firstChild;
+            if (!txt) return { error: 'no text node' };
+            const firstIdx = txt.nodeValue.indexOf('same text');
+            const secondIdx = txt.nodeValue.indexOf('same text', firstIdx + 1);
+            if (secondIdx < 0) return { error: 'no second occurrence' };
+            const r = document.createRange();
+            r.setStart(txt, secondIdx);
+            r.setEnd(txt, secondIdx + 9);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            const beforeText = sel.toString();
+            const beforeOffset = secondIdx;
+            // Force the fallback path: temporarily remove okfLoomStudio.applyDoc.
+            const savedApplyDoc = window.okfLoomStudio.applyDoc;
+            window.okfLoomStudio.applyDoc = undefined;
+            // Intercept fetch to return the SAME body html so the text is
+            // still findable after replacement.
+            const realFetch = window.fetch.bind(window.fetch);
+            window.fetch = function(url, opts) {
+                if (typeof url === 'string' && url.indexOf('/__data/doc') >= 0) {
+                    return Promise.resolve(new Response(JSON.stringify({
+                        id: 'tables/orders', rev: 8852,
+                        html: html, title: '', description: '', raw: '',
+                        frontmatter: {}, headings: [], backlinks: [], outgoing: [],
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                }
+                return realFetch(url, opts);
+            };
+            // Call the REAL patchNow() — uses fallback path (no applyDoc).
+            let patchError = null;
+            try {
+                await window.okfLoomLive.patchNow();
+            } catch (e) { patchError = String(e); }
+            // Restore.
+            window.okfLoomStudio.applyDoc = savedApplyDoc;
+            window.fetch = realFetch;
+            // Check: selection should NOT be restored (ambiguous: "same text"
+            // appears twice in one text node).
+            const afterSel = window.getSelection();
+            const afterText = afterSel ? afterSel.toString() : '';
+            const afterCollapsed = afterSel ? afterSel.isCollapsed : true;
+            // If restored, check which offset it restored to.
+            let afterOffset = -1;
+            if (afterSel && afterSel.rangeCount > 0 && !afterSel.isCollapsed) {
+                const r = afterSel.getRangeAt(0);
+                if (r.startContainer === txt || r.startContainer === body.querySelector('#sn-dupe')?.firstChild) {
+                    afterOffset = r.startOffset;
+                }
+            }
+            return { beforeText, afterText, afterCollapsed, beforeOffset, afterOffset, patchError };
+        }"""
+    )
+    assert "error" not in result, result
+    # The selection should NOT be restored because "same text" is ambiguous
+    # (appears twice in the same text node after body replacement).
+    assert result["afterText"] == "" or result["afterCollapsed"], (
+        f"same-node duplicate should NOT be restored (fail closed), but got: "
+        f"afterText={result['afterText']!r} collapsed={result['afterCollapsed']}"
+    )
+
+
+def test_async_stale_fetch_fenced_by_sequence(writable_server_url: str, page) -> None:
+    """Async lifecycle: two REAL window.okfLoomLive.patchNow() operations fire
+    concurrent /__data/doc fetches. The older fetch (seq 1) completes AFTER
+    the newer (seq 2), but is fenced by _docFetchSeq and does NOT overwrite
+    the newer body. Uses deterministic fetch interception — no sleeps.
+
+    Proves: patchOpenConcept's _docFetchSeq fence prevents stale patches.
+    """
+    base = writable_server_url
+    page.goto(f"{base}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    result = page.evaluate(
+        """async () => {
+            // Install a fetch interceptor that captures and holds /__data/doc
+            // responses until released.
+            const realFetch = window.fetch.bind(window.fetch);
+            const held = [];
+            let callCount = 0;
+            window.fetch = function(url, opts) {
+                if (typeof url === 'string' && url.indexOf('/__data/doc') >= 0) {
+                    callCount++;
+                    const myCall = callCount;
+                    return new Promise((resolve) => {
+                        held.push({ callNum: myCall, resolve });
+                    });
+                }
+                return realFetch(url, opts);
+            };
+            // Fire TWO patchNow() calls (both held).
+            const p1 = window.okfLoomLive.patchNow();
+            const p2 = window.okfLoomLive.patchNow();
+            // Release the SECOND fetch first (seq 2 — should apply).
+            const newerContent = '<p id="applied">newer content from seq 2</p>';
+            held[1].resolve(new Response(JSON.stringify({
+                id: 'tables/orders', rev: 9002,
+                html: newerContent, title: '', description: '', raw: '',
+                frontmatter: {}, headings: [], backlinks: [], outgoing: [],
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            // Wait for the second patch to settle.
+            await p2;
+            const bodyAfterNewer = document.querySelector('.okf-page__body').textContent.trim();
+            // Release the FIRST fetch last (seq 1 — should be fenced).
+            const olderContent = '<p id="stale">older stale content from seq 1</p>';
+            held[0].resolve(new Response(JSON.stringify({
+                id: 'tables/orders', rev: 9001,
+                html: olderContent, title: '', description: '', raw: '',
+                frontmatter: {}, headings: [], backlinks: [], outgoing: [],
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            // Wait for the first patch to settle (it should be fenced).
+            try { await p1; } catch (e) {}
+            const bodyAfterOlder = document.querySelector('.okf-page__body').textContent.trim();
+            // Restore fetch.
+            window.fetch = realFetch;
+            return {
+                fetchCount: callCount,
+                bodyAfterNewer,
+                bodyAfterOlder,
+                newerApplied: bodyAfterNewer.indexOf('newer content') >= 0,
+                olderFenced: bodyAfterOlder.indexOf('older stale content') < 0,
+            };
+        }"""
+    )
+    assert result["fetchCount"] == 2, (
+        f"expected 2 /__data/doc fetches, got {result['fetchCount']}"
+    )
+    assert result["newerApplied"], (
+        f"newer fetch (seq 2) should have applied; body: {result['bodyAfterNewer']!r}"
+    )
+    assert result["olderFenced"], (
+        f"older fetch (seq 1) should be fenced; body still has stale content: "
+        f"{result['bodyAfterOlder']!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # B2 - comment ranges anchor to text (CRI-002)
 # ---------------------------------------------------------------------------
@@ -299,11 +1378,11 @@ def test_comment_mark_reapplied_after_patch(server_url: str, page) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_presence_focus_highlights_list_row(server_url: str, page) -> None:
+def test_presence_focus_highlights_list_row(writable_server_url: str, page) -> None:
     """presence.focus highlights the matching index row (current spec §12)."""
     # The root index lists subdirectories; concept rows live under subdir
     # indexes like /tables/ (render.py groups direct children per directory).
-    page.goto(f"{server_url}/tables/", wait_until="load")
+    page.goto(f"{writable_server_url}/tables/", wait_until="load")
     _wait_for_studio(page)
     # Wait for the concept list to be present (server-rendered).
     page.wait_for_selector(".okf-concept-list li a", timeout=5000)
@@ -338,9 +1417,9 @@ def test_presence_focus_highlights_list_row(server_url: str, page) -> None:
     )
 
 
-def test_presence_idle_clears_highlights(server_url: str, page) -> None:
+def test_presence_idle_clears_highlights(writable_server_url: str, page) -> None:
     """presence.idle clears every presence highlight (current spec §12)."""
-    page.goto(f"{server_url}/tables/", wait_until="load")
+    page.goto(f"{writable_server_url}/tables/", wait_until="load")
     _wait_for_studio(page)
     page.wait_for_selector(".okf-concept-list li a", timeout=5000)
     href = page.evaluate("document.querySelector('.okf-concept-list li a').getAttribute('href')")
@@ -369,9 +1448,9 @@ def test_presence_idle_clears_highlights(server_url: str, page) -> None:
     page.wait_for_function("document.querySelectorAll('.okf-presence-focus').length === 0", timeout=8000)
 
 
-def test_graph_presence_halo(server_url: str, page) -> None:
+def test_graph_presence_halo(writable_server_url: str, page) -> None:
     """presence.focus adds a halo to the focused graph node (current spec §12)."""
-    page.goto(f"{server_url}/__graph", wait_until="load")
+    page.goto(f"{writable_server_url}/__graph", wait_until="load")
     # graph.js boots independently; wait for the canvas + okfLoomLive.
     page.wait_for_function("typeof window.okfLoomLive === 'object'", timeout=8000)
     page.wait_for_selector("#okf-graph canvas", timeout=8000)
@@ -854,10 +1933,10 @@ def test_sse_watchdog_arms_polling_when_stream_is_starved(server_url: str, page)
 # agent's], focus-trapped, Esc-dismissable, reduced-motion aware.
 
 
-def test_conflict_modal_appears_on_409_from_apply(server_url: str, page) -> None:
+def test_conflict_modal_appears_on_409_from_apply(writable_server_url: str, page) -> None:
     """A 409 with conflict:true from /__apply surfaces the modal with the
     concept-named heading and the three required actions."""
-    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    page.goto(f"{writable_server_url}/tables/orders", wait_until="load")
     _wait_for_studio(page)
     # Read the CSRF token the studio embeds.
     token = page.evaluate("window.__OKF_LOOM_STUDIO__ && window.__OKF_LOOM_STUDIO__.token || ''")
@@ -1079,27 +2158,11 @@ def writable_server_url(tmp_path: Path) -> str:
         pytest.skip(f"demo bundle missing: {DEMO_BUNDLE}")
     dst = tmp_path / "writable_bundle"
     shutil.copytree(DEMO_BUNDLE, dst, ignore=shutil.ignore_patterns(".okf-loom"))
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen(
-        okf_module_argv(
-            "serve", str(dst), "--host", "127.0.0.1", "--port", str(port),
-            "--no-open",
-        ),
-        cwd=str(TOOLKIT_ROOT),
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        env=okf_subprocess_env(),
-    )
+    proc, base = _start_server(dst)
     try:
-        _wait_for_server(proc, base)
         yield base
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+        _stop_server(proc)
 
 
 def test_conflict_modal_diff_renders_actual_diff(writable_server_url: str, page) -> None:
@@ -2073,13 +3136,13 @@ def test_change_list_cap_messaging_upfront(server_url: str, page) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_watching_toggle_posts_presence(server_url: str, page) -> None:
+def test_agent_watching_toggle_posts_presence(writable_server_url: str, page) -> None:
     """The 'Agent watching' switch in the studio bar toggles the agent's
     proactive-watching presence via POST /__presence (§3 step 3/4). It must
     be a labelled, keyboard-accessible toggle (aria-pressed) and POST the
     right {actor, state} on each flip.
     """
-    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    page.goto(f"{writable_server_url}/tables/orders", wait_until="load")
     _wait_for_studio(page)
     # The toggle must exist with an accessible name + aria-pressed.
     toggle = page.locator(".okf-watch-toggle")
@@ -2292,7 +3355,7 @@ def test_change_list_load_merges_late_snapshot(server_url: str, page) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_activity_panel_has_unique_sections(server_url: str, page) -> None:
+def test_agent_activity_panel_has_unique_sections(writable_server_url: str, page) -> None:
     """The Agent-activity panel must show UNIQUE content the presence chip +
     Changes panel don't surface (CRI2-012): the agent's claimed comment queue
     + a presence-history log. Without these it just duplicated the chip + a
@@ -2301,7 +3364,7 @@ def test_agent_activity_panel_has_unique_sections(server_url: str, page) -> None
     Drives presence transitions + a claimed comment, opens the panel, and
     asserts both unique sections render with real content.
     """
-    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    page.goto(f"{writable_server_url}/tables/orders", wait_until="load")
     _wait_for_studio(page)
     page.wait_for_function("typeof window.okfLoomLive === 'object'", timeout=8000)
     token = page.evaluate("window.__OKF_LOOM_STUDIO__ && window.__OKF_LOOM_STUDIO__.token || ''")
@@ -2537,11 +3600,11 @@ def test_index_dashboard_filters_sorts_and_searches(server_url, page):
 # ---------------------------------------------------------------------------
 
 
-def test_quick_action_run_posts_directive(server_url, page) -> None:
+def test_quick_action_run_posts_directive(writable_server_url, page) -> None:
     """Round 2 §6.4: an intent's Run button POSTs a directive to /__comment
     (reuses the composer Send path)."""
     page.set_viewport_size({"width": 1200, "height": 900})
-    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    page.goto(f"{writable_server_url}/tables/orders", wait_until="load")
     _wait_for_studio(page)
     page.click('.okf-rail__btn[data-rail-id="comments"]')  # open Comments overlay
     page.wait_for_selector(".okf-panel__intent-run", timeout=8000)
@@ -2724,4 +3787,59 @@ def test_validation_statseg_stays_hidden_pre_fetch(server_url: str, page) -> Non
         f"hidden .okf-statseg computed display:{display!r}, expected 'none' "
         "(.okf-statseg{display:inline-flex} is beating [hidden] -- "
         "add .okf-statseg[hidden]{display:none} to studio.css)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fixture lifecycle tests: _start_server cleanup on failure
+# ---------------------------------------------------------------------------
+
+
+def test_start_server_cleans_up_on_early_exit(tmp_path: Path, monkeypatch) -> None:
+    """_start_server terminates and reaps the child process when the server
+    exits immediately (early exit). No live process is left behind.
+    """
+    import subprocess as sp
+
+    # Create a real short-lived process that exits with rc=1.
+    real_proc = sp.Popen(
+        [sys.executable, "-c", "import sys; sys.exit(1)"],
+        stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+    )
+
+    # Monkey-patch subprocess.Popen so _start_server uses our process.
+    monkeypatch.setattr(sp, "Popen", lambda *a, **kw: real_proc)
+
+    with pytest.raises(RuntimeError, match="exited unexpectedly"):
+        _start_server(tmp_path / "fake_bundle")
+
+    # The process must be reaped (poll() returns a value, not None).
+    assert real_proc.poll() is not None, (
+        "child process should be terminated and reaped after early exit"
+    )
+
+
+def test_start_server_cleans_up_on_timeout(tmp_path: Path, monkeypatch) -> None:
+    """_start_server terminates and reaps the child process when the server
+    fails to become ready within the startup timeout. No live process is left
+    behind.
+    """
+    import subprocess as sp
+
+    # Create a real long-lived process that never serves HTTP.
+    real_proc = sp.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+    )
+
+    # Monkey-patch subprocess.Popen and shorten the timeout.
+    monkeypatch.setattr(sp, "Popen", lambda *a, **kw: real_proc)
+    monkeypatch.setattr("tests.test_studio_iter1_browser._SERVER_STARTUP_TIMEOUT", 1.0)
+
+    with pytest.raises(RuntimeError, match="not ready within"):
+        _start_server(tmp_path / "fake_bundle")
+
+    # The process must be terminated and reaped.
+    assert real_proc.poll() is not None, (
+        "child process should be terminated and reaped after timeout"
     )

@@ -1454,6 +1454,30 @@ def _readtime_html(body: str) -> str:
     return f'<span class="okf-readtime">{minutes} min read</span>'
 
 
+def _render_concept_body_html(
+    concept: Concept,
+    bundle: Bundle,
+    *,
+    mode: str,
+    root_prefix: str = "",
+) -> str:
+    """Render the canonical concept-body fragment for pages and live patches.
+
+    Keeping markdown conversion, link rewriting, citation suppression, and
+    heading demotion behind this boundary prevents ``/__data/doc`` from
+    emitting a structurally different fragment during ready/resync.
+    """
+    body_html = markdown_to_html(concept.body)
+    body_html = rewrite_internal_links(
+        body_html, _render_link_map(bundle, concept, mode)
+    )
+    if mode == "static":
+        body_html = _relativize_asset_srcs(body_html, root_prefix)
+    if _has_frontmatter_citations(concept):
+        body_html = _strip_body_citations_section(body_html)
+    return _demote_headings(body_html)
+
+
 def _render_concept_page(
     concept: Concept,
     bundle: Bundle,
@@ -1469,27 +1493,9 @@ def _render_concept_page(
     static_prefix = _static_prefix_for(mode, concept.id)
     root_prefix = _root_prefix_for(mode, concept.id)
 
-    # Body markdown → HTML → internal-link rewrite.
-    body_html = markdown_to_html(concept.body)
-    link_map = _render_link_map(bundle, concept, mode)
-    body_html = rewrite_internal_links(body_html, link_map)
-    if mode == "static":
-        # Absolute image srcs must become page-relative in static builds
-        # (the copied media sits at its bundle-relative path in the output).
-        body_html = _relativize_asset_srcs(body_html, root_prefix)
-    # P1-39: when frontmatter ``citations:`` is present (rendered by the
-    # governed-keys block below), suppress the body's ``# Citations``
-    # heading + its content so the two citation lists don't render twice.
-    # We strip the body's Citations section BEFORE heading demotion so the
-    # regex matches the original (pre-demote) ``<h1>Citations</h1>`` the
-    # markdown renderer emits for ``# Citations``.
-    if _has_frontmatter_citations(concept):
-        body_html = _strip_body_citations_section(body_html)
-    # Demote body headings by one level so the page <h1> (concept title)
-    # is the only top-level heading. This preserves a clean document
-    # outline for screen-reader navigation and SEO. `# Schema` in the
-    # body becomes <h2>, `## Subsection` becomes <h3>, etc. h6 stays h6.
-    body_html = _demote_headings(body_html)
+    body_html = _render_concept_body_html(
+        concept, bundle, mode=mode, root_prefix=root_prefix
+    )
 
     # Editorial Workbench §6.1: on-page ToC from the FINAL body_html so its
     # #anchors match the ids the renderer emitted (gated to >=3 headings).

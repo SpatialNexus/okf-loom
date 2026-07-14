@@ -50,6 +50,7 @@ from .render import (
     _render_index_page,
     _render_search_page,
     _render_graph_page,
+    _render_concept_body_html,
     _content_index_json,
 )
 from .viewer.assets import (
@@ -62,7 +63,7 @@ from .viewer.assets import (
     versioned_asset_url,
     is_known_static_asset,
 )
-from .viewer.markdown import markdown_to_html, rewrite_internal_links, url_for_concept
+from .viewer.markdown import markdown_to_html
 
 # ---------------------------------------------------------------------------
 # DoS size caps (P2-55). The authoritative YAML/body size cap lives in
@@ -1506,8 +1507,6 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
 
     def _handle_data_doc(self, query: dict[str, list[str]]) -> None:
         """One concept's rendered+raw+meta JSON for in-place re-render (§6)."""
-        from .render import _render_link_map
-
         cid_str = (query.get("id", [""])[0] or "").strip()
         if not cid_str:
             return self._send_json(400, {"error": "id required"})
@@ -1520,17 +1519,14 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         if concept is None:
             return self._send_json(404, {"error": f"unknown concept: {cid_str}"})
         graph = bundle.graph()
-        # Render the concept body HTML the same way the concept page does, so a
-        # live `changed` patch swaps in identical markup (§7.3 no-refresh).
-        body_html = markdown_to_html(concept.body)
-        link_map = _render_link_map(bundle, concept, "serve")
-        body_html = rewrite_internal_links(body_html, link_map)
-        # F13: apply the plugin hook so a plugin's body injection survives the
-        # first live patch — parity with _handle_concept's render path, which
-        # routes the page through ``on_concept_render``. Use ``self._plugin()``
-        # (NoOpPlugin fallback) for the same crash-safety the concept page has;
-        # the snapshot's ``plugin`` may be None when an embedder sets
-        # ``server.plugin = None`` (the test harness does exactly that).
+        # Use the concept page's canonical body transform so ready/resync is a
+        # structural no-op when source content has not changed (§7.3).
+        body_html = _render_concept_body_html(concept, bundle, mode="serve")
+        # F13: this invocation gives the plugin a BODY FRAGMENT so body
+        # injection survives a live patch. The initial-page invocation in
+        # _handle_concept receives the FULL PAGE after template assembly; the
+        # hook intentionally supports both scopes. Use ``self._plugin()``
+        # (NoOpPlugin fallback) because embedders may set server.plugin = None.
         body_html = self._plugin().on_concept_render(concept, body_html)
         backlinks = sorted({
             concept_id_to_str(link.source)
@@ -1548,6 +1544,8 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             "html": body_html,
             "raw": concept.body,
             "frontmatter": concept.frontmatter,
+            # Metadata reflects source Markdown levels. Rendered HTML levels
+            # are offset by the canonical body transform (h1→h2, etc.).
             "headings": [{"level": h.level, "text": h.text} for h in concept.headings],
             "backlinks": backlinks,
             "outgoing": outgoing,

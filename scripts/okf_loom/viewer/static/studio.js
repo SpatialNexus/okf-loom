@@ -749,8 +749,21 @@
     if (tag === "table" || tag === "pre") {
       return tag + "|" + id + "|" + (el.textContent || "").replace(/\s+/g, " ").trim();
     }
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200);
-    return tag + "|" + id + "|" + text;
+    // For headings, exclude the client-only heading-anchor glyph (¶) that
+    // bindHeadingAnchors injects into the live DOM, so an unchanged heading
+    // compares equal to the server-rendered version (which has no anchor).
+    // This keeps heading DOM identity stable across no-op re-renders and
+    // prevents unnecessary block replacement on every patch. Intentional
+    // heading-level changes (H2→H1) still trigger replacement via the tag
+    // component of the signature.
+    var text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (/^h[1-6]$/.test(tag) && el.querySelector && el.querySelector(".okf-heading-anchor")) {
+      var clone = el.cloneNode(true);
+      var anchors = clone.querySelectorAll(".okf-heading-anchor");
+      for (var ai = 0; ai < anchors.length; ai++) anchors[ai].remove();
+      text = (clone.textContent || "").replace(/\s+/g, " ").trim();
+    }
+    return tag + "|" + id + "|" + text.slice(0, 200);
   }
   function parseHtmlToBlocks(html) {
     const tmp = document.createElement("div");
@@ -835,39 +848,77 @@
   // Captures the current in-body selection. Because unchanged blocks keep
   // their DOM identity (diffChildren never touches them), a selection that
   // lives entirely inside an unchanged block survives automatically. Only
-  // selections spanning a CHANGED block need a best-effort text-search
-  // restore after the patch. Returns {restore(changedBlocks)}.
+  // selections whose boundary nodes were disconnected/replaced need a
+  // best-effort text-search restore after the patch.
+  //
+  // CRITICAL: the "did the selection survive?" check must use ACTUAL node
+  // connectivity/containment, NOT text equality. A replaced block can carry
+  // different text (e.g. an H2→H1 patch that also drops a client-only
+  // heading-anchor ¶ glyph), so comparing old-vs-inserted block text would
+  // incorrectly treat a detached anchor block as unchanged — collapsing the
+  // selection and preventing the comment affordance from appearing.
+  //
+  // AMBIGUITY FAIL-CLOSED: when re-resolving by text, the search is scoped
+  // to the replacement block (by captured block ID / tag / index + local
+  // before/after context). If multiple viable ranges remain or identity
+  // cannot be established, NO range is restored — never the first global
+  // duplicate. Returns {restore(changedBlocks)}.
   function saveSelectionAcrossPatch(body) {
     const sel = window.getSelection && window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return { restore() {} };
     const range = sel.getRangeAt(0);
     if (!body.contains(range.commonAncestorContainer)) return { restore() {} };
-    const text = sel.toString();
+    const text = sel.toString().trim();
     if (!text) return { restore() {} };
-    // Record the text of the block containing the anchor so we can tell
-    // whether that block was replaced.
-    const anchorBlock = containingBlock(range.startContainer, body);
-    const anchorBlockText = anchorBlock ? (anchorBlock.textContent || "").replace(/\s+/g, " ").trim() : "";
+    // Retain the EXACT boundary node references + their containing blocks.
+    const startNode = range.startContainer;
+    const startOffset = range.startOffset;
+    const endNode = range.endContainer;
+    const endOffset = range.endOffset;
+    const anchorBlock = containingBlock(startNode, body);
+    const focusBlock = containingBlock(endNode, body);
+    // Direction: backward when the Selection anchor is NOT at the range start.
+    const backward = sel.anchorNode !== range.startContainer ||
+      (sel.anchorNode === range.startContainer && sel.anchorOffset !== range.startOffset);
+    // Capture structural identity for scoped re-resolution. This lets us
+    // search the CORRECT replacement block after a patch instead of blindly
+    // matching the first global occurrence of the text (which would be wrong
+    // if the same text appears in multiple blocks).
+    const ident = captureBlockIdentity(anchorBlock, range, body);
     return {
       _text: text,
-      _anchorBlockText: anchorBlockText,
       restore(changedBlocks) {
         if (!text) return;
-        // If the anchor block wasn't changed, the live Selection is still
-        // valid (the DOM node is untouched). Only re-resolve when a changed
-        // block overlaps the prior selection.
-        const changedSigs = changedBlocks.map((b) => (b.textContent || "").replace(/\s+/g, " ").trim());
-        const anchorChanged = !anchorBlockText || changedSigs.indexOf(anchorBlockText) >= 0;
-        if (!anchorChanged) return; // selection survived untouched
-        // Best-effort: find the text anywhere in the body and reselect it.
-        const found = findTextNode(body, text);
+        // Selection survived ONLY if BOTH boundary nodes are still connected
+        // AND contained by the current body AND live inside a real block
+        // element (not the body root).
+        const startLive = startNode && startNode.isConnected &&
+          body.contains(startNode) && anchorBlock && anchorBlock !== body &&
+          anchorBlock.isConnected && body.contains(anchorBlock);
+        const endLive = endNode && endNode.isConnected &&
+          body.contains(endNode) && focusBlock && focusBlock !== body &&
+          focusBlock.isConnected && body.contains(focusBlock);
+        if (startLive && endLive) return; // selection survived untouched
+        // At least one boundary node was disconnected/replaced. Re-resolve
+        // using scoped search with structural identity. findScopedTextRange
+        // fails closed (returns null) when the text is ambiguous or not
+        // found, so we never create a wrong range.
+        const found = findScopedTextRange(body, text, ident, changedBlocks);
         if (!found) return;
         try {
-          const r = document.createRange();
-          r.setStart(found.node, found.start);
-          r.setEnd(found.node, found.end);
-          sel.removeAllRanges();
-          sel.addRange(r);
+          if (backward && typeof sel.setBaseAndExtent === "function") {
+            sel.removeAllRanges();
+            sel.setBaseAndExtent(
+              found.endNode, found.endOffset,
+              found.startNode, found.startOffset
+            );
+          } else {
+            const r = document.createRange();
+            r.setStart(found.startNode, found.startOffset);
+            r.setEnd(found.endNode, found.endOffset);
+            sel.removeAllRanges();
+            sel.addRange(r);
+          }
         } catch (e) { /* give up silently; selection is best-effort */ }
       },
     };
@@ -882,14 +933,279 @@
     }
     return root;
   }
-  function findTextNode(root, text) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-      const idx = node.nodeValue ? node.nodeValue.indexOf(text) : -1;
-      if (idx >= 0) return { node: node, start: idx, end: idx + text.length };
+  // Capture structural identity of the anchor block + local text context
+  // around the selection. Used after a patch to scope the text search to the
+  // correct replacement block and disambiguate duplicate text.
+  function captureBlockIdentity(anchorBlock, range, body) {
+    if (!anchorBlock || anchorBlock === body) return null;
+    var id = anchorBlock.getAttribute("id") || "";
+    var tag = anchorBlock.tagName.toLowerCase();
+    var index = -1;
+    try {
+      var el = body.firstElementChild, i = 0;
+      while (el) { if (el === anchorBlock) { index = i; break; } el = el.nextElementSibling; i++; }
+    } catch (e) {}
+    // Local before/after context: text within the anchor block immediately
+    // before/after the selection. Used to disambiguate when the same text
+    // appears multiple times within the same block.
+    var before = "", after = "";
+    try {
+      var br = document.createRange();
+      br.setStart(anchorBlock, 0);
+      br.setEnd(range.startContainer, range.startOffset);
+      before = br.toString().slice(-60); // last 60 chars before selection
+    } catch (e) {}
+    try {
+      var ar = document.createRange();
+      ar.setStart(range.endContainer, range.endOffset);
+      ar.setEnd(anchorBlock, anchorBlock.childNodes.length);
+      after = ar.toString().slice(0, 60); // first 60 chars after selection
+    } catch (e) {}
+    return { id: id, tag: tag, index: index, before: before, after: after };
+  }
+  // Tiered scoped search for re-resolving selection text after a body patch.
+  // 1. Block ID match → search within that block.
+  // 2. Changed blocks with matching tag → search within each; fail closed
+  //    if text is found in more than one.
+  // 3. All changed blocks → same fail-closed principle.
+  // 4. Entire body → last resort; still fail closed on multiple matches.
+  // If identity cannot be established (null ident) and no changed blocks
+  // narrow the scope, fail closed — never restore to an unscoped global match.
+  function findScopedTextRange(body, text, ident, changedBlocks) {
+    // Tier 1: block ID match.
+    if (ident && ident.id) {
+      var scopeById = body.querySelector('#' + cssEscape(ident.id));
+      if (scopeById) {
+        var found = findTextRange(scopeById, text, { contextBefore: ident.before, contextAfter: ident.after });
+        if (found) return found;
+      }
     }
-    return null;
+    // Tier 2: changed blocks with matching tag.
+    if (changedBlocks && changedBlocks.length && ident && ident.tag) {
+      var matches = [];
+      for (var ci = 0; ci < changedBlocks.length; ci++) {
+        if (changedBlocks[ci].tagName.toLowerCase() === ident.tag) {
+          var m = findTextRange(changedBlocks[ci], text, { contextBefore: ident.before, contextAfter: ident.after });
+          if (m) { matches.push(m); if (matches.length > 1) return null; }
+        }
+      }
+      if (matches.length === 1) return matches[0];
+    }
+    // Tier 3: all changed blocks.
+    if (changedBlocks && changedBlocks.length) {
+      var matches3 = [];
+      for (var cj = 0; cj < changedBlocks.length; cj++) {
+        var m3 = findTextRange(changedBlocks[cj], text, ident ? { contextBefore: ident.before, contextAfter: ident.after } : {});
+        if (m3) { matches3.push(m3); if (matches3.length > 1) return null; }
+      }
+      if (matches3.length === 1) return matches3[0];
+    }
+    // Tier 4: entire body — only when we have identity to disambiguate via
+    // context. Without identity, a global search is too ambiguous.
+    if (ident && (ident.id || ident.tag)) {
+      return findTextRange(body, text, { contextBefore: ident.before, contextAfter: ident.after });
+    }
+    return null; // fail closed
+  }
+    // Find `text` anywhere under `root` (or within `opts.scopeEl`). Models
+    // actual browser Selection.toString() semantics: block elements produce
+    // `\n\n` separators, adjacent inline elements concatenate directly
+    // (<strong>foo</strong><em>bar</em> → "foobar"), and authored whitespace
+    // is preserved. A bounded candidate enumeration finds all occurrences;
+    // each is verified by mapping offsets back to DOM nodes. Fails closed
+    // (returns null) when 0 or >1 verified matches are found. Context
+    // (before/after) disambiguates only when multiple candidates exist.
+    function findTextRange(root, text, opts) {
+      opts = opts || {};
+      if (!text) return null;
+      var scopeEl = opts.scopeEl || root;
+      var ctxBefore = opts.contextBefore || "";
+      var ctxAfter = opts.contextAfter || "";
+      var textNodes = collectTextNodes(scopeEl);
+      if (!textNodes.length) return null;
+      // Build a flat string modeling Selection.toString() semantics:
+      // - \n\n between text nodes in DIFFERENT block elements
+      // - direct concatenation for text nodes in the SAME block (inline)
+      // - authored whitespace preserved as-is
+      // - whitespace-only text nodes that are direct children of scopeEl
+      //   (inter-block template whitespace) are skipped
+      var flat = "";
+      var map = []; // map[flatIndex] = {node, offset} | null for separator
+      var prevBlock = null;
+      for (var i = 0; i < textNodes.length; i++) {
+        var tn = textNodes[i];
+        var nv = tn.nodeValue;
+        if (!nv) continue;
+        // Skip inter-block whitespace (direct child of scope, whitespace-only).
+        if (nv.trim() === "" && tn.parentElement === scopeEl) continue;
+        var block = containingBlock(tn, scopeEl);
+        // Insert block separator when transitioning between block elements.
+        if (prevBlock !== null && block !== prevBlock && flat.length > 0) {
+          flat += "\n\n";
+          map.push(null);
+          map.push(null);
+        }
+        for (var j = 0; j < nv.length; j++) {
+          map.push({ node: tn, offset: j });
+          flat += nv.charAt(j);
+        }
+        prevBlock = block;
+      }
+      // Find all occurrences of text in the scope text.
+      var candidates = [];
+      var MAX_CANDIDATES = 50;
+      var found = 0;
+      var idx = 0;
+      while (idx <= flat.length - text.length && found < MAX_CANDIDATES) {
+        idx = flat.indexOf(text, idx);
+        if (idx < 0) break;
+        found++;
+        var startPos = mapPosToDom(map, idx);
+        var endPos = mapPosToDom(map, idx + text.length - 1);
+        if (startPos && endPos) {
+          candidates.push({
+            startNode: startPos.node, startOffset: startPos.offset,
+            endNode: endPos.node, endOffset: endPos.offset + 1
+          });
+        }
+        idx++;
+      }
+      // Phase 2: if no exact match, try normalized match (collapse whitespace
+      // runs to single spaces). This handles cross-block selections where
+      // Selection.toString() produces element-specific separators (\n for
+      // <blockquote>, \n\n for <p>) that may differ from our \n\n model.
+      if (candidates.length === 0) {
+        var normResult = searchNormalizedMatch(map, flat, text, MAX_CANDIDATES);
+        if (normResult) return normResult;
+        return null;
+      }
+      // Single candidate: accept without context check.
+      if (candidates.length === 1) return candidates[0];
+      if (candidates.length === 0) return null;
+      // Multiple: use context to disambiguate.
+      var ctxMatches = [];
+      for (var ci = 0; ci < candidates.length; ci++) {
+        if (contextCheck(candidates[ci], ctxBefore, ctxAfter, scopeEl)) {
+          ctxMatches.push(candidates[ci]);
+          if (ctxMatches.length > 1) return null;
+        }
+      }
+      if (ctxMatches.length === 1) return ctxMatches[0];
+      return null;
+    }
+    // Map a position in the flat string to a DOM (node, offset).
+    // Separator chars (null map entries) are resolved to the next real node.
+    function mapPosToDom(map, position) {
+      var si = position;
+      while (si < map.length && !map[si]) si++;
+      if (si >= map.length) {
+        // Position is in trailing separators; use last real entry.
+        si = position;
+        while (si >= 0 && !map[si]) si--;
+      }
+      if (si < 0 || si >= map.length || !map[si]) return null;
+      return { node: map[si].node, offset: map[si].offset };
+    }
+    // Normalized search: collapse whitespace runs in both the flat string
+    // and the needle to single spaces, then find matches. Maps normalized
+    // positions back to DOM nodes via the original map. Handles cross-block
+    // selections where Selection.toString() produces element-specific
+    // separators (\n, \n\n) that differ from our \n\n model.
+    function searchNormalizedMatch(map, flat, text, maxCandidates) {
+      var normNeedle = text.replace(/\s+/g, " ").trim();
+      if (!normNeedle) return null;
+      // Build normalized flat string, keeping track of which original map
+      // entry each normalized character came from.
+      var nflat = "";
+      var nmap = []; // nmap[nflatIndex] = original map entry | null
+      var lastWasSpace = false;
+      for (var i = 0; i < flat.length; i++) {
+        var ch = flat.charAt(i);
+        if (/\s/.test(ch)) {
+          if (!lastWasSpace && nflat.length > 0) {
+            nflat += " ";
+            nmap.push(null);
+            lastWasSpace = true;
+          }
+        } else {
+          nflat += ch;
+          nmap.push(map[i]);
+          lastWasSpace = false;
+        }
+      }
+      // Trim leading space.
+      if (nflat.charAt(0) === " ") { nflat = nflat.substring(1); nmap.shift(); }
+      var matches = [];
+      var idx = 0;
+      while (idx <= nflat.length - normNeedle.length && matches.length < 2) {
+        idx = nflat.indexOf(normNeedle, idx);
+        if (idx < 0) break;
+        var startPos = mapPosToDom(nmap, idx);
+        var endPos = mapPosToDom(nmap, idx + normNeedle.length - 1);
+        if (startPos && endPos) {
+          matches.push({
+            startNode: startPos.node, startOffset: startPos.offset,
+            endNode: endPos.node, endOffset: endPos.offset + 1
+          });
+        }
+        idx++;
+      }
+      return matches.length === 1 ? matches[0] : null;
+    }
+    function collectTextNodes(root) {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var out = [];
+      var n;
+      while ((n = walker.nextNode())) { if (n.nodeValue && n.nodeValue.length > 0) out.push(n); }
+      return out;
+    }
+    // Check if a candidate's surrounding text matches the captured context.
+    function contextCheck(cand, ctxBefore, ctxAfter, scopeEl) {
+      if (!ctxBefore && !ctxAfter) return true;
+      try {
+        if (ctxBefore) {
+          var br = document.createRange();
+          br.setStart(scopeEl, 0);
+          br.setEnd(cand.startNode, cand.startOffset);
+          if (!br.toString().endsWith(ctxBefore)) return false;
+        }
+        if (ctxAfter) {
+          var ar = document.createRange();
+          ar.setStart(cand.endNode, cand.endOffset);
+          ar.setEnd(scopeEl, scopeEl.childNodes.length);
+          if (!ar.toString().startsWith(ctxAfter)) return false;
+        }
+        return true;
+      } catch (e) { return false; }
+    }
+    // Backward-compatible wrapper: comment-mark resolution (applyCommentMarks,
+  // applyPendingDraftMark, resolveSelectionDraft) expects {node, start, end}
+  // and creates a single-node range. Delegates to findTextRange but only
+  // returns single-node matches so callers using surroundContents are safe.
+  function findTextNode(root, text) {
+    var found = findTextRange(root, text);
+    if (!found || found.startNode !== found.endNode) return null;
+    return { node: found.startNode, start: found.startOffset, end: found.endOffset };
+  }
+  // Resolve a comment anchor text to a Range, using scoped search (block ID
+  // first, then full body) and cross-node findTextRange so a comment whose
+  // anchor spans inline elements (<strong>foo</strong>bar) is found and
+  // wrapped correctly via wrapRangeInMark → wrapRangeAcrossElements.
+  // Returns a Range or null.
+  function resolveCommentRange(root, text, blockId) {
+    if (!text) return null;
+    var scope = null;
+    if (blockId) scope = root.querySelector('#' + cssEscape(blockId));
+    var found = null;
+    if (scope) found = findTextRange(scope, text);
+    if (!found) found = findTextRange(root, text);
+    if (!found) return null;
+    try {
+      var r = document.createRange();
+      r.setStart(found.startNode, found.startOffset);
+      r.setEnd(found.endNode, found.endOffset);
+      return r;
+    } catch (e) { return null; }
   }
 
   // ====================================================================
@@ -1163,19 +1479,13 @@
         };
       } catch (e) { /* fall through to text re-resolution */ }
     }
-    let found = null;
-    if (!draft.inSource && !draft.inGraph && draft.block_id) {
-      const block = root.querySelector('#' + cssEscape(draft.block_id));
-      if (block) found = findTextNode(block, draft.text);
-    }
-    if (!found) found = findTextNode(root, draft.text);
-    if (!found) return null;
-    try {
-      const range = document.createRange();
-      range.setStart(found.node, found.start);
-      range.setEnd(found.node, found.end);
-      return { range, text: draft.text, inSource: draft.inSource, inGraph: draft.inGraph };
-    } catch (e) { return null; }
+    // Cross-node re-resolution: use resolveCommentRange (findTextRange) so a
+    // draft whose anchor spans inline elements is found and restored as a
+    // proper Range, not just a single-node match.
+    const blockId = (!draft.inSource && !draft.inGraph && draft.block_id) ? draft.block_id : "";
+    const range = resolveCommentRange(root, draft.text, blockId);
+    if (!range) return null;
+    return { range, text: draft.text, inSource: draft.inSource, inGraph: draft.inGraph };
   }
 
   function commentConceptForSelection(inBody) {
@@ -1287,35 +1597,31 @@
       const id = m.getAttribute("data-comment-id");
       if (id) (existing[id] || (existing[id] = [])).push(m);
     });
-    mine.forEach((c) => {
-      c._stale = false;
-      if (existing[c.id] && existing[c.id].length) {
-        // Mark exists: just sync its state attribute.
-        setCommentMarkState(c.id, c.state || "open");
-        return;
-      }
-      // Resolve the anchor: prefer the block_id heading, else search the
-      // whole body. Wrap the first match of the ref snippet.
-      const block = c.anchor.block_id ? body.querySelector('#' + cssEscape(c.anchor.block_id)) : null;
-      const root = block || body;
-      const found = findTextNode(root, c.anchor.ref);
-      if (!found) {
-        // Try the full body as a last resort (block may have been renamed).
-        const found2 = block ? findTextNode(body, c.anchor.ref) : null;
-        if (!found2) {
-          c._stale = true;
-          // Render a visible stale anchor indicator at the end of the body
-          // so users can see the comment exists even though its text was
-          // edited/removed. Uses the production .okf-comment-mark--stale
-          // class (non-color dotted underline cue) with an accessible label.
-          appendStaleMark(body, c);
+      mine.forEach((c) => {
+        c._stale = false;
+        if (existing[c.id] && existing[c.id].length) {
+          // Mark exists: just sync its state attribute.
+          setCommentMarkState(c.id, c.state || "open");
           return;
         }
-        wrapTextNode(found2, c.id, c.state || "open");
-        return;
-      }
-      wrapTextNode(found, c.id, c.state || "open");
-    });
+        // Resolve the anchor: prefer the block_id heading, else search the
+        // whole body. Use cross-node resolveCommentRange so a comment whose
+        // anchor spans inline elements is wrapped correctly via
+        // wrapRangeInMark → wrapRangeAcrossElements.
+        const range = resolveCommentRange(body, c.anchor.ref, c.anchor.block_id);
+        if (range) {
+          wrapRangeInMark(range, c.id, c.state || "open");
+        } else {
+          // Try the full body as a last resort (block may have been renamed).
+          const range2 = c.anchor.block_id ? resolveCommentRange(body, c.anchor.ref, "") : null;
+          if (!range2) {
+            c._stale = true;
+            appendStaleMark(body, c);
+          } else {
+            wrapRangeInMark(range2, c.id, c.state || "open");
+          }
+        }
+      });
   }
   // A user can select text and open the comment composer before the lazy
   // /__data/doc load (or a live patch) settles. The body patch correctly
@@ -1332,20 +1638,22 @@
     const body = $(".okf-page__body");
     if (!body) return;
     const selector = '.okf-comment-mark[data-comment-id="' + cssEscape(pendingId) + '"]';
-    if (body.querySelector(selector)) return;
-    const block = anchor.block_id ? body.querySelector('#' + cssEscape(anchor.block_id)) : null;
-    const found = (block && findTextNode(block, anchor.ref)) || findTextNode(body, anchor.ref);
-    if (found) wrapTextNode(found, pendingId, "open");
+    if (body.querySelector(selector)) return; // visible mark exists
+    // Cross-node resolution so a pending highlight spanning inline elements
+    // survives body patch. Do not keep the pending ID without a visible mark.
+    const range = resolveCommentRange(body, anchor.ref, anchor.block_id);
+    if (range) wrapRangeInMark(range, pendingId, "open");
   }
+  // Retained for compatibility: wraps a single-node {node, start, end} result
+  // in a comment mark. New callers should use resolveCommentRange +
+  // wrapRangeInMark for full cross-node support.
   function wrapTextNode(found, commentId, commentState) {
     try {
       const range = document.createRange();
       range.setStart(found.node, found.start);
       range.setEnd(found.node, found.end);
-      const mark = el("mark", { class: "okf-comment-mark", "data-comment-id": commentId });
-      if (commentState) mark.setAttribute("data-comment-state", commentState);
-      range.surroundContents(mark);
-    } catch (e) { /* selection crossed a boundary; skip this mark */ }
+      wrapRangeInMark(range, commentId, commentState);
+    } catch (e) { /* invalid range; skip */ }
   }
   // Render a visible stale anchor indicator at the end of the body. The
   // comment's original text was edited or removed; this mark gives users a
