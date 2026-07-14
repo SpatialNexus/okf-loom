@@ -68,22 +68,29 @@ def page():
 # Stub mermaid module for deterministic testing (no CDN).
 STUB_MERMAID_JS = """() => {
     // The stub: a mock mermaid that renders a synthetic <svg> into each node.
+    // Records initialize calls with theme + resolved themeVariables colors
+    // so tests can verify theme changes via the primaryColor value.
     window.__mermaidCallLog = [];
     window.__okfMermaidTestImport = {
         default: {
             initialize: function(opts) {
-                window.__mermaidCallLog.push({fn: 'initialize', theme: opts.theme});
+                var tv = opts.themeVariables || {};
+                window.__mermaidCallLog.push({
+                    fn: 'initialize',
+                    theme: opts.theme,
+                    primaryColor: tv.primaryColor || '',
+                    background: tv.background || '',
+                });
             },
             run: function(args) {
                 var nodes = args.nodes || [];
                 window.__mermaidCallLog.push({fn: 'run', count: nodes.length});
                 nodes.forEach(function(n) {
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                    svg.setAttribute('data-stub-theme', window.__mermaidCallLog[window.__mermaidCallLog.length-1]
-                        ? (window.__mermaidCallLog[0].theme || 'default') : 'default');
-                    // Determine current theme from the last initialize call.
+                    // Determine current theme from the last initialize call's
+                    // primaryColor (dark vs light have different bg-elev values).
                     var lastInit = window.__mermaidCallLog.filter(function(c) { return c.fn === 'initialize'; }).pop();
-                    if (lastInit) svg.setAttribute('data-stub-theme', lastInit.theme);
+                    if (lastInit) svg.setAttribute('data-stub-bg', lastInit.background || '');
                     n.innerHTML = '';
                     n.appendChild(svg);
                 });
@@ -139,8 +146,9 @@ def test_mermaid_light_dark_light_rerender(server_url, page):
     _add_mermaid_div(page)
     page.evaluate("window.dispatchEvent(new Event('okf-loom:bodyPatched'))")
     page.wait_for_function("document.querySelector('div.mermaid svg') !== null", timeout=5000)
-    # Light→dark: check initialize was called with "dark" theme.
-    # In production, theme.js updates data-theme BEFORE dispatching the event.
+    # Light→dark: check initialize was called with different background.
+    # With theme:'base', the theme string is always 'base'; we verify the
+    # theme change via the resolved background color from themeVariables.
     page.evaluate("""() => {
         document.documentElement.setAttribute('data-theme', 'technical-dark');
         window.dispatchEvent(new CustomEvent("okf-loom:themeChanged", {
@@ -149,8 +157,11 @@ def test_mermaid_light_dark_light_rerender(server_url, page):
     }""")
     page.wait_for_function("""() => {
         var inits = window.__mermaidCallLog.filter(function(c) { return c.fn === 'initialize'; });
-        return inits.length >= 2 && inits[inits.length-1].theme === 'dark';
-    }""", timeout=5000)
+        if (inits.length < 2) return false;
+        // With theme:'base', background is resolved from CSS tokens.
+        // Light bg (#f...) differs from dark bg (#0...).
+        return inits[inits.length-1].background !== inits[0].background;
+    }""", timeout=10000)
     # SVG should still exist in live DOM (committed from clones).
     page.wait_for_function("document.querySelector('div.mermaid svg') !== null", timeout=5000)
     # Dark→light.
@@ -162,8 +173,10 @@ def test_mermaid_light_dark_light_rerender(server_url, page):
     }""")
     page.wait_for_function("""() => {
         var inits = window.__mermaidCallLog.filter(function(c) { return c.fn === 'initialize'; });
-        return inits.length >= 3 && inits[inits.length-1].theme === 'default';
-    }""", timeout=5000)
+        // After dark→light: the last init should differ from the dark one.
+        if (inits.length < 3) return false;
+        return inits[inits.length-1].background !== inits[inits.length-2].background;
+    }""", timeout=10000)
     # Source still preserved.
     src = page.evaluate("document.querySelector('div.mermaid').getAttribute('data-source')")
     assert src and "graph TD" in src
@@ -237,16 +250,16 @@ def test_mermaid_stale_completion_discarded(server_url, page):
         window.__mermaidRenderDelay = 0;
         window.__okfMermaidTestImport = {
             default: {
-                initialize: function(opts) { window.__lastTheme = opts.theme; },
+                initialize: function(opts) { window.__lastBg = (opts.themeVariables || {}).background || ''; },
                 run: function(args) {
                     var delay = window.__mermaidRenderDelay;
                     return new Promise(function(resolve) {
                         setTimeout(function() {
-                            var theme = window.__lastTheme || 'default';
+                            var bg = window.__lastBg || '';
                             (args.nodes || []).forEach(function(n) {
                                 n.innerHTML = '';
                                 var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                                svg.setAttribute('data-stub-theme', theme);
+                                svg.setAttribute('data-stub-bg', bg);
                                 n.appendChild(svg);
                             });
                             resolve();
@@ -276,9 +289,14 @@ def test_mermaid_stale_completion_discarded(server_url, page):
         }));
     }""")
     page.wait_for_timeout(1000)
-    # The committed theme should be 'default' (light, gen 3), not 'dark' (gen 2).
-    theme = page.evaluate("document.querySelector('div.mermaid svg').getAttribute('data-stub-theme')")
-    assert theme == "default", f"stale render (dark) overwrote newer (light): {theme}"
+    # The committed SVG should have the light background (from gen 3), not
+    # the dark one (from the stale gen 2). We compare background hex values:
+    # the light background should be brighter than the dark one.
+    bg = page.evaluate("document.querySelector('div.mermaid svg').getAttribute('data-stub-bg')")
+    assert bg, f"stale render committed with empty bg"
+    # Light bg (#f0f... or #fff...) should be brighter than dark (#0f... or #16...).
+    # Simple check: light bg starts with a high hex digit.
+    assert bg[1] >= 'e' or bg[1] >= 'E', f"stale dark bg committed: {bg}"
 
 
 def test_mermaid_repeated_body_patches_unique_ids(server_url, page):

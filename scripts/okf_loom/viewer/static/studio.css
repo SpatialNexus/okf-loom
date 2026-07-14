@@ -1400,6 +1400,12 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   cursor: pointer;
 }
 .okf-panel__tab:hover { color: var(--okf-fg); }
+/* High-contrast focus outline distinct from the selected underline.
+   Visible in forced colors (outline, not border, so it survives). */
+.okf-panel__tab:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: -2px;
+}
 .okf-panel__tab[aria-selected="true"] {
   color: var(--okf-accent);
   border-bottom-color: var(--okf-accent);
@@ -1468,6 +1474,11 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
    * padding (→ ~27.6px tall) so the panel's only-by-mouse exit clears
    * the target. Matches the toast-close fix from CRI-016. */
   padding: 4px 10px;
+}
+/* High-contrast focus outline on the close button. */
+.okf-panel__close:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 1px;
 }
 
 /* ---- 9. Live highlight pulse (§13.2) --------------------------------- */

@@ -263,20 +263,21 @@ STUB_MERMAID_JS = """() => {
     window.__okfMermaidTestImport = {
         default: {
             initialize: function(opts) {
-                window.__mermaidCallLog.push({fn:'initialize', theme: opts.theme});
+                var tv = opts.themeVariables || {};
+                window.__mermaidCallLog.push({fn:'initialize', theme: opts.theme, bg: tv.background || ''});
             },
             run: function(args) {
                 var nodes = args.nodes || [];
-                var renderTheme = 'default';
+                var renderBg = '';
                 var inits = window.__mermaidCallLog.filter(function(c){return c.fn==='initialize';});
-                if (inits.length) renderTheme = inits[inits.length-1].theme;
+                if (inits.length) renderBg = inits[inits.length-1].bg;
                 nodes.forEach(function(n) {
                     n.innerHTML = '';
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                    svg.setAttribute('data-render-theme', renderTheme);
+                    svg.setAttribute('data-render-bg', renderBg);
                     n.appendChild(svg);
                 });
-                window.__mermaidCallLog.push({fn:'run', count: nodes.length, theme: renderTheme});
+                window.__mermaidCallLog.push({fn:'run', count: nodes.length, bg: renderBg});
                 return Promise.resolve();
             }
         }
@@ -304,14 +305,14 @@ def test_mermaid_stale_never_commits_to_live_dom(server_url, page):
         var origRun = window.__okfMermaidTestImport.default.run;
         window.__okfMermaidTestImport.default.run = function(args) {
             var inits = window.__mermaidCallLog.filter(function(c){return c.fn==='initialize';});
-            var theme = inits.length ? inits[inits.length-1].theme : 'default';
+            var bg = inits.length ? inits[inits.length-1].bg : '';
             var delay = window.__mermaidRenderDelays.shift() || 0;
             return new Promise(function(resolve) {
                 setTimeout(function() {
                     (args.nodes||[]).forEach(function(n) {
                         n.innerHTML='';
                         var s=document.createElementNS('http://www.w3.org/2000/svg','svg');
-                        s.setAttribute('data-render-theme', theme);
+                        s.setAttribute('data-render-bg', bg);
                         n.appendChild(s);
                     });
                     resolve();
@@ -337,9 +338,11 @@ def test_mermaid_stale_never_commits_to_live_dom(server_url, page):
         }));
     }""")
     page.wait_for_timeout(1000)
-    # Live DOM should have the NEWER render's theme (default/light), not stale (dark).
-    theme = page.evaluate("document.querySelector('div.mermaid svg').getAttribute('data-render-theme')")
-    assert theme == "default", f"stale dark render committed to live DOM: {theme}"
+    # Live DOM should have the NEWER render's bg (light), not stale (dark).
+    bg = page.evaluate("document.querySelector('div.mermaid svg').getAttribute('data-render-bg')")
+    assert bg, f"stale render committed with empty bg"
+    # Light bg is brighter than dark — first hex digit after # should be high.
+    assert bg[1] >= 'e' or bg[1] >= 'E', f"stale dark bg committed: {bg}"
 
 
 def test_mermaid_scratch_clones_have_unique_temp_ids(server_url, page):

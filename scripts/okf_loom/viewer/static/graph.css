@@ -103,14 +103,25 @@
 }
 /* Mobile: node-index is in normal flow (reparented by JS), not an overlay. */
 .okf-node-index--mobile {
-  position: static;
-  width: 100%;
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box;
   max-height: 50vh;
-  margin-bottom: var(--okf-space-3);
+  margin: 0 0 var(--okf-space-3) 0;
   box-shadow: none;
 }
 .okf-node-index--mobile > summary {
   font-size: var(--okf-text-base);
+  white-space: normal;
+  overflow: visible;
+}
+.okf-node-index--mobile .okf-node-index__label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 .okf-node-index--mobile .okf-node-index__list {
   max-height: 40vh;

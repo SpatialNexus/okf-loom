@@ -121,34 +121,72 @@
   function _nextMermaidId() { return "okf-mermaid-" + (++_mermaidIdCounter); }
 
   // Build Mermaid themeVariables from the current computed Editorial
-  // Workbench CSS tokens so diagrams match the page theme in all four
-  // themes (including dark). Mermaid reads these as the base palette for
-  // node fills, strokes, text, and lines.
+  // Workbench CSS tokens. Uses theme:'base' so ALL colors are controlled
+  // by themeVariables (no Mermaid built-in palette interference).
+  // CSS custom properties may return OKLCH values which Mermaid's internal
+  // SVG renderer cannot parse — resolve them to RGB hex via a canvas probe.
   function _mermaidThemeVars() {
     var cs = getComputedStyle(document.documentElement);
+    // Create a canvas to resolve any CSS color (oklch, hsl, named) to hex.
+    var cv = document.createElement("canvas"); cv.width = 2; cv.height = 2;
+    var cx = cv.getContext("2d");
+    function toHex(cssVal) {
+      if (!cssVal) return "#ffffff";
+      cx.fillStyle = "#000"; // reset
+      cx.fillStyle = cssVal;
+      cx.fillRect(0, 0, 1, 1);
+      var d = cx.getImageData(0, 0, 1, 1).data;
+      return "#" + [d[0], d[1], d[2]].map(function(c) {
+        return c.toString(16).padStart(2, "0");
+      }).join("");
+    }
     function v(name) { return cs.getPropertyValue(name).trim(); }
     var dark = isDark();
+    var fg = toHex(v("--okf-fg"));
+    var bgElev = toHex(v("--okf-bg-elev"));
+    var bgInset = toHex(v("--okf-bg-inset"));
+    var borderStrong = toHex(v("--okf-border-strong"));
+    var border = toHex(v("--okf-border"));
+    var fgMuted = toHex(v("--okf-fg-muted"));
+    var accent = toHex(v("--okf-accent"));
+    var accentBg = toHex(v("--okf-accent-bg"));
+    var bg = toHex(v("--okf-bg"));
+    var lineColor = dark ? borderStrong : border;
     return {
-      // Node fill/stroke/text from the page surface tokens.
-      primaryColor: v("--okf-bg-elev"),
-      primaryTextColor: v("--okf-fg"),
-      primaryBorderColor: v("--okf-border-strong"),
-      // Line/edge color from the border token.
-      lineColor: dark ? v("--okf-border-strong") : v("--okf-border"),
-      // Secondary (alt) nodes use the inset background.
-      secondaryColor: v("--okf-bg-inset"),
-      secondaryTextColor: v("--okf-fg-muted"),
-      secondaryBorderColor: v("--okf-border"),
-      // Tertiary nodes use the accent background tint.
-      tertiaryColor: v("--okf-accent-bg"),
-      tertiaryTextColor: v("--okf-accent"),
-      tertiaryBorderColor: v("--okf-accent"),
-      // Text and background for the whole diagram.
-      background: v("--okf-bg"),
-      mainBkg: v("--okf-bg-elev"),
-      textColor: v("--okf-fg"),
-      // Font family from the theme.
-      fontFamily: v("--okf-font-body"),
+      // Flowchart nodes.
+      primaryColor: bgElev,
+      primaryTextColor: fg,
+      primaryBorderColor: borderStrong,
+      secondaryColor: bgInset,
+      secondaryTextColor: fgMuted,
+      secondaryBorderColor: border,
+      tertiaryColor: accentBg,
+      tertiaryTextColor: accent,
+      tertiaryBorderColor: accent,
+      // Lines and edges.
+      lineColor: lineColor,
+      // Sequence diagram.
+      actorBkg: bgElev,
+      actorBorder: borderStrong,
+      actorTextColor: fg,
+      actorLineColor: fgMuted,
+      noteBkgColor: accentBg,
+      noteBorderColor: accent,
+      noteTextColor: accent,
+      activationBkgColor: bgInset,
+      activationBorderColor: borderStrong,
+      signalColor: fg,
+      signalTextColor: fgMuted,
+      labelBoxBkgColor: bgElev,
+      labelBoxBorderColor: borderStrong,
+      labelTextColor: fg,
+      loopTextColor: fg,
+      // Overall.
+      background: bg,
+      mainBkg: bgElev,
+      textColor: fg,
+      fontFamily: v("--okf-font-body") || "sans-serif",
+      fontSize: "14px",
     };
   }
 
@@ -181,7 +219,7 @@
         _mermaidMod = mermaid;
         mermaid.initialize({
           startOnLoad: false,
-          theme: isDark() ? "dark" : "default",
+          theme: "base",
           themeVariables: _mermaidThemeVars(),
         });
         // Render to clones in a hidden container — mermaid.run may require
