@@ -292,17 +292,27 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_graph(args: argparse.Namespace) -> int:
+    from .render import _graph_grouping_metadata
+
     bundle = _load_bundle(args.bundle)
     graph = bundle.graph()
+
+    def _node_dict(c: Any) -> dict[str, Any]:
+        metadata = _graph_grouping_metadata(c)
+        return {
+            "id": concept_id_to_str(c.id),
+            "type": c.type,
+            "title": c.title,
+            "tags": c.tags,
+            "path": str(c.rel_path),
+            "metadata": metadata,
+            "graph_cluster": metadata.get("graph_cluster", ""),
+            "source_system": metadata.get("source_system", ""),
+        }
+
     out: dict[str, Any] = {
         "nodes": [
-            {
-                "id": concept_id_to_str(c.id),
-                "type": c.type,
-                "title": c.title,
-                "tags": c.tags,
-                "path": str(c.rel_path),
-            }
+            _node_dict(c)
             # §3.2: sort explicitly by concept_id; never rely on dict
             # insertion order (Bundle.load happens to sort via rglob today,
             # but in-memory Bundle construction and embedders must not
@@ -563,8 +573,14 @@ def cmd_discover(args: argparse.Namespace) -> int:
         _print_json(report.as_dict())
     else:
         suppressed = getattr(report, "suppressed", [])
-        extra = f" ({len(suppressed)} low-confidence suppressed)" if suppressed else ""
+        extra = f" ({len(suppressed)} suppressed)" if suppressed else ""
         print(f"# {len(report.suggestions)} suggestions across {len(report.by_rule())} rules{extra}")
+        bucket_counts = report.as_dict().get("actionability_counts", {})
+        if bucket_counts:
+            bucket_text = ", ".join(
+                f"{name}={count}" for name, count in bucket_counts.items()
+            )
+            print(f"  actionability: {bucket_text}")
         for s in report.suggestions:
             print(
                 f"  [{s.severity:8}] {s.rule:30} {concept_id_to_str(s.concept_id) if s.concept_id else '-'}"

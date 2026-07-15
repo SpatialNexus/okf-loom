@@ -70,6 +70,47 @@ merge or cross-link.
 `missing_indexes` is mechanical — it always makes sense to add an
 `index.md` when a directory has more than a few concepts.
 
+For aliases that are useful search terms but too broad for automatic linking,
+prefer object-form aliases with `discoverable: false`:
+
+```yaml
+aliases:
+  - label: Architecture
+    discoverable: false
+```
+
+Those aliases remain available to search and the viewer, but `discover` will
+not emit unlinked-mention suggestions for them.
+
+For unlinked mentions, check `detail.location_counts` before applying. A match
+seen in body prose is stronger than a match seen only in `frontmatter`, `h1`,
+`heading`, or `table`; heading-only and table-only suggestions usually need
+review rather than automatic linking.
+
+When a phrase or source→target pair is noisy only in this bundle, configure an
+editorial suppression instead of adding it to a universal stoplist:
+
+```yaml
+discover:
+  suppress_phrases:
+    - architecture
+  suppress_pairs:
+    - source: /project-a/product-spec.md
+      target: /project-b/product-spec.md
+```
+
+These items stay visible in JSON under `suppressed` with reasons such as
+`configured_phrase` or `configured_pair`.
+
+For large reports, use the actionability buckets before reading every row:
+
+- `safe_to_apply` — high-confidence or mechanical suggestions.
+- `needs_review` — useful but not automatic.
+- `suppressed_existing_relation` — already represented by `relations:`.
+- `suppressed_generic_label` / `suppressed_cross_cluster` — likely string-match noise.
+- `suppressed_configured` — hidden by this bundle's config.
+- `low_confidence` — available for broad audits, not default action.
+
 # Step 4: Apply fixes directly via the mutators
 
 For a handful of suggestions, the authoring verbs are the fastest path.

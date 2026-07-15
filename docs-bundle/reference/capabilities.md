@@ -73,7 +73,7 @@ Unknown declarations (an id not in the registry) are surfaced as
 |---|---|---|
 | `okf.cap.typed_relations` | `relations` | Interpret `relations:` as a list of typed relation objects (`{target, type, detail, …}`). |
 | `okf.cap.entities` | `entities` | Interpret `entities:` as named-entity tags. Entries may be bare strings or `{id, label, kind, aliases}`. Labels + aliases feed entity search. |
-| `okf.cap.aliases` | `aliases` | Interpret top-level `aliases:` as alternate names for the concept. Consumed by entity search and the viewer. |
+| `okf.cap.aliases` | `aliases` | Interpret top-level `aliases:` as alternate names for the concept. Consumed by search and the viewer; object-form aliases may set `discoverable: false` to opt out of unlinked-mention discovery. |
 | `okf.cap.provenance` | `provenance` | Interpret `provenance:` as source/origin metadata for the concept. |
 | `okf.cap.citations` | `citations` | Interpret `citations:` as reference citations. |
 | `okf.cap.embeddings` | — | Emit per-concept dense-vector embeddings for semantic search. |

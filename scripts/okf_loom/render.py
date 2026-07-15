@@ -23,6 +23,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .aliases import alias_labels
 from .model import Bundle, Concept
 from .paths import ConceptId, concept_id_to_str
 from .theme import EXPLICIT_THEMES
@@ -294,9 +295,8 @@ def _graph_governed_keys(concept: Concept) -> dict[str, list]:
 
     fm = concept.frontmatter
 
-    # aliases — list[str]
-    aliases_raw = _safe_list(fm.get("aliases"))
-    aliases = [str(a).strip() for a in aliases_raw if isinstance(a, str) and str(a).strip()]
+    # aliases — tolerate strings or {label, discoverable} dicts.
+    aliases = alias_labels(fm.get("aliases"))
 
     # entities — tolerate bare strings or {id,label,kind,aliases} dicts (§7.2)
     entities_raw = _safe_list(fm.get("entities"))
@@ -1209,14 +1209,7 @@ def _concept_aliases(c: Concept) -> list[str]:
     Tolerates missing/scalar/list shapes (mirrors :py:attr:`Concept.tags`).
     Producers MAY omit ``aliases``; consumers MUST treat it as ``[]`` then.
     """
-    v = c.frontmatter.get("aliases")
-    if v is None:
-        return []
-    if isinstance(v, str):
-        return [v]
-    if isinstance(v, list):
-        return [str(a) for a in v]
-    return []
+    return alias_labels(c.frontmatter.get("aliases"))
 
 
 def _search_corpus_json(bundle: Bundle) -> list[dict[str, Any]]:
@@ -1897,10 +1890,7 @@ def _render_subtitle(concept: Concept) -> str:
     P2-7 (iter-1): the inline ``style=`` fallback was removed; ``.okf-subtitle``
     is now a real rule in wiki.css (margin/font-size/colour via tokens).
     """
-    aliases = concept.frontmatter.get("aliases")
-    if not aliases or not isinstance(aliases, list):
-        return ""
-    strs = [str(a) for a in aliases if isinstance(a, str) and str(a).strip()]
+    strs = alias_labels(concept.frontmatter.get("aliases"))
     if not strs:
         return ""
     joined = " · ".join(_esc(a) for a in strs)

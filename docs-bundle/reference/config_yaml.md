@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: okf-loom.config.yaml reference
-description: Every `okf-loom.config.yaml` key — `bundle.*`, `viewer.*`, `search.*`, `validate.*`, `studio.*` — with type, default, and behaviour. Path-bearing fields are bundle-relative; unknown keys are preserved in `OkfConfig.raw`.
+description: Every `okf-loom.config.yaml` key — `bundle.*`, `viewer.*`, `search.*`, `discover.*`, `validate.*`, `studio.*` — with type, default, and behaviour. Path-bearing fields are bundle-relative; unknown keys are preserved in `OkfConfig.raw`.
 resource: /reference/config_yaml.md
 tags: [config, reference]
 timestamp: "2026-06-29T00:00:00Z"
@@ -10,7 +10,7 @@ timestamp: "2026-06-29T00:00:00Z"
 # `okf-loom.config.yaml` reference
 
 A bundle MAY ship an `okf-loom.config.yaml` at its root (current spec §5)
-to set viewer / search / validate / studio defaults. **Absence ⇒ all
+to set viewer / search / discover / validate / studio defaults. **Absence ⇒ all
 defaults** — the file is purely additive; nothing breaks without it.
 [`scripts/okf-loom init`](cli.md#init) writes a commented-defaults template
 automatically; [`scripts/okf-loom bootstrap`](cli.md#bootstrap) does not.
@@ -25,11 +25,12 @@ The canonical filename is `okf-loom.config.yaml` (single constant in
 bundle:   { … }   # markdown scanning excludes
 viewer:   { … }   # display + override settings
 search:   { … }   # search-mode default
+discover: { … }   # discovery noise controls
 validate: { … }   # validation profile + broken-link policy
 studio:   { … }   # live collaborative studio
 ```
 
-The five top-level keys are the only recognised top-level keys.
+The six top-level keys are the only recognised top-level keys.
 Unknown top-level keys are preserved verbatim in `OkfConfig.raw`
 for forward compatibility.
 
@@ -150,6 +151,32 @@ must NOT silently enable active code.
 
 Unknown values are rejected fail-closed (no silent fallback to a
 different backend). See [search_modes.md](search_modes.md).
+
+# `discover.*`
+
+Bundle-specific discovery suppressions. These are editorial noise controls;
+they do not affect validation, search, graph construction, or authored OKF
+data.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `suppress_phrases` | list of strings (or one string) | `[]` | Case-insensitive phrases to suppress from `unlinked_mentions`. Use for labels that are noisy in this bundle but may be useful elsewhere. |
+| `suppress_pairs` | list of `{source, target}` mappings | `[]` | Suppress one source→target unlinked-mention pair. `source` and `target` may be concept ids (`project-a/spec`) or bundle-absolute concept links (`/project-a/spec.md`). |
+
+Example:
+
+```yaml
+discover:
+  suppress_phrases:
+    - architecture
+    - product spec
+  suppress_pairs:
+    - source: /project-a/product-spec.md
+      target: /project-b/product-spec.md
+```
+
+Suppressed suggestions remain visible in JSON under `suppressed`, with
+`detail.suppression_reasons` set to `configured_phrase` or `configured_pair`.
 
 # `validate.*`
 

@@ -260,6 +260,26 @@ def test_graph_json(tiny_good_bundle: Path) -> None:
     assert len(data["nodes"]) == 4
 
 
+def test_graph_json_includes_grouping_metadata(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text(
+        "---\n"
+        "type: Runbook\n"
+        "title: Deploy\n"
+        "graph_cluster: ops/deploy\n"
+        "source_system: local\n"
+        "---\nbody\n",
+        encoding="utf-8",
+    )
+    rc, out, _ = _capture(["graph", str(tmp_path), "--format", "json"])
+
+    assert rc == 0
+    data = json.loads(out)
+    node = data["nodes"][0]
+    assert node["graph_cluster"] == "ops/deploy"
+    assert node["source_system"] == "local"
+    assert node["metadata"]["graph_cluster"] == "ops/deploy"
+
+
 def test_graph_quality_json(tiny_good_bundle: Path) -> None:
     rc, out, _ = _capture([
         "graph-quality", str(tiny_good_bundle), "--format", "json",
@@ -278,7 +298,22 @@ def test_discover_json(tiny_good_bundle: Path) -> None:
     assert rc == 0
     data = json.loads(out)
     assert "total" in data
+    assert "actionability_counts" in data
+    assert "actionability" in data
     assert "suggestions" in data
+
+
+def test_discover_text_prints_actionability(tmp_path: Path) -> None:
+    (tmp_path / "index.md").write_text("# Bundle\n", encoding="utf-8")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "a.md").write_text("---\ntype: T\ntitle: A\n---\nbody\n", encoding="utf-8")
+
+    rc, out, _ = _capture(["discover", str(tmp_path)])
+
+    assert rc == 0
+    assert "actionability:" in out
+    assert "safe_to_apply=" in out
 
 
 def test_discover_writes_out_file(tiny_good_bundle: Path, tmp_path: Path) -> None:

@@ -118,7 +118,8 @@ scripts/okf-loom graph <bundle> [--format {text,json,md,dot}]
 
 Print the link graph. Wikilinks (`[[…]]`) are emitted as edges with
 `form="wikilink"`. `dot` output renders with Graphviz; `json` is the
-machine-readable shape consumed by the viewer.
+machine-readable shape consumed by the viewer. JSON nodes include allowlisted
+grouping metadata such as `graph_cluster` and `source_system` when present.
 
 # graph-quality
 
@@ -147,12 +148,18 @@ Full mode-by-mode detail lives in [search_modes.md](/reference/search_modes.md).
 
 ```bash
 scripts/okf-loom discover <bundle> [--rules RULES] [--out OUT]
-            [--scope SCOPE] [--neighbors] [--format {text,json,md,dot}]
+            [--scope SCOPE] [--neighbors] [--min-confidence N]
+            [--include-low-confidence] [--format {text,json,md,dot}]
 ```
 
 Emit a structured report of gaps the managing agent may fix.
 Suggestions carry a rule, severity, message, target concept, and an
-`action` verb phrase.
+`action` verb phrase. JSON output includes suppressed suggestions and
+`suppressed_reason_counts` so filtered data remains inspectable. It also
+includes `actionability_counts` and an `actionability` object that groups
+items into buckets such as `safe_to_apply`, `needs_review`,
+`suppressed_existing_relation`, `suppressed_generic_label`,
+`suppressed_cross_cluster`, and `low_confidence`.
 
 | Flag | Effect |
 |---|---|
@@ -160,6 +167,20 @@ Suggestions carry a rule, severity, message, target concept, and an
 | `--out plan.json` | Write the JSON report to this path. |
 | `--scope ID,ID` | Restrict rules to named concept ids (current spec §7). |
 | `--neighbors` | Expand `--scope` to 1-hop graph neighbours (in + out edges). |
+| `--min-confidence N` | Minimum confidence for unlinked-mention suggestions (default `0.5`). |
+| `--include-low-confidence` | Keep low-confidence suggestions in the main list for broad audits. |
+
+`unlinked_mentions` suppresses suggestions already covered by structured
+`relations:` metadata (`already_structurally_related`) and lowers confidence
+for generic labels such as `Architecture`, `README`, or `Implementation Plan`
+unless source and target share strong context such as `graph_cluster` or
+folder. Mention details include `location_counts` and `occurrence_locations`
+with locations `frontmatter`, `h1`, `heading`, `table`, and `body`; matches
+seen only in frontmatter, headings, or tables are lower confidence than body
+prose.
+Bundle-specific editorial suppressions live in `okf-loom.config.yaml` under
+`discover.suppress_phrases` and `discover.suppress_pairs`; configured
+suppression reasons are emitted as `configured_phrase` and `configured_pair`.
 
 The agent applies fixes directly via the mutators; the reviewable-plan
 workflow (`discover` → `plan` → `update`) is still available.

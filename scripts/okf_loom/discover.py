@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .model import Bundle
+from .aliases import discoverable_alias_labels
+from .model import Bundle, Concept
 from .parse import _INLINE_CODE_RE, _LINK_RE, _strip_code_blocks
 from .paths import (
     ConceptId,
@@ -52,6 +53,7 @@ _NOISY_MENTION_PHRASES = {
     "note",
     "notes",
     "page",
+    "people",
     "project",
     "projects",
     "reference",
@@ -60,6 +62,80 @@ _NOISY_MENTION_PHRASES = {
     "users",
     "wiki",
     "wiki page",
+}
+
+_NOISY_STATUS_PHRASES = {
+    "accepted",
+    "active",
+    "closed",
+    "complete",
+    "completed",
+    "done",
+    "inactive",
+    "new",
+    "open",
+    "pending",
+    "rejected",
+    "resolved",
+}
+
+_GENERIC_DUPLICATE_LABELS = {
+    "architecture",
+    "design",
+    "design doc",
+    "implementation plan",
+    "open questions",
+    "overview",
+    "product spec",
+    "readme",
+    "requirements",
+    "roadmap",
+    "session log",
+    "status",
+    "summary",
+}
+
+_COMMON_PERSON_NAMES = {
+    "aaron",
+    "adam",
+    "alex",
+    "andrew",
+    "anthony",
+    "ben",
+    "brian",
+    "chris",
+    "christopher",
+    "dan",
+    "daniel",
+    "david",
+    "emily",
+    "eric",
+    "george",
+    "james",
+    "jason",
+    "john",
+    "joseph",
+    "kevin",
+    "laura",
+    "lisa",
+    "mark",
+    "matt",
+    "matthew",
+    "michael",
+    "paul",
+    "peter",
+    "robert",
+    "sarah",
+    "steve",
+    "steven",
+    "tom",
+    "william",
+}
+
+_ALWAYS_SUPPRESS_REASONS = {
+    "already_structurally_related",
+    "configured_phrase",
+    "configured_pair",
 }
 
 
@@ -125,6 +201,7 @@ class DiscoveryReport:
 
     def as_dict(self) -> dict:
         by_rule = self.by_rule()
+        actionability = _actionability_buckets(self.suggestions, self.suppressed)
         return {
             "bundle_root": str(self.bundle_root),
             "total": len(self.suggestions),
@@ -134,6 +211,13 @@ class DiscoveryReport:
                 rule: len(items)
                 for rule, items in _group_suggestions(self.suppressed).items()
             },
+            "suppressed_reason_counts": _suppression_reason_counts(
+                self.suppressed
+            ),
+            "actionability_counts": {
+                bucket: len(items) for bucket, items in actionability.items()
+            },
+            "actionability": actionability,
             "suggestions": [s.as_dict() for s in self.suggestions],
             "suppressed": [s.as_dict() for s in self.suppressed],
         }
@@ -143,6 +227,12 @@ class DiscoveryReport:
 class _MentionCandidate:
     concept_id: ConceptId
     sources: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _MentionOccurrence:
+    line: int
+    location: str
 
 
 # ---------------------------------------------------------------------------
@@ -187,16 +277,24 @@ def discover_suggestions(
     for name in selected:
         suggestions.extend(_ALL_RULES[name](bundle))
     suppressed: list[Suggestion] = []
-    if not include_low_confidence:
-        kept: list[Suggestion] = []
-        for s in suggestions:
-            if s.rule == "unlinked_mentions":
+    kept: list[Suggestion] = []
+    for s in suggestions:
+        if s.rule == "unlinked_mentions":
+            suppression_reasons = _detail_list(s.detail, "suppression_reasons")
+            if any(r in _ALWAYS_SUPPRESS_REASONS for r in suppression_reasons):
+                s.detail["suppression_reasons"] = suppression_reasons
+                suppressed.append(s)
+                continue
+            if not include_low_confidence:
                 confidence = float(s.detail.get("confidence", 1.0))
                 if confidence < min_confidence:
+                    if "low_confidence" not in suppression_reasons:
+                        suppression_reasons.append("low_confidence")
+                    s.detail["suppression_reasons"] = suppression_reasons
                     suppressed.append(s)
                     continue
-            kept.append(s)
-        suggestions = kept
+        kept.append(s)
+    suggestions = kept
     # Current spec §7: scoped enrichment. When a scope set is given, keep only
     # suggestions whose subject concept_id is in scope. The neighbour
     # expansion (§11 ``--neighbors``) happens in plan.build_plan before this
@@ -228,6 +326,121 @@ def _group_suggestions(suggestions: list[Suggestion]) -> dict[str, list[Suggesti
     for s in suggestions:
         out.setdefault(s.rule, []).append(s)
     return out
+
+
+def _detail_list(detail: dict, key: str) -> list[str]:
+    value = detail.get(key)
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def _suppression_reason_counts(suggestions: list[Suggestion]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for s in suggestions:
+        for reason in _detail_list(s.detail, "suppression_reasons"):
+            counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
+def _suggestion_bucket(suggestion: Suggestion, *, suppressed: bool) -> str:
+    detail = suggestion.detail
+    confidence_reasons = set(_detail_list(detail, "confidence_reasons"))
+    suppression_reasons = set(_detail_list(detail, "suppression_reasons"))
+    if suppressed:
+        if "already_structurally_related" in suppression_reasons:
+            return "suppressed_existing_relation"
+        if {"configured_phrase", "configured_pair"} & suppression_reasons:
+            return "suppressed_configured"
+        if (
+            "different_graph_cluster" in confidence_reasons
+            or "different_top_level_folder" in confidence_reasons
+            or "cross_context_generic_label" in confidence_reasons
+        ):
+            return "suppressed_cross_cluster"
+        if (
+            "generic_duplicate_label" in confidence_reasons
+            or "common_label" in confidence_reasons
+            or "common_person_name" in confidence_reasons
+            or "status_label" in confidence_reasons
+            or "high_document_frequency" in confidence_reasons
+        ):
+            return "suppressed_generic_label"
+        if "low_confidence" in suppression_reasons:
+            return "low_confidence"
+        return "suppressed"
+
+    if suggestion.rule == "missing_indexes":
+        return "safe_to_apply"
+    if suggestion.rule == "unlinked_mentions":
+        confidence = float(detail.get("confidence", 0.0))
+        location_counts = detail.get("location_counts")
+        has_body = (
+            isinstance(location_counts, dict)
+            and int(location_counts.get("body", 0) or 0) > 0
+        )
+        noisy = bool({
+            "generic_duplicate_label",
+            "common_label",
+            "common_person_name",
+            "status_label",
+            "different_graph_cluster",
+            "different_top_level_folder",
+            "cross_context_generic_label",
+        } & confidence_reasons)
+        if confidence >= 0.7 and has_body and not noisy:
+            return "safe_to_apply"
+    return "needs_review"
+
+
+def _actionability_buckets(
+    suggestions: list[Suggestion],
+    suppressed: list[Suggestion],
+) -> dict[str, list[dict]]:
+    bucket_names = (
+        "safe_to_apply",
+        "needs_review",
+        "suppressed_existing_relation",
+        "suppressed_configured",
+        "suppressed_generic_label",
+        "suppressed_cross_cluster",
+        "low_confidence",
+        "suppressed",
+    )
+    buckets: dict[str, list[dict]] = {name: [] for name in bucket_names}
+    for suggestion in suggestions:
+        bucket = _suggestion_bucket(suggestion, suppressed=False)
+        item = suggestion.as_dict()
+        item["actionability_bucket"] = bucket
+        buckets.setdefault(bucket, []).append(item)
+    for suggestion in suppressed:
+        bucket = _suggestion_bucket(suggestion, suppressed=True)
+        item = suggestion.as_dict()
+        item["actionability_bucket"] = bucket
+        buckets.setdefault(bucket, []).append(item)
+    return {bucket: items for bucket, items in buckets.items() if items}
+
+
+def _load_discover_config(bundle: Bundle) -> object:
+    from .config import DiscoverConfig, OkfConfig, OkfConfigError
+
+    try:
+        return OkfConfig.load(bundle.root).discover
+    except OkfConfigError:
+        return DiscoverConfig()
+
+
+def _configured_suppress_phrases(cfg: object) -> set[str]:
+    return set(getattr(cfg, "suppress_phrases", ()))
+
+
+def _configured_suppress_pairs(cfg: object) -> set[tuple[ConceptId, ConceptId]]:
+    return {
+        (pair.source, pair.target)
+        for pair in getattr(cfg, "suppress_pairs", ())
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +479,35 @@ def _scannable_body(body: str) -> str:
     return cleaned
 
 
+def _mention_location(body_lines: list[str], line_no: int) -> str:
+    if line_no < 1 or line_no > len(body_lines):
+        return "body"
+    line = body_lines[line_no - 1].strip()
+    if re.match(r"^#\s+\S", line):
+        return "h1"
+    if re.match(r"^#{2,6}\s+\S", line):
+        return "heading"
+    if line.startswith("|") and line.count("|") >= 2:
+        return "table"
+    return "body"
+
+
+def _scannable_frontmatter(concept: Concept) -> str:
+    parts: list[str] = []
+    for key in ("title", "description"):
+        value = concept.frontmatter.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    return "\n".join(parts)
+
+
+def _location_counts(occurrences: list[_MentionOccurrence]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for occurrence in occurrences:
+        counts[occurrence.location] = counts.get(occurrence.location, 0) + 1
+    return counts
+
+
 def _build_title_index(bundle: Bundle) -> dict[str, _MentionCandidate]:
     """Map a lowercased mention phrase to a single concept id.
 
@@ -282,11 +524,8 @@ def _build_title_index(bundle: Bundle) -> dict[str, _MentionCandidate]:
         last_seg = (c.id[-1] if c.id else "").strip().lower()
         if last_seg:
             phrases.setdefault(last_seg, set()).add("id_segment")
-        aliases = c.frontmatter.get("aliases")
-        if isinstance(aliases, list):
-            for alias in aliases:
-                if isinstance(alias, str) and alias.strip():
-                    phrases.setdefault(alias.strip().lower(), set()).add("alias")
+        for alias in discoverable_alias_labels(c.frontmatter.get("aliases")):
+            phrases.setdefault(alias.lower(), set()).add("alias")
         for p, sources in phrases.items():
             if len(p) < 3 or not re.search(r"[a-z0-9]", p):
                 continue
@@ -300,11 +539,39 @@ def _build_title_index(bundle: Bundle) -> dict[str, _MentionCandidate]:
     return out
 
 
+def _structural_relation_targets(concept: Concept) -> set[ConceptId]:
+    targets: set[ConceptId] = set()
+    rels = concept.frontmatter.get("relations")
+    if not isinstance(rels, list):
+        return targets
+    for rel in rels:
+        if not isinstance(rel, dict):
+            continue
+        target_raw = rel.get("target")
+        if not isinstance(target_raw, str) or not target_raw.strip():
+            continue
+        try:
+            targets.add(concept_id_from_str(target_raw))
+        except (ConceptIdError, ValueError):
+            continue
+    return targets
+
+
+def _top_level_folder(cid: ConceptId) -> str:
+    return cid[0] if len(cid) > 1 else ""
+
+
+def _parent_folder(cid: ConceptId) -> ConceptId:
+    return cid[:-1] if len(cid) > 1 else ()
+
+
 def _mention_confidence(
     phrase: str,
     candidate: _MentionCandidate,
-    occurrences: list[int],
+    occurrences: list[_MentionOccurrence],
     bundle: Bundle,
+    source: Concept,
+    document_frequency: int,
 ) -> tuple[float, list[str]]:
     score = 0.35
     reasons: list[str] = []
@@ -329,8 +596,46 @@ def _mention_confidence(
     if len(occurrences) >= 2:
         score += 0.05
         reasons.append("repeated")
+    location_counts = _location_counts(occurrences)
+    has_body_prose = location_counts.get("body", 0) > 0
+    if has_body_prose and len(location_counts) > 1:
+        score += 0.05
+        reasons.append("also_mentioned_in_body")
+    if not has_body_prose:
+        if set(location_counts) == {"frontmatter"}:
+            score -= 0.35
+            reasons.append("frontmatter_only")
+        elif location_counts.get("h1", 0) and len(location_counts) == 1:
+            score -= 0.35
+            reasons.append("h1_only")
+        elif (
+            location_counts.get("heading", 0)
+            and location_counts.get("table", 0) == 0
+        ):
+            score -= 0.25
+            reasons.append("heading_only")
+        elif location_counts.get("table", 0):
+            score -= 0.20
+            reasons.append("table_only")
+        else:
+            score -= 0.20
+            reasons.append("non_body_only")
+    concept_count = max(1, len(bundle.concepts))
+    doc_ratio = document_frequency / concept_count
+    if document_frequency >= 10 or (concept_count >= 20 and doc_ratio >= 0.08):
+        score -= 0.35
+        reasons.append("high_document_frequency")
+    elif document_frequency >= 4 and (concept_count >= 20 and doc_ratio >= 0.05):
+        score -= 0.15
+        reasons.append("moderate_document_frequency")
+    if phrase in _COMMON_PERSON_NAMES:
+        score -= 0.40
+        reasons.append("common_person_name")
+    if phrase in _NOISY_STATUS_PHRASES:
+        score -= 0.40
+        reasons.append("status_label")
     target = bundle.concepts.get(candidate.concept_id)
-    target_type = (target.type if target else "").strip().lower()
+    target_type = str((target.type if target else "") or "").strip().lower()
     if target_type in {"document", "wiki page", "index", "page"}:
         score -= 0.15
         reasons.append("generic_target_type")
@@ -340,6 +645,63 @@ def _mention_confidence(
     if phrase in _NOISY_MENTION_PHRASES:
         score -= 0.45
         reasons.append("common_label")
+    # Source-aware nudge: matching source/cluster metadata slightly strengthens
+    # a suggestion; cross-source suggestions need stronger textual evidence.
+    source_system = str(source.frontmatter.get("source_system") or "").strip()
+    source_cluster = str(source.frontmatter.get("graph_cluster") or "").strip()
+    target_system = ""
+    target_cluster = ""
+    if target is not None:
+        target_system = str(target.frontmatter.get("source_system") or "").strip()
+        target_cluster = str(target.frontmatter.get("graph_cluster") or "").strip()
+    strong_context = False
+    cross_context = False
+    if source_system and target_system:
+        if source_system == target_system:
+            score += 0.04
+            reasons.append("same_source_system")
+        else:
+            score -= 0.05
+            reasons.append("different_source_system")
+            cross_context = True
+    if source_cluster and target_cluster:
+        if source_cluster == target_cluster:
+            score += 0.10
+            reasons.append("same_graph_cluster")
+            strong_context = True
+        else:
+            score -= 0.08
+            reasons.append("different_graph_cluster")
+            cross_context = True
+    if target is not None:
+        source_parent = _parent_folder(source.id)
+        target_parent = _parent_folder(target.id)
+        if source_parent and target_parent and source_parent == target_parent:
+            score += 0.06
+            reasons.append("same_parent_folder")
+            strong_context = True
+        source_top = _top_level_folder(source.id)
+        target_top = _top_level_folder(target.id)
+        if source_top and target_top:
+            if source_top == target_top:
+                score += 0.04
+                reasons.append("same_top_level_folder")
+                strong_context = True
+            else:
+                score -= 0.04
+                reasons.append("different_top_level_folder")
+                cross_context = True
+    if phrase in _GENERIC_DUPLICATE_LABELS:
+        reasons.append("generic_duplicate_label")
+        if strong_context:
+            score -= 0.15
+            reasons.append("generic_duplicate_label_same_context")
+        else:
+            score -= 0.50
+            reasons.append("generic_duplicate_label_weak_context")
+        if cross_context:
+            score -= 0.10
+            reasons.append("cross_context_generic_label")
     score = max(0.0, min(1.0, score))
     return round(score, 3), reasons
 
@@ -350,19 +712,39 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
     title_index = _build_title_index(bundle)
     if not title_index:
         return out
+    discover_config = _load_discover_config(bundle)
+    configured_phrases = _configured_suppress_phrases(discover_config)
+    configured_pairs = _configured_suppress_pairs(discover_config)
     compiled = {
         p: re.compile(rf"\b{re.escape(p)}\b", re.IGNORECASE)
         for p in title_index
     }
+    scannables = {
+        src.id: _scannable_body(src.body)
+        for src in sorted(bundle.concepts.values(), key=lambda c: c.id)
+    }
+    frontmatter_scannables = {
+        src.id: _scannable_frontmatter(src)
+        for src in sorted(bundle.concepts.values(), key=lambda c: c.id)
+    }
+    document_frequency: dict[str, int] = {}
+    for phrase, pat in compiled.items():
+        document_frequency[phrase] = sum(
+            1
+            for src_id, text in scannables.items()
+            if pat.search(text) or pat.search(frontmatter_scannables[src_id])
+        )
     for src in sorted(bundle.concepts.values(), key=lambda c: c.id):
-        scannable = _scannable_body(src.body)
-        if not scannable.strip():
+        scannable = scannables[src.id]
+        frontmatter_scannable = frontmatter_scannables[src.id]
+        if not scannable.strip() and not frontmatter_scannable.strip():
             continue
         already_linked = {
             link.target
             for link in src.links(bundle_root=bundle.root)
             if link.target is not None
         }
+        relation_targets = _structural_relation_targets(src)
         for phrase, candidate in title_index.items():
             target_cid = candidate.concept_id
             if target_cid == src.id:
@@ -370,37 +752,76 @@ def _rule_unlinked_mentions(bundle: Bundle) -> list[Suggestion]:
             if target_cid in already_linked:
                 continue  # source already links to target
             pat = compiled[phrase]
-            occurrences = [
-                scannable.count("\n", 0, m.start()) + 1
-                for m in pat.finditer(scannable)
-            ]
+            body_lines = src.body.splitlines()
+            occurrences = []
+            for m in pat.finditer(frontmatter_scannable):
+                occurrences.append(
+                    _MentionOccurrence(line=0, location="frontmatter")
+                )
+            for m in pat.finditer(scannable):
+                line_no = scannable.count("\n", 0, m.start()) + 1
+                occurrences.append(
+                    _MentionOccurrence(
+                        line=line_no,
+                        location=_mention_location(body_lines, line_no),
+                    )
+                )
             if not occurrences:
                 continue
             target = bundle.concepts.get(target_cid)
             target_title = target.title if target else phrase
             confidence, reasons = _mention_confidence(
-                phrase, candidate, occurrences, bundle,
+                phrase,
+                candidate,
+                occurrences,
+                bundle,
+                src,
+                document_frequency.get(phrase, 0),
             )
+            suppression_reasons: list[str] = []
+            if target_cid in relation_targets:
+                suppression_reasons.append("already_structurally_related")
+            if phrase in configured_phrases:
+                suppression_reasons.append("configured_phrase")
+            if (src.id, target_cid) in configured_pairs:
+                suppression_reasons.append("configured_pair")
+            if suppression_reasons:
+                message = (
+                    f"{src.title!r} mentions {target_title!r} "
+                    f"({len(occurrences)}x) but already has a "
+                    "structured relation to it."
+                )
+                action = "no action"
+            else:
+                message = (
+                    f"{src.title!r} mentions {target_title!r} "
+                    f"({len(occurrences)}x) but does not link to it."
+                )
+                action = "add link"
             out.append(
                 Suggestion(
                     rule="unlinked_mentions",
                     severity="info",
-                    message=(
-                        f"{src.title!r} mentions {target_title!r} "
-                        f"({len(occurrences)}x) but does not link to it."
-                    ),
+                    message=message,
                     concept_id=src.id,
                     target_concept_id=target_cid,
-                    action="add link",
+                    action=action,
                     detail={
                         "label": target_title,
                         "phrase": phrase,
                         "confidence": confidence,
                         "confidence_reasons": reasons,
+                        "suppression_reasons": suppression_reasons,
+                        "document_frequency": document_frequency.get(phrase, 0),
+                        "location_counts": _location_counts(occurrences),
                         "suggested_target_concept_id": concept_id_to_str(
                             target_cid
                         ),
-                        "occurrences": occurrences,
+                        "occurrences": [o.line for o in occurrences],
+                        "occurrence_locations": [
+                            {"line": o.line, "location": o.location}
+                            for o in occurrences
+                        ],
                     },
                 )
             )

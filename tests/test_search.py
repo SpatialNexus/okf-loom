@@ -478,6 +478,28 @@ def test_entity_mode_alias_hit() -> None:
     assert all(r.source_backend == "entity" for r in results)
 
 
+def test_alias_object_label_is_searchable(tmp_path: Path) -> None:
+    (tmp_path / "design.md").write_text(
+        "---\n"
+        "type: Design\n"
+        "title: Design System\n"
+        "aliases:\n"
+        "  - label: Architecture\n"
+        "    discoverable: false\n"
+        "---\n"
+        "Body without the alias term.\n",
+        encoding="utf-8",
+    )
+    b = Bundle.load(tmp_path)
+    clear_search_cache()
+
+    lexical = search_bundle(b, "Architecture", mode=SearchMode.LEXICAL, limit=10)
+    entity = search_bundle(b, "Architecture", mode=SearchMode.ENTITY, limit=10)
+
+    assert ("design",) in [r.concept_id for r in lexical]
+    assert ("design",) in [r.concept_id for r in entity]
+
+
 def test_entity_mode_object_form_label_matches(tmp_path: Path) -> None:
     """Entity mode must match object-form entities keyed by `label`
     (current spec §4 canonical shape {id, label, kind, aliases}).
