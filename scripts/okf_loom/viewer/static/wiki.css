@@ -1129,6 +1129,14 @@ details.okf-frontmatter td code {
 }
 .okf-table th { background: var(--okf-bg-inset); font-weight: 600; }
 
+/* Without the JS wrapper, the table itself is the horizontal scrollport.
+ * Preserve each cell's intrinsic width so a narrow viewport scrolls columns
+ * instead of collapsing the table into wrapped cell fragments.  The enhancer
+ * adds .okf-table--enhanced and restores ordinary wrapping for JS-enabled
+ * tables, where the wrapper owns overflow detection and scrolling. */
+.okf-table:not(.okf-table--enhanced) th,
+.okf-table:not(.okf-table--enhanced) td { white-space: nowrap; }
+
 /* GFM column alignment (markdown.py emits okf-al-c / okf-al-r from the
  * :---: separator row; left is the default). Right-aligned columns are
  * usually numeric — tabular figures keep the digits in vertical rhythm. */

@@ -1503,4 +1503,3 @@ git commit -m "fix(viewer): Round-2 Phase-3 visual-pass tuning (ToC/index/search
 - **Task 8 `/__validate`** is the only new server surface: read-only, token-gated (same guard as `/__diff`), rev-cached to avoid re-walking the bundle on polls. `--okf-warn`/`--okf-danger` use `var(…, fallback)` so undefined tokens don't break.
 - **RUN posts real directives** to the agent's queue — in the DEMO serve that's harmless (no agent claims them); documented that RUN sends the completed composer text (or the complete `runPrompt` when empty), never a bare template.
 - **advisor unavailable** — compensated by each task's two-stage subagent review (spec-compliance then code-quality), the final whole-Phase-3 review (Task 9 Step 6), and independent test + screenshot verification.
-

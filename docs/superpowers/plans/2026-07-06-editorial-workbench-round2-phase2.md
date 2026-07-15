@@ -1154,4 +1154,3 @@ git commit -m "fix(viewer): Round-2 Phase-2 visual-pass tuning (soft token value
 - **D5 auto semantics** (single-key model) mean an Auto preference resolves to Swiss family on reload (matches today's boot); documented, acceptable for Phase 2.
 - **Soft token exact values** are tuned in Task 10's visual pass (per §5.2), not guessed final here — the plan sets the token names/placement/mechanism; the browser pass dials the hex.
 - The **advisor tool is unavailable** this session; each task's two-stage subagent review (spec-compliance then code-quality) + the independent test/screenshot verification compensate.
-

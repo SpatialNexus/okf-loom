@@ -5058,7 +5058,7 @@
       // settlement. See _bootProbe below. Inert in production.
       _bootProbe("post-async-kick");
     }
-  
+
     // ---- TEST-ONLY boot probe ---------------------------------------------
     // ``_bootProbe`` is a constrained, inert-by-default seam that lets the
     // browser test suite deterministically inject a boot() failure at a named
@@ -5086,7 +5086,7 @@
         window.__okfBootProbe(phase);
       }
     }
-  
+
     // Expose the public API.
   window.okfLoomStudio = {
     register,

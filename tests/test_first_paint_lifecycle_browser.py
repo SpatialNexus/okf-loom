@@ -1077,6 +1077,7 @@ def test_native_ctrl_click_opens_new_tab(server_url, dark_page):
     link = _find_concept_link(dark_page)
     assert link is not None, "no concept link"
     href = link.get_attribute("href")
+    assert href, "concept link has no href"
     # Ctrl-click (meta on mac) opens a new context (tab). We assert a new
     # page event fires — the browser's own modifier semantics, not a JS
     # handler. No SPA interception means the browser handles it natively.
@@ -1084,7 +1085,10 @@ def test_native_ctrl_click_opens_new_tab(server_url, dark_page):
         link.click(modifiers=["Control"])
     new_page = new_page_info.value
     try:
-        new_page.wait_for_load_state("domcontentloaded", timeout=5000)
+        # A popup first exists as about:blank, whose DOMContentLoaded state is
+        # already satisfied. Wait for the destination URL rather than treating
+        # that transient initial document as the new tab's final navigation.
+        new_page.wait_for_url(f"**{href}", wait_until="domcontentloaded", timeout=5000)
         assert new_page.url.endswith(href), (
             f"Ctrl-click new tab URL mismatch: {new_page.url!r} vs {href!r}"
         )
