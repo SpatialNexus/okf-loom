@@ -90,6 +90,7 @@ Discussion-oriented pieces that clarify the why behind the design.
 * [What OKF is for](explanation/what_is_okf.md)
 * [okf-loom architecture (concise)](explanation/architecture.md)
 * [Why the live studio exists](explanation/live_studio_design.md)
+* [Editorial Workbench hardening](explanation/editorial_workbench_hardening.md)
 * [Dependency-light philosophy](explanation/zero_dependencies.md)
 * [Why this bundle uses Diátaxis](explanation/diataxis.md)
 * [Original requirements brief](explanation/requirements.md) — the user-stated goals + traceability matrix.

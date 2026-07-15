@@ -17,6 +17,7 @@ to understand the reasoning behind its shape.
 | [What OKF is for](what_is_okf.md) | Why knowledge lives in plain markdown files, why the graph matters, and what OKF deliberately is not |
 | [okf-loom architecture](architecture.md) | One canonical model feeding three render targets, the module map, and why each module has its shape |
 | [Why the live studio exists](live_studio_design.md) | The rationale behind the live studio: comment-driven directing, no review gate, all-on defaults, the archive track, the trust model |
+| [Editorial Workbench hardening](editorial_workbench_hardening.md) | Why theme, layout, boot status, navigation, and wide tables remain stable and accessible |
 | [Dependency-light philosophy](zero_dependencies.md) | Why okf-loom runs from a checkout with no primary install step, and how the PyYAML-preferred fallback works |
 | [Why this bundle uses Diátaxis](diataxis.md) | The four content types, the four reader postures, and why mixing them confuses readers |
 

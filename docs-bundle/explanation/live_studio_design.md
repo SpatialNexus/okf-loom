@@ -286,5 +286,7 @@ is open or not. See [Direct the agent loop](/tutorials/author_with_agent.md).
   `studio.*` defaults and how to change them.
 * [`/reference/spec.md`](/reference/spec.md) — the binding current
   specification this essay summarises.
+* [Editorial Workbench hardening](/explanation/editorial_workbench_hardening.md) —
+  the companion rationale for stable, accessible theme and navigation behavior.
 
 Return to [Explanation](/explanation/index.md).
