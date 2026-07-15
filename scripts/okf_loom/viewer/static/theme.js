@@ -57,11 +57,48 @@
   // override setups; the first execution wins.
   if (window.OKFLoomTheme) return;
 
-  // Mark the root as JS-enabled at the earliest possible moment. This
-  // distinguishes "JS is on" from "JS is off" for the fallback banner
-  // system: the <noscript> banner renders only when JS is off; the
-  // --js variant renders only when JS is on but the studio hasn't booted.
-  document.documentElement.classList.add("okf-js-enabled");
+    // Mark the root as JS-enabled at the earliest possible moment. This
+    // distinguishes "JS is on" from "JS is off" for the fallback banner
+    // system: the <noscript> banner renders only when JS is off; the --js
+    // variant is revealed by the watchdog below only when the studio
+    // genuinely fails to boot.
+    document.documentElement.classList.add("okf-js-enabled");
+
+    // ---- Studio-boot watchdog ---------------------------------------------
+    // theme.js is the earliest always-present viewer script (parser-blocking
+    // in <head> on every surface), so it is the reliable place to settle the
+    // fallback-banner question. studio.js (a deferred module) stamps
+    // okf-studio-booted ONLY after its synchronous boot() body completes
+    // successfully, or okf-studio-unavailable if boot() throws (see the
+    // _runBoot wrapper at the bottom of studio.js). Deferred modules execute
+    // after parsing (readyState "interactive") but BEFORE DOMContentLoaded
+    // fires, so once DOMContentLoaded fires the boot outcome is final.
+    //
+    // This watchdog is the safety net for the one case studio.js itself
+    // cannot signal: studio.js blocked/missing, no bootstrap data, or a
+    // plain read-only server. If okf-studio-booted is still absent at
+    // DOMContentLoaded (neither boot() success nor failure stamped a class),
+    // the studio never loaded — mark unavailable so the --js banner shows.
+    //
+    // Driving the reveal from this DOMContentLoaded probe — instead of the
+    // old okf-js-enabled:not(okf-studio-booted) selector, which was true the
+    // instant theme.js ran but before studio.js had a chance to load — means
+    // the banner is NEVER visible during a normal successful boot. That
+    // eliminates the ~40px transient banner flash on navigation while still
+    // surfacing the banner for the real failure cases (and for no-JS via the
+    // separate <noscript> element). No timer/opacity/overlay is involved: this
+    // is a one-shot, event-driven (DOMContentLoaded) settlement.
+    function _settleStudioBanner() {
+      var de = document.documentElement;
+      if (!de.classList.contains("okf-studio-booted")) {
+        de.classList.add("okf-studio-unavailable");
+      }
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", _settleStudioBanner);
+    } else {
+      _settleStudioBanner();
+    }
 
   // ---- Shared topmost-overlay / Escape layer -----------------------------
   // ONE Escape closes only the TOPMOST registered overlay and stops
@@ -354,9 +391,13 @@
   // overflow clipping (the topbar controls scroller at <=900px). Its top/left
   // are computed from the trigger's bounding rect on every open + on
   // resize/scroll/visualViewport change, then flipped/clamped to an 8px inset.
-  var trigger = document.getElementById("okf-theme");
-  var menu = document.getElementById("okf-appearance-menu");
-  var wrap = trigger && trigger.closest ? trigger.closest(".okf-appearance") : null;
+  // The trigger/menu elements live in <body>. theme.js is now parser-blocking
+  // in <head> (so apply() resolves data-theme before first paint — no FOUC),
+  // so at first execution <body> is not parsed yet and these resolve to null.
+  // wireAppearancePopover() assigns them once the DOM is ready. They stay
+  // module-scoped because the functions below (reflectMenu/openMenu/…) close
+  // over them.
+  var trigger = null, menu = null, wrap = null;
 
   function reflectMenu() {
     if (!menu) return;
@@ -471,50 +512,10 @@
       if (!handedOff && trigger) { try { trigger.focus(); } catch (e) {} }
     }
   }
-  function isMenuOpen() { return menu && !menu.hidden; }
+    function isMenuOpen() { return menu && !menu.hidden; }
 
-    if (trigger) trigger.addEventListener("click", function (e) {
-      e.stopPropagation();
-      if (isMenuOpen()) closeMenu(false); else openMenu();
-    });
-  if (menu) menu.addEventListener("click", function (e) {
-    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
-    if (!opt) return;
-    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
-    if (k === "family") setFamily(v);
-    else if (k === "mode") setMode(v);
-    else setModifier(k, v); // contrast | border
-  });
-
-  // ---- Radiogroup keyboard navigation -----------------------------------
-  // Arrows wrap + select + focus within the same radiogroup. Home/End focus
-  // first/last. Only fires when focus is inside a radiogroup option — never
-  // suppresses keys elsewhere (editable inputs, search, etc.).
-  if (menu) menu.addEventListener("keydown", function (e) {
-    var opt = e.target;
-    if (!opt || !opt.classList || !opt.classList.contains("okf-appearance__opt")) return;
-    var group = opt.closest('.okf-appearance__group[role="radiogroup"]');
-    if (!group) return;
-    var opts = Array.prototype.slice.call(group.querySelectorAll(".okf-appearance__opt"));
-    var idx = opts.indexOf(opt);
-    var key = e.key;
-    if (key === "ArrowRight" || key === "ArrowDown") {
-      e.preventDefault();
-      var next = opts[(idx + 1) % opts.length];
-      selectOpt(next);
-    } else if (key === "ArrowLeft" || key === "ArrowUp") {
-      e.preventDefault();
-      next = opts[(idx - 1 + opts.length) % opts.length];
-      selectOpt(next);
-    } else if (key === "Home") {
-      e.preventDefault();
-      selectOpt(opts[0]);
-    } else if (key === "End") {
-      e.preventDefault();
-      selectOpt(opts[opts.length - 1]);
-    }
-    // Enter/Space: native button activation fires click → handler above.
-  });
+    // NOTE: the trigger/menu/document listeners that previously lived here are
+    // registered in wireAppearancePopover() below, once <body> is parsed.
   function selectOpt(opt) {
     var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
     if (k === "family") setFamily(v);
@@ -523,21 +524,8 @@
     try { opt.focus(); } catch (e) {}
   }
 
-  // ---- Outside-click / focus-exit close ---------------------------------
-  // Escape is handled by the shared overlay stack (capture-phase keydown on
-  // document) — no separate Escape handler here.
-    document.addEventListener("click", function (e) {
-      if (isMenuOpen() && wrap && !wrap.contains(e.target)) closeMenu(false);
-    });
-    // Focus-exit: close when focus moves to a specific element OUTSIDE the
-    // trigger+menu wrapper (genuine user Tab navigation). relatedTarget is null
-    // during programmatic blur/focus, so those never close. Focus stays on
-    // the destination the user moved to.
-    document.addEventListener("focusout", function (e) {
-      if (!isMenuOpen()) return;
-      var related = e.relatedTarget;
-      if (related && wrap && !wrap.contains(related)) closeMenu(false);
-    }, true);
+    // Outside-click / focus-exit + reposition listeners are wired in
+    // wireAppearancePopover() below (after <body> is parsed).
 
   // Lightweight reposition (scroll/resize): only updates left/top from the
   // trigger's current rect. Does NOT touch max-height/overflow (which would
@@ -570,22 +558,105 @@
       if (isMenuOpen()) repositionMenu();
     });
   }
-  if (menu) {
-    window.addEventListener("resize", scheduleReposition, { passive: true });
-    window.addEventListener("scroll", scheduleReposition, { passive: true, capture: true });
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", scheduleReposition);
-      window.visualViewport.addEventListener("scroll", scheduleReposition);
-    }
-  }
+    // ---- Wire the popover once <body> is parsed ---------------------------
+    // theme.js is parser-blocking in <head>, so the trigger/menu elements (in
+    // <body>) are not yet available at first execution. Defer ALL element
+    // resolution + listener registration to DOMContentLoaded — exactly the
+    // timing the previous deferred-script load gave this code. The functions
+    // above (openMenu/closeMenu/selectOpt/scheduleReposition/…) are hoisted
+    // within this IIFE, so they are ready when the handler runs. apply() ran
+    // synchronously below and already set data-theme for first paint;
+    // reflectMenu() is re-run here to sync the popover's aria-checked once the
+    // menu element exists.
+    function wireAppearancePopover() {
+      trigger = document.getElementById("okf-theme");
+      menu = document.getElementById("okf-appearance-menu");
+      wrap = trigger && trigger.closest ? trigger.closest(".okf-appearance") : null;
 
-  // ---- Boot ---------------------------------------------------------------
-  // Post-paint, same timing as the previous per-surface reads (inline
-  // scripts are CSP-blocked on the served templates, so there is no
-  // pre-paint hook; the server-rendered data-theme prevents FOUC).
-  // Modifiers self-heal: a corrupt stored value is DELETED (unlike the
-  // canonical theme keys, no migration gate depends on its presence) and
-  // the default applies.
+      if (trigger) trigger.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (isMenuOpen()) closeMenu(false); else openMenu();
+      });
+      if (menu) menu.addEventListener("click", function (e) {
+        var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
+        if (!opt) return;
+        var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
+        if (k === "family") setFamily(v);
+        else if (k === "mode") setMode(v);
+        else setModifier(k, v); // contrast | border
+      });
+
+      // Radiogroup keyboard navigation: arrows wrap + select + focus within the
+      // same group; Home/End focus first/last. Only fires when focus is inside
+      // an option — never suppresses keys elsewhere (inputs, search, …).
+      if (menu) menu.addEventListener("keydown", function (e) {
+        var opt = e.target;
+        if (!opt || !opt.classList || !opt.classList.contains("okf-appearance__opt")) return;
+        var group = opt.closest('.okf-appearance__group[role="radiogroup"]');
+        if (!group) return;
+        var opts = Array.prototype.slice.call(group.querySelectorAll(".okf-appearance__opt"));
+        var idx = opts.indexOf(opt);
+        var key = e.key;
+        if (key === "ArrowRight" || key === "ArrowDown") {
+          e.preventDefault();
+          var next = opts[(idx + 1) % opts.length];
+          selectOpt(next);
+        } else if (key === "ArrowLeft" || key === "ArrowUp") {
+          e.preventDefault();
+          next = opts[(idx - 1 + opts.length) % opts.length];
+          selectOpt(next);
+        } else if (key === "Home") {
+          e.preventDefault();
+          selectOpt(opts[0]);
+        } else if (key === "End") {
+          e.preventDefault();
+          selectOpt(opts[opts.length - 1]);
+        }
+        // Enter/Space: native button activation fires click → handler above.
+      });
+
+      // Outside-click / focus-exit close. (Escape is handled by the shared
+      // overlay stack — capture-phase keydown on document.)
+      document.addEventListener("click", function (e) {
+        if (isMenuOpen() && wrap && !wrap.contains(e.target)) closeMenu(false);
+      });
+      // Focus-exit: close when focus moves to a specific element OUTSIDE the
+      // wrapper (genuine user Tab navigation). relatedTarget is null during
+      // programmatic blur/focus, so those never close.
+      document.addEventListener("focusout", function (e) {
+        if (!isMenuOpen()) return;
+        var related = e.relatedTarget;
+        if (related && wrap && !wrap.contains(related)) closeMenu(false);
+      }, true);
+
+      if (menu) {
+        window.addEventListener("resize", scheduleReposition, { passive: true });
+        window.addEventListener("scroll", scheduleReposition, { passive: true, capture: true });
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", scheduleReposition);
+          window.visualViewport.addEventListener("scroll", scheduleReposition);
+        }
+      }
+
+      reflectMenu(); // sync aria-checked now that the menu element exists
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", wireAppearancePopover);
+    } else {
+      wireAppearancePopover();
+    }
+
+    // ---- Boot ---------------------------------------------------------------
+    // apply() runs synchronously here. Because theme.js is now parser-blocking
+    // in <head> (no defer), this executes BEFORE <body> is parsed/painted, so
+    // data-theme is resolved against saved preference + prefers-color-scheme
+    // before first paint — eliminating the wrong-theme flash on dark-OS /
+    // saved-dark navigations (inline scripts are CSP-blocked, so a blocking
+    // external head script is the only pre-paint hook). The popover wiring
+    // (which needs <body>) is deferred to DOMContentLoaded above.
+    // Modifiers self-heal: a corrupt stored value is DELETED (unlike the
+    // canonical theme keys, no migration gate depends on its presence) and
+    // the default applies.
   (function bootModifiers() {
     for (var kind in MODIFIERS) {
       var raw = readKey(MODIFIERS[kind].key);

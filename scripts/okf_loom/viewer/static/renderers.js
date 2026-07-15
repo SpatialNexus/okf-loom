@@ -429,6 +429,7 @@
         enhanceTable(t);
       });
     });
+    watchTableContainers();
     updateTableFits();
   }
 
@@ -439,6 +440,20 @@
 
   function enhanceTable(table) {
     table.dataset.okfEnhanced = "1";
+    // Transfer the no-JS server fallback focus affordance OFF the table.
+    // markdown.py stamps the bare <table> with tabindex="0" + aria-label +
+    // data-okf-fallback="tabbable" so a no-JS keyboard user can focus and
+    // arrow-scroll the table without an enhancer. Once we run, classifyTable()
+    // owns that decision: it re-applies the affordance on the wrapper only
+    // when the table actually overflows, so a JS-enhanced table that FITS
+    // keeps no extra tab stop (table tabindex stripped, wrapper has none).
+    // Stripped before the headerless early return so headerless tables are
+    // cleaned up too.
+    if (table.getAttribute("data-okf-fallback") === "tabbable") {
+      table.removeAttribute("tabindex");
+      table.removeAttribute("aria-label");
+      table.removeAttribute("data-okf-fallback");
+    }
     if (!table.tHead || !table.tHead.rows.length) return; // headerless: leave as-is
 
     // Wrapper carries the horizontal scroll (previously on the table itself)
@@ -484,6 +499,13 @@
         cycleSort(table, th, originalRows);
       });
     });
+
+    // Edge-shadow state tracks the user's horizontal scroll position so the
+    // cue shadow always points toward off-screen content. Passive: we never
+    // preventDefault on the scroll.
+    wrap.addEventListener("scroll", function () {
+      updateScrollEdgeState(wrap);
+    }, { passive: true });
   }
 
   function buildTableToolbar(table) {
@@ -651,22 +673,128 @@
     });
   }
 
+  // --------------------------------------------------------------------
+  // Table overflow containment + accessibility
+  // --------------------------------------------------------------------
+  // A table overflows its wrapper when the wrapper's own scrollport is
+  // wider than its visible area: ``wrap.scrollWidth > wrap.clientWidth + 1``
+  // (the +1 tolerates sub-pixel rounding). On overflow the wrapper becomes
+  // a keyboard-focusable scroll region with an accessible name, a visible
+  // cue, and stateful start/end edge shadows. On fit, all of that is
+  // removed so the wrapper is neither a tab stop nor visually adorned —
+  // desktop tables that fit read as plain tables with sticky headers.
+  //
+  // The fit/overflow classes are MUTUALLY EXCLUSIVE: classifyTable() never
+  // leaves both (or neither) on a wrapper. Reclassification runs after
+  // initial enhancement, viewport/column resize, and live body replacement.
+
+  var SCROLL_CUE_TEXT = "Scroll horizontally to view all columns";
+  var _cueIdCounter = 0;
+
+  // Derive an accessible name from a <caption> (if present) or the nearest
+  // preceding heading in the prose root, falling back to "Table". Strips
+  // the decorative heading-anchor pilcrow so the label reads cleanly.
+  function tableAccessibleName(table) {
+    var cap = table.querySelector("caption");
+    if (cap && collapseWs(cap.textContent)) return collapseWs(cap.textContent);
+    var wrap = table.closest(".okf-tablewrap");
+    var start = wrap || table;
+    for (var node = start.previousElementSibling; node; node = node.previousElementSibling) {
+      if (/^H[1-6]$/.test(node.tagName)) {
+        var clone = node.cloneNode(true);
+        var anchors = clone.querySelectorAll(".okf-heading-anchor");
+        Array.prototype.forEach.call(anchors, function (a) { a.remove(); });
+        var txt = collapseWs(clone.textContent);
+        if (txt) return txt + " table";
+      }
+    }
+    return "Table";
+  }
+
+  function ensureScrollCue(wrap) {
+    var cue = wrap.querySelector(".okf-table-cue");
+    if (cue) return cue;
+    cue = document.createElement("p");
+    cue.className = "okf-table-cue";
+    cue.id = "okf-table-cue-" + (++_cueIdCounter);
+    cue.setAttribute("aria-hidden", "true");
+    cue.textContent = SCROLL_CUE_TEXT;
+    wrap.insertBefore(cue, wrap.firstChild);
+    return cue;
+  }
+
+  function removeScrollCue(wrap) {
+    var cue = wrap.querySelector(".okf-table-cue");
+    if (cue) cue.parentNode.removeChild(cue);
+  }
+
+  // Update the data-scroll edge-state attribute that drives the CSS edge
+  // shadows. Called on scroll, after classify, and after resize.
+  function updateScrollEdgeState(wrap) {
+    if (!wrap.classList.contains("okf-tablewrap--overflow")) return;
+    var sl = wrap.scrollLeft;
+    var max = wrap.scrollWidth - wrap.clientWidth;
+    if (max <= 1) { wrap.setAttribute("data-scroll", "start"); return; }
+    var atStart = sl <= 1;
+    var atEnd = sl >= max - 1;
+    if (atStart && atEnd) wrap.setAttribute("data-scroll", "start"); // tiny overflow
+    else if (atEnd) wrap.setAttribute("data-scroll", "end");
+    else if (atStart) wrap.setAttribute("data-scroll", "start");
+    else wrap.setAttribute("data-scroll", "middle");
+  }
+
+  // Core classifier: measure once, set mutually-exclusive state + ARIA.
+  function classifyTable(wrap) {
+    var table = wrap.querySelector("table");
+    if (!table) return;
+    var overflows = wrap.scrollWidth > wrap.clientWidth + 1;
+    if (overflows) {
+      wrap.classList.remove("okf-tablewrap--fit");
+      wrap.classList.add("okf-tablewrap--overflow");
+      wrap.setAttribute("role", "region");
+      wrap.setAttribute("aria-label",
+        tableAccessibleName(table) + ". " + SCROLL_CUE_TEXT + ".");
+      wrap.setAttribute("tabindex", "0");
+      ensureScrollCue(wrap);
+      updateScrollEdgeState(wrap);
+    } else {
+      wrap.classList.add("okf-tablewrap--fit");
+      wrap.classList.remove("okf-tablewrap--overflow");
+      wrap.removeAttribute("role");
+      wrap.removeAttribute("aria-label");
+      wrap.removeAttribute("tabindex");
+      wrap.removeAttribute("data-scroll");
+      removeScrollCue(wrap);
+    }
+  }
+
   // Sticky headers only work when the wrapper is NOT a horizontal scroll
   // container (position:sticky pins to the nearest scrollport). When the
-  // table fits, mark the wrapper so the stylesheet can lift the overflow
-  // and let thead stick under the page topbar.
+  // table fits, the --fit class lifts overflow so thead can stick under
+  // the page topbar. When it overflows, --overflow keeps the scroll region
+  // and its accessibility affordance.
   function updateTableFits() {
     Array.prototype.forEach.call(document.querySelectorAll(".okf-tablewrap"), function (wrap) {
-      var table = wrap.querySelector("table");
-      if (!table) return;
-      wrap.classList.toggle("okf-tablewrap--fit", table.scrollWidth <= wrap.clientWidth + 1);
+      classifyTable(wrap);
     });
   }
+
+  // Debounced reclassification driver shared by window-resize and the
+  // ResizeObserver (which catches container-width changes that don't fire
+  // a window resize: sidebar toggle, focus mode, split-view drag).
   var fitTimer = null;
-  window.addEventListener("resize", function () {
+  function scheduleReclassify() {
     if (fitTimer) clearTimeout(fitTimer);
     fitTimer = setTimeout(updateTableFits, 150);
-  });
+  }
+  window.addEventListener("resize", scheduleReclassify);
+
+  var _tableRO = null;
+  function watchTableContainers() {
+    if (_tableRO || typeof ResizeObserver === "undefined") return;
+    _tableRO = new ResizeObserver(scheduleReclassify);
+    proseRoots().forEach(function (root) { _tableRO.observe(root); });
+  }
 
   // --- code blocks: copy button + language badge -------------------------
   function initCodeBlocks() {

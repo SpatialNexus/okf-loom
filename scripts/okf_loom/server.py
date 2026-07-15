@@ -1735,13 +1735,28 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         )
 
     # --- Response writers -------------------------------------------------
-    def _studio_bootstrap(self) -> str | None:
-        """Inline ``<script>``/``<link>`` bootstrap for the live studio (§7/§13).
+    def _studio_bootstrap(self) -> tuple[str, str] | None:
+        """Inline studio bootstrap for the live studio (§7/§13).
 
-        Injected into every served HTML page so the studio client has the
-        per-session CSRF token (current spec §14), the studio flags, and the initial
-        bundle rev. Returns ``None`` when the studio is not attached
-        (plain read-only server) — then nothing is injected.
+        Returns a ``(bootstrap_node, assets)`` pair injected into every served
+        HTML page so the studio client has the per-session CSRF token (current
+        spec §14), the studio flags, and the initial bundle rev. Returns
+        ``None`` when the studio is not attached (plain read-only server) —
+        then nothing is injected.
+
+        The pair is split so ``_send_text`` can place each part at the right
+        time in the head parse:
+
+        * ``bootstrap_node`` — a CSP-safe non-executable
+          ``<script type="application/json">`` data block carrying the cfg JSON.
+          It goes FIRST in ``<head>`` (before the parser-blocking theme.js) so
+          theme.js can read the configured ``studio.theme`` during head parse
+          and resolve ``data-theme`` before first paint (no FOUC). It is inert,
+          so placing it early cannot execute or block.
+        * ``assets`` — the studio.css ``<link>`` and the live.js/studio.js
+          ``<script type="module">`` tags. These stay at ``</head>`` (modules
+          are deferred regardless of position; the stylesheet is render-blocking
+          either way).
         """
         studio = self.studio
         if studio is None:
@@ -1755,37 +1770,50 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             "theme": getattr(self.server, "studio_theme", "auto"),
         }
         payload = json.dumps(cfg, default=str)
+        # CSP-safe bootstrap: a non-executable JSON data block. The served CSP
+        # is ``script-src 'self' ...`` with NO 'unsafe-inline', so an inline
+        # executable <script> is blocked (and the binding studio contract says
+        # "no inline <script> bodies"). A ``<script type="application/json">``
+        # data block is NOT executed by the browser, so ``script-src`` does not
+        # govern it; the studio modules (live.js/studio.js) read it on boot and
+        # expose it as ``window.__OKF_LOOM_STUDIO__`` for parity with the API.
+        bootstrap_node = (
+            f'<script type="application/json" id="okf-studio-bootstrap">{payload}</script>'
+        )
         # Asset URLs carry a content-derived ``?v=`` cache-busting query
         # (viewer/assets.versioned_asset_url) so an edited studio.css/live.js/
         # studio.js invalidates browser/CDN caches. The live router parses
         # ``urlparse().path`` for routing, so the query is ignored; CSP
-        # ``'self'`` is unaffected. The version is the same digest the
-        # rendered pages emit for their assets (single contract).
-        bits = [
-            # CSP-safe bootstrap: a non-executable JSON data block. The
-            # served CSP is ``script-src 'self' ...`` with NO 'unsafe-inline',
-            # so an inline executable <script> is blocked (and the binding
-            # studio contract says "no inline <script> bodies"). A
-            # ``<script type="application/json">`` data block is NOT executed
-            # by the browser, so ``script-src`` does not govern it; the studio
-            # modules (live.js/studio.js) read it on boot and expose it as
-            # ``window.__OKF_LOOM_STUDIO__`` for parity with the documented API.
-            f'<script type="application/json" id="okf-studio-bootstrap">{payload}</script>',
+        # ``'self'`` is unaffected. The version is the same digest the rendered
+        # pages emit for their assets (single contract).
+        assets = "\n".join([
             f'<link rel="stylesheet" href="{versioned_asset_url("studio.css", "/__static", self.bundle)}">',
             f'<script type="module" src="{versioned_asset_url("live.js", "/__static", self.bundle)}"></script>',
             f'<script type="module" src="{versioned_asset_url("studio.js", "/__static", self.bundle)}"></script>',
-        ]
-        return "\n".join(bits)
+        ])
+        return bootstrap_node, assets
 
     def _send_text(self, code: int, body: str, *, content_type: str = "text/html; charset=utf-8",
                    close: bool = False) -> None:
         # Inject the studio bootstrap into HTML pages so the live client boots
         # with the CSRF token + asset links (no-op when studio is absent).
-        if content_type.startswith("text/html") and "</head>" in body:
+        if content_type.startswith("text/html"):
             boot = self._studio_bootstrap()
             if boot:
-                body = body.replace("</head>", boot + "\n</head>", 1)
+                bootstrap_node, assets = boot
+                # The inert JSON node goes FIRST in <head> — before the
+                # parser-blocking theme.js <script> — so theme.js can read the
+                # configured studio.theme during head parse and resolve
+                # data-theme before first paint. The CSS/module assets stay at
+                # </head> (their original position; modules are deferred).
+                if "<head>" in body:
+                    body = body.replace("<head>", "<head>\n" + bootstrap_node, 1)
+                elif "</head>" in body:
+                    body = body.replace("</head>", bootstrap_node + "\n</head>", 1)
+                if "</head>" in body:
+                    body = body.replace("</head>", assets + "\n</head>", 1)
         self._send_bytes(code, body.encode("utf-8"), content_type=content_type, close=close)
+
 
     def _send_bytes(self, code: int, body: bytes, *, content_type: str,
                     close: bool = False, csp: str | None = None,

@@ -401,7 +401,26 @@ def _render_table(header: str, rows: list[str], sep: str = "") -> str:
         )
         return f"<tr>{rendered}</tr>"
 
-    out = ['<table class="okf-table">']
+    # P1 no-JS keyboard reachability: the bare <table> is the no-JS horizontal
+    # scrollport (wiki.css gives it ``display: block; overflow-x: auto``). A
+    # plain <table> is NOT keyboard-focusable, so without JavaScript a keyboard
+    # user could never scroll it to reach off-screen columns. We emit server-side
+    # FALLBACK focus attributes directly on the table:
+    #   * ``tabindex="0"`` — the table enters the tab order; once focused, the
+    #     browser scrolls a scroll container with the arrow / Home / End keys,
+    #     so every column is keyboard-reachable with no JS enhancer.
+    #   * ``aria-label`` — accessible name + scroll instruction (the visible
+    #     focus outline from wiki.css is the sighted affordance).
+    # No ``role`` is set, so the table keeps its implicit ``table`` semantics.
+    # The ``data-okf-fallback="tabbable"`` marker lets renderers.js TRANSFER
+    # this affordance: enhanceTable() strips these attributes and classifyTable()
+    # re-applies them on the ``.okf-tablewrap`` only when a table actually
+    # overflows — so a JS-enhanced table that fits carries NO extra tab stop.
+    out = [
+        '<table class="okf-table" tabindex="0" '
+        'aria-label="Table. Scroll horizontally to view all columns." '
+        'data-okf-fallback="tabbable">'
+    ]
     if header:
         out.append("<thead>")
         out.append(_row(header_cells, "th"))

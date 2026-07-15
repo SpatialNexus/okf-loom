@@ -163,6 +163,10 @@
   --okf-active-fg: var(--okf-accent-on);
   --okf-active-border: var(--okf-accent);
   --okf-pop-shadow: -18px 0 46px rgba(15, 23, 42, 0.18);
+  /* P1 mobile table fix: edge-shadow tint for table scroll regions. Light
+   * themes use a dark translucent shadow; dark themes override to stronger
+   * black for depth against dark surfaces. */
+  --okf-scroll-shadow: rgba(15, 23, 42, 0.22);
   --okf-page-bg: #e6eaef;
 }
 /* ============================ THEMES (4) ============================
@@ -292,6 +296,7 @@
   --okf-active-fg: var(--okf-accent);
   --okf-active-border: transparent;
   --okf-pop-shadow: -18px 0 46px rgba(0, 0, 0, 0.5);
+  --okf-scroll-shadow: rgba(0, 0, 0, 0.6);
   --okf-page-bg: #05070a;
 }
 [data-theme="swiss-light"] {
@@ -408,6 +413,7 @@
   --okf-active-fg: var(--okf-accent-on);
   --okf-active-border: var(--okf-accent);
   --okf-pop-shadow: -14px 0 40px rgba(0, 0, 0, 0.5);
+  --okf-scroll-shadow: rgba(0, 0, 0, 0.6);
   --okf-page-bg: #050607;
 }
 
@@ -1132,6 +1138,20 @@ details.okf-frontmatter td code {
   font-variant-numeric: tabular-nums;
 }
 
+/* P1 no-JS keyboard reachability: markdown.py emits the bare .okf-table with
+ * a server-side tabindex="0" + aria-label so a no-JS keyboard user can focus
+ * the table and scroll it horizontally with the arrow keys (a plain <table>
+ * is otherwise not focusable). Visible focus treatment makes that target
+ * obvious. Scoped to the NON-enhanced table only: once renderers.js runs it
+ * strips the table tabindex (enhanceTable) and moves the scroll/focus duty to
+ * .okf-tablewrap, so this rule never lights up an enhanced (display:table)
+ * table — the wrapper owns its own :focus-visible treatment below. */
+.okf-table:not(.okf-table--enhanced):focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: -2px;
+  border-radius: var(--okf-radius-sm);
+}
+
 /* ---- Table UX enhancer (renderers.js initTables) ----------------------
  * The enhancer wraps each body table in .okf-tablewrap, which takes over
  * the horizontal-scroll duty from the bare .okf-table block hack above, so
@@ -1155,6 +1175,58 @@ details.okf-frontmatter td code {
   top: var(--okf-topbar-h);
   z-index: 2;
 }
+
+/* ---- Table overflow affordance (P1 mobile table fix) ------------------
+ * When a table overflows its column the wrapper becomes a labelled,
+ * keyboard-focusable scroll region. The cue + stateful edge shadows tell
+ * readers there is off-screen content; on fit none of this renders so a
+ * desktop table that fits reads as a plain table with no extra tab stop.
+ *
+ * The --fit and --overflow classes are mutually exclusive (set by
+ * classifyTable in renderers.js). data-scroll is updated on user scroll
+ * so the shadow always points toward the unreached edge. */
+.okf-tablewrap--overflow { position: relative; }
+
+/* Visible scroll cue — first child of the wrapper so it sits above the
+ * toolbar/table. aria-hidden: the instruction is already in the region's
+ * aria-label; the visible text is redundant for screen readers. */
+.okf-tablewrap .okf-table-cue {
+  margin: 0 0 var(--okf-space-1) 0;
+  padding: 0;
+  font-size: var(--okf-text-xs);
+  line-height: 1.4;
+  color: var(--okf-fg-muted);
+  font-style: italic;
+  max-width: none;
+}
+.okf-tablewrap .okf-table-cue::before { content: "↔ "; font-style: normal; }
+
+/* Stateful inset edge shadows. Inset shadows paint on the wrapper's inner
+ * edge and stay fixed while content scrolls — they do NOT scroll with the
+ * table. The spread/blur are tuned so the shadow is a subtle depth cue, not
+ * a heavy bar. */
+.okf-tablewrap--overflow[data-scroll="start"] {
+  box-shadow: inset -14px 0 8px -8px var(--okf-scroll-shadow);
+}
+.okf-tablewrap--overflow[data-scroll="middle"] {
+  box-shadow:
+    inset 14px 0 8px -8px var(--okf-scroll-shadow),
+    inset -14px 0 8px -8px var(--okf-scroll-shadow);
+}
+.okf-tablewrap--overflow[data-scroll="end"] {
+  box-shadow: inset 14px 0 8px -8px var(--okf-scroll-shadow);
+}
+
+/* Keyboard focus: visible outline so keyboard users see the scroll region
+ * they are operating. Negative offset stays inside the wrapper border. */
+.okf-tablewrap--overflow:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: -2px;
+  border-radius: var(--okf-radius-sm);
+}
+
+/* Respect reduced motion: the edge shadow is static (no transition), so no
+ * override is needed here — included for clarity. */
 
 /* Sortable headers: the whole th is the button; the indicator rides in the
  * reserved right padding so the label doesn't shift between states. */
@@ -2063,13 +2135,23 @@ details.okf-frontmatter th { background: var(--okf-bg-inset); }
 
 /* ---- Fallback banner visibility (loaded on ALL surfaces) -------------- */
 /* The noscript banner shows when JS is off (on ALL surfaces including
-   static). The --js variant is hidden by default and shown only when JS
-   is on (okf-js-enabled) but studio.js failed to boot (okf-studio-booted
-   absent). Static mode hides only the --js variant (read-only by design),
-   NOT the noscript variant (so no-JS static users still see the notice). */
+   static). The --js variant is hidden by default and revealed ONLY when
+   the root is marked okf-studio-unavailable — i.e. the live studio genuinely
+   did not boot. There are TWO settlement paths, both additive-only (the
+   class is never removed once set):
+     1. studio.js _runBoot: stamps okf-studio-booted after boot() succeeds,
+        or okf-studio-unavailable if boot() throws (post-module failure).
+     2. theme.js watchdog: at DOMContentLoaded, if okf-studio-booted is still
+        absent (studio.js blocked/missing, no bootstrap, plain read-only),
+        stamps okf-studio-unavailable.
+   Because okf-studio-booted is stamped only AFTER synchronous boot()
+   completes (not at module evaluation), a boot() throw is correctly surfaced
+   as a failure — the old premature stamp permanently hid the banner. Static
+   mode hides only the --js variant (read-only by design), NOT the noscript
+   variant (so no-JS static users still see the notice). */
 html.okf-studio-booted .okf-studio-fallback-banner { display: none; }
 .okf-studio-fallback-banner--js { display: none; }
-html.okf-js-enabled:not(.okf-studio-booted) .okf-studio-fallback-banner--js { display: block; }
+html.okf-studio-unavailable .okf-studio-fallback-banner--js { display: block; }
 /* Static mode: no --js banner (static is read-only by design). */
 html.okf-js-enabled body[data-okf-mode="static"] .okf-studio-fallback-banner--js,
 [data-okf-mode="static"] .okf-studio-fallback-banner--js { display: none !important; }

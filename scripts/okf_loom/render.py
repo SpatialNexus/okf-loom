@@ -566,18 +566,32 @@ _THEMES: tuple[str, ...] = EXPLICIT_THEMES
 def _theme_js_link(static_prefix: str, bundle: Bundle | None = None) -> str:
     """``<script>`` tag for the canonical theme-state asset.
 
-    Emitted in ``<head>`` so theme.js executes BEFORE every consumer: the
-    deferred wiki.js/graph.js/renderers.js at the end of ``<body>`` AND the
-    studio module scripts the live server injects before ``</head>``
-    (deferred classic scripts and module scripts share one in-document-order
-    execution queue).
+    Emitted in ``<head>`` as a PARSER-BLOCKING classic script (no ``defer``)
+    so theme.js resolves ``data-theme`` BEFORE the first paint of ``<body>``.
+
+    Rationale: the resolved theme depends on client-only signals the server
+    cannot know — the saved family/mode preference (localStorage) and, for
+    Auto mode, ``prefers-color-scheme``. Under ``defer`` the browser painted
+    ``<body>`` against the ``:root`` light fallback and only re-themed once
+    the deferred script ran, producing a wrong-theme flash on dark-OS /
+    saved-dark navigations (FOUC). The page CSP (``script-src 'self'``) forbids
+    inline scripts, so a blocking external head script is the only
+    deterministic way to set ``data-theme`` before paint. The fetch overlaps
+    with the render-blocking ``wiki.css`` link (both sit in ``<head>``), so the
+    cost is the marginal theme.js fetch, not a serial delay.
+
+    It still executes BEFORE every consumer: the deferred
+    wiki.js/graph.js/renderers.js at the end of ``<body>`` and the studio
+    module scripts injected before ``</head>`` (a blocking head script runs
+    during head parse, ahead of all deferred/module scripts), so
+    ``window.OKFLoomTheme`` is ready when they run.
 
     The URL carries a content-derived ``?v=`` cache-busting query
     (:func:`versioned_asset_url`) so a theme.js edit invalidates browser/CDN
     caches. The version is computed from the same resolved content in every
     emit path (serve/SPA/static), keeping the digest contract uniform.
     """
-    return f'<script src="{versioned_asset_url("theme.js", static_prefix, bundle)}" defer></script>'
+    return f'<script src="{versioned_asset_url("theme.js", static_prefix, bundle)}"></script>'
 
 
 def _theme_button_html(initial_theme: str) -> str:

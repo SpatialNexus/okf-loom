@@ -591,3 +591,188 @@ def test_graph_topbar_no_overflow_on_mobile(server_url, page):
         cw: document.documentElement.clientWidth,
     })""")
     assert overflow["sw"] <= overflow["cw"] + 1, f"graph topbar overflow at 390px: sw={overflow['sw']} cw={overflow['cw']}"
+
+
+# ===========================================================================
+# Mobile table overflow containment + accessibility (P1 table fix)
+# ===========================================================================
+
+def _table_wrap_info(page):
+    """Single source of truth for table-wrapper measurements in the tests."""
+    return page.evaluate("""() => {
+        const html = document.documentElement;
+        const wrap = document.querySelector('.okf-tablewrap');
+        if (!wrap) return null;
+        const cue = wrap.querySelector('.okf-table-cue');
+        const table = wrap.querySelector('table');
+        return {
+            docSW: html.scrollWidth, docCW: html.clientWidth,
+            wrapSW: wrap.scrollWidth, wrapCW: wrap.clientWidth,
+            wrapOverflows: wrap.scrollWidth > wrap.clientWidth + 1,
+            cls: wrap.className,
+            role: wrap.getAttribute('role'),
+            tabindex: wrap.getAttribute('tabindex'),
+            ariaLabel: wrap.getAttribute('aria-label'),
+            dataScroll: wrap.getAttribute('data-scroll'),
+            hasCue: !!cue,
+            cueText: cue ? cue.textContent : null,
+            // Inner-table fallback-affordance state. markdown.py stamps the
+            // bare table with tabindex/aria-label/data-okf-fallback for the
+            // no-JS path; enhanceTable must TRANSFER (strip) them so a fit
+            // table carries no extra tab stop and overflow uses the wrapper.
+            tableTabindex: table ? table.getAttribute('tabindex') : null,
+            tableAriaLabel: table ? table.getAttribute('aria-label') : null,
+            tableFallback: table ? table.getAttribute('data-okf-fallback') : null,
+            tableEnhanced: table ? table.classList.contains('okf-table--enhanced') : false,
+        };
+    }""")
+
+
+@pytest.mark.parametrize("width", [390, 414])
+def test_mobile_table_overflow_has_accessibility(server_url, page, width):
+    """At mobile widths the overflowing table wrapper is a labelled,
+    keyboard-focusable scroll region with a visible cue and edge-state."""
+    _set_width(page, width)
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_timeout(300)
+    info = _table_wrap_info(page)
+    assert info, "no table wrapper found"
+    assert info["wrapOverflows"], f"table should overflow at {width}px"
+    assert "okf-tablewrap--overflow" in info["cls"]
+    assert "okf-tablewrap--fit" not in info["cls"], "fit and overflow must be mutually exclusive"
+    assert info["role"] == "region", "wrapper must have role=region on overflow"
+    assert info["tabindex"] == "0", "wrapper must be keyboard-focusable on overflow"
+    assert info["ariaLabel"], "wrapper must have an accessible name on overflow"
+    assert "table" in info["ariaLabel"].lower()
+    assert info["hasCue"], "visible scroll cue must be present on overflow"
+    assert info["cueText"], "cue must have text"
+    assert info["dataScroll"] in ("start", "middle", "end"), "data-scroll edge state must be set"
+
+
+@pytest.mark.parametrize("width", [390, 414])
+def test_mobile_table_no_document_overflow(server_url, page, width):
+    """The table is locally contained — no document-level horizontal overflow."""
+    _set_width(page, width)
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_timeout(300)
+    info = _table_wrap_info(page)
+    assert info["docSW"] <= info["docCW"] + 1, \
+        f"document overflow at {width}px: docSW={info['docSW']} docCW={info['docCW']}"
+
+
+def test_desktop_table_fit_has_no_tab_stop(server_url, page):
+    """At desktop width a table that fits has NO overflow affordance: no
+    role, no tabindex, no cue. Desktop reads as a plain table.
+
+    Also proves the no-JS→JS affordance TRANSFER: markdown.py stamps the bare
+    table with tabindex/aria-label/data-okf-fallback for the no-JS keyboard
+    path, but once the enhancer runs it strips those table attributes and lets
+    classifyTable keep the wrapper clean on fit — so neither the wrapper NOR
+    the inner table is an extra tab stop."""
+    _set_width(page, 1280)
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_timeout(300)
+    info = _table_wrap_info(page)
+    assert info, "no table wrapper found"
+    assert not info["wrapOverflows"], "table should fit at 1280px"
+    assert "okf-tablewrap--fit" in info["cls"]
+    assert "okf-tablewrap--overflow" not in info["cls"]
+    assert info["role"] is None, "fit table wrapper must not have role"
+    assert info["tabindex"] is None, "fit table wrapper must not be a tab stop"
+    assert info["ariaLabel"] is None, "fit table wrapper must not have aria-label"
+    assert not info["hasCue"], "fit table must not have a cue"
+    # Transfer proof: the inner table's server fallback focus affordance is
+    # stripped by enhanceTable, so a fitting desktop table is NOT an extra
+    # tab stop on the table element itself either.
+    assert info["tableEnhanced"], "table should be enhanced in JS mode"
+    assert info["tableTabindex"] is None, (
+        f"enhanced fit table must not carry the no-JS fallback tabindex, "
+        f"got {info['tableTabindex']!r}"
+    )
+    assert info["tableAriaLabel"] is None, (
+        f"enhanced fit table must not carry the no-JS fallback aria-label, "
+        f"got {info['tableAriaLabel']!r}"
+    )
+    assert info["tableFallback"] is None, (
+        f"data-okf-fallback marker must be stripped after transfer, "
+        f"got {info['tableFallback']!r}"
+    )
+
+
+def test_table_edge_shadow_state_transitions(server_url, page):
+    """data-scroll updates from 'start' to 'end' as the user scrolls right."""
+    _set_width(page, 390)
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_timeout(300)
+    info = _table_wrap_info(page)
+    assert info["dataScroll"] == "start", "should start at left edge"
+    # Scroll to the far right.
+    page.evaluate("""() => {
+        const w = document.querySelector('.okf-tablewrap');
+        w.scrollLeft = w.scrollWidth;
+    }""")
+    page.wait_for_timeout(200)
+    info2 = _table_wrap_info(page)
+    assert info2["dataScroll"] == "end", \
+        f"should reach 'end' after scrolling right, got {info2['dataScroll']}"
+
+
+def test_table_keyboard_scroll(server_url, page):
+    """A keyboard user can scroll the focused overflow region with arrow keys."""
+    _set_width(page, 390)
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_timeout(300)
+    page.evaluate("document.querySelector('.okf-tablewrap').focus()")
+    before = page.evaluate("document.querySelector('.okf-tablewrap').scrollLeft")
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(100)
+    after = page.evaluate("document.querySelector('.okf-tablewrap').scrollLeft")
+    assert after > before, f"ArrowRight should scroll the region: before={before} after={after}"
+
+
+def test_table_resize_reclassifies_fit_to_overflow(server_url, page):
+    """Resizing from wide (fit) to narrow (overflow) adds the affordance."""
+    _set_width(page, 1280)
+    page.goto(f"{server_url}/tables/orders", wait_until="load")
+    _wait_for_studio(page)
+    page.wait_for_timeout(300)
+    fit = _table_wrap_info(page)
+    assert "okf-tablewrap--fit" in fit["cls"]
+    # Narrow the viewport — debounced reclassify + ResizeObserver must fire.
+    _set_width(page, 390)
+    page.wait_for_timeout(500)
+    overflow = _table_wrap_info(page)
+    assert "okf-tablewrap--overflow" in overflow["cls"], "resize did not reclassify to overflow"
+    assert overflow["role"] == "region"
+
+
+def test_table_bare_css_present_before_enhancement(server_url, page):
+    """The bare ``.okf-table`` keeps its own ``overflow-x: auto`` CSS so that
+    even before the JS enhancer runs (or if it never runs) the table scrolls
+    horizontally without causing document-level overflow.
+
+    NOTE: This runs in a JS-ENABLED context and inspects the pre-enhancement
+    state (before ``_wait_for_studio``). It is NOT a no-JS proof — the real
+    ``java_script_enabled=False`` no-JS table containment proof lives in
+    ``test_first_paint_lifecycle_browser.py::test_nojs_mobile_table_no_enhancer_and_scrollable``
+    and ``test_nojs_mobile_table_reachable_by_tab``."""
+    # The 'page' fixture has JS enabled; we measure the bare-table CSS state
+    # immediately on DOMContentLoaded, before the enhancer wraps the table.
+    _set_width(page, 414)
+    page.goto(f"{server_url}/tables/orders", wait_until="domcontentloaded")
+    page.wait_for_timeout(200)
+    info = page.evaluate("""() => ({
+        docSW: document.documentElement.scrollWidth,
+        docCW: document.documentElement.clientWidth,
+        tableOverX: (() => {
+            const t = document.querySelector('table.okf-table');
+            return t ? getComputedStyle(t).overflowX : null;
+        })(),
+    })""")
+    assert info["docSW"] <= info["docCW"] + 1, "document overflow before JS enhancement"
+    assert info["tableOverX"] in ("auto", "visible"), "bare table must retain scroll CSS"

@@ -51,11 +51,15 @@
   }
   const BOOT = readBoot();
   if (!BOOT) return;
-  // iter1 CRI-019: mark <html> as studio-booted ASAP (synchronously, before
-  // any async work) so the SSR fallback banner hides the instant studio.js
-  // loads. If studio.js fails to load entirely, the class is never added and
-  // the banner stays visible, which is exactly the failure case it exists for.
-  document.documentElement.classList.add("okf-studio-booted");
+  // iter1 CRI-019 (revised): okf-studio-booted is NOT stamped here. The old
+  // code added it synchronously at module evaluation — before boot() ran —
+  // which permanently hid the fallback banner even when boot() subsequently
+  // threw (the theme.js watchdog saw the class at DOMContentLoaded and
+  // skipped the unavailable settlement). Now the class is stamped ONLY after
+  // boot() completes successfully; see the _runBoot wrapper at the bottom of
+  // this module. If boot() throws, okf-studio-unavailable is stamped instead
+  // so the banner is revealed. The theme.js watchdog catches the remaining
+  // case (studio.js blocked/missing or no bootstrap) at DOMContentLoaded.
   const EDIT = BOOT.edit !== false; // read-only kiosk when false
   const TOKEN = BOOT.token || "";
   const REDUCED_MOTION =
@@ -401,13 +405,15 @@
     // Bottom status strip: append as the last in-flow child of the flex-column
     // body so it pins to the viewport bottom (sticky, see studio.css).
     document.body.appendChild(bar);
-    // Round 2 carryover: show the direct Studio opener wherever the rail is
-    // ABSENT — non-concept pages (any width) OR concept pages on mobile
-    // (<=900). Desktop concept pages have the rail, so no footer duplication.
-    // (mountBar runs before body.okf-has-rail is set, so test the predicate
-    // directly.) Placed before the concept-only view controls so order reads
-    // Watch · Commands · Studio · [Rendered/Source/Split · Focus].
-    var railPresent = isConceptPage() && window.innerWidth > 900;
+      // Round 2 carryover: show the direct Studio opener wherever the rail is
+      // ABSENT — non-concept pages (any width) OR concept pages on mobile
+      // (<=900). Desktop concept pages have the rail, so no footer duplication.
+      // (Test the width predicate directly: body.okf-has-rail is now
+      // server-rendered on ALL concept pages, so the class alone can't tell
+      // desktop-rail from mobile-no-rail.) Placed before the concept-only view
+      // controls so order reads Watch · Commands · Studio · [Rendered/Source/
+      // Split · Focus].
+      var railPresent = isConceptPage() && window.innerWidth > 900;
     if (!railPresent) leftGroup.appendChild(studioBtn);
     if (isConceptPage()) {
       leftGroup.appendChild(viewSwitch);
@@ -4998,10 +5004,16 @@
     });
   }
 
-  function boot() {
-    mountBar();
-    mountNavToggle();
-    wireCommentMarkClicks();
+    function boot() {
+      mountBar();
+      mountNavToggle();
+      // TEST-ONLY PROBE (post-mount): runs AFTER mountBar() appended the
+      // studio bar to document.body and mountNavToggle() toggled the nav-
+      // collapse class — i.e. after at least one genuine boot() DOM mutation
+      // completed (proving this is a boot() failure, not a module-evaluation
+      // failure). See _bootProbe below. Inert in production.
+      _bootProbe("post-mount");
+      wireCommentMarkClicks();
     wirePaletteKeys();
     if (isConceptPage()) {
       ensureViewWrap();
@@ -5010,6 +5022,10 @@
       buildSidebarPanels();
       // Round 2: always-docked thin rail (>=900px); overlays open on demand
       // (no auto-open dock). The slim reserve keeps content clear of the rail.
+      // NOTE: body.okf-has-rail is ALSO server-rendered on concept pages
+      // (concept_page.html) so studio.css applies the reserve from first paint
+      // and the centered page never recentres at boot; this add() is an
+      // idempotent belt-and-suspenders for any path that skips the template.
       if (window.innerWidth > 900) {
         buildRail();
         document.body.classList.add("okf-has-rail");
@@ -5032,11 +5048,46 @@
     tokenFetch("/__presence", { method: "POST", body: { state: "idle", actor: "user" } }).catch(() => {});
     // Apply bootstrap presence highlight if focus present.
     renderPresence(state.presence);
-    // Rebuild markers after fonts/layout settle.
-    setTimeout(rebuildMarginMarkers, 400);
-  }
-
-  // Expose the public API.
+      // Rebuild markers after fonts/layout settle.
+      setTimeout(rebuildMarginMarkers, 400);
+      // TEST-ONLY PROBE (post-async-kick): runs AFTER all fire-and-forget
+      // async tails have been dispatched (loadGraph/loadComments/tokenFetch
+      // promises + the 400ms rebuildMarginMarkers timer) but BEFORE boot()
+      // returns. Lets a test force boot() to throw at this exact point so it
+      // can prove the in-flight late tails cannot overwrite the unavailable
+      // settlement. See _bootProbe below. Inert in production.
+      _bootProbe("post-async-kick");
+    }
+  
+    // ---- TEST-ONLY boot probe ---------------------------------------------
+    // ``_bootProbe`` is a constrained, inert-by-default seam that lets the
+    // browser test suite deterministically inject a boot() failure at a named
+    // phase. It is the ONLY way to prove two contract-sensitive invariants
+    // without guessing fragile DOM-method call orders:
+    //   1. boot() genuinely executes (past module evaluation) and mutates the
+    //      DOM, THEN throws — distinguishing a boot() failure from a module-
+    //      evaluation failure (probe phase "post-mount").
+    //   2. Late asynchronous tails (already-dispatched promises/timers) cannot
+    //      replace okf-studio-unavailable with okf-studio-booted or hide the
+    //      failure banner (probe phase "post-async-kick").
+    //
+    // Safety contract:
+    //   * INERT BY DEFAULT: the typeof guard means production never invokes
+    //     the callback — it is only installed by a test's add_init_script.
+    //   * NOT A PUBLIC MUTATION PATH: the probe receives only a phase STRING
+    //     (no internals, no state). It can do exactly one thing relevant to
+    //     boot settlement: throw, which _runBoot catches and converts to the
+    //     unavailable terminal state (the correct failure UX). It cannot call
+    //     _settleBoot, cannot bypass the catch, cannot mutate boot state.
+    //   * CONSTRAINED: called at exactly two named phases inside boot(); no
+    //     other call sites exist.
+    function _bootProbe(phase) {
+      if (typeof window.__okfBootProbe === "function") {
+        window.__okfBootProbe(phase);
+      }
+    }
+  
+    // Expose the public API.
   window.okfLoomStudio = {
     register,
     applyDoc,
@@ -5062,9 +5113,47 @@
     }),
   };
 
+  // ---- Boot settlement (one-way, event-driven) ---------------------------
+  // Stamp okf-studio-booted ONLY after the synchronous boot() body completes
+  // without throwing. If boot() throws, stamp okf-studio-unavailable instead
+  // so the failure banner is revealed (wiki.css: html.okf-studio-unavailable
+  // .okf-studio-fallback-banner--js { display: block }). The settlement
+  // classes are ADDITIVE ONLY — neither is ever removed — so a successful
+  // ready state and an unavailable state can never race or overwrite each
+  // other. Late async results (loadGraph/loadComments/tokenFetch promises and
+  // the 400ms rebuildMarginMarkers timer) are fire-and-forget with their own
+  // catch handlers; they do not affect the synchronous boot settlement.
+  //
+  // Execution timeline: studio.js is a deferred module, so it evaluates
+  // AFTER parsing completes (readyState "interactive") but BEFORE
+  // DOMContentLoaded fires. At evaluation time readyState is already
+  // "interactive", so _runBoot() is called immediately — synchronously
+  // within module evaluation. By the time DOMContentLoaded fires and
+  // theme.js's watchdog checks for okf-studio-booted, boot() has already
+  // settled (either okf-studio-booted or okf-studio-unavailable is present).
+  // The watchdog is the safety net for "studio.js never loaded at all."
+  function _settleBoot(ok) {
+    document.documentElement.classList.add(
+      ok ? "okf-studio-booted" : "okf-studio-unavailable"
+    );
+  }
+  function _runBoot() {
+    try {
+      boot();
+      _settleBoot(true);
+    } catch (e) {
+      _settleBoot(false);
+      // Surface the error for debugging without re-throwing (a re-throw
+      // would be an unhandled module-level exception; the user already sees
+      // the failure banner, which is the correct UX for a boot failure).
+      if (window.console && console.error) {
+        console.error("[okf-studio] boot() threw — marking unavailable:", e);
+      }
+    }
+  }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot, { once: true });
+    document.addEventListener("DOMContentLoaded", _runBoot, { once: true });
   } else {
-    boot();
+    _runBoot();
   }
 })();

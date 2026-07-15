@@ -46,7 +46,13 @@ def test_table_rows_padded_and_truncated_to_header_width() -> None:
 
 def test_table_single_dash_separator_accepted() -> None:
     html = markdown_to_html("| A | B |\n|-|-|\n| 1 | 2 |")
-    assert '<table class="okf-table">' in html
+    # Opening tag carries the no-JS fallback focus affordance (tabindex +
+    # accessible name/instruction) so a keyboard user can scroll the bare
+    # table without JavaScript; no role is set, so table semantics survive.
+    assert '<table class="okf-table" tabindex="0"' in html
+    assert 'aria-label="Table. Scroll horizontally to view all columns."' in html
+    assert 'data-okf-fallback="tabbable"' in html
+    assert "<table" in html and ' role="' not in html.split("</table>", 1)[0]
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,95 @@
+{
+  "description": "Fresh current-branch proof screenshots for the first-paint boot-settlement + table-containment slice.",
+  "branch": "feature/new-layout",
+  "captured_by": "tests/capture_boot_settlement_proof.py",
+  "capture_date": "2026-07-15",
+  "server": "python -m okf_loom serve samples/demo_bundle --no-watch --no-open",
+  "screenshots": {
+    "01-successful-boot-no-banner.png": {
+      "scenario": "Successful studio boot \u2014 JS fallback banner hidden",
+      "viewport": "1280x900 desktop, dark OS",
+      "command": "okf serve samples/demo_bundle (current branch feature/new-layout)",
+      "test": "test_first_paint_lifecycle_browser.py::test_no_banner_flash_during_successful_boot",
+      "terminal_state": "html.okf-studio-booted (banner display:none)"
+    },
+    "02-boot-failure-banner-visible.png": {
+      "scenario": "Boot failure AFTER genuine DOM mutation \u2014 banner revealed",
+      "viewport": "1280x900 desktop, dark OS",
+      "command": "okf serve samples/demo_bundle (current branch); __okfBootProbe post-mount throws",
+      "test": "test_first_paint_lifecycle_browser.py::test_boot_failure_after_genuine_mutation",
+      "terminal_state": "html.okf-studio-unavailable (banner display:block)"
+    },
+    "03-studio-blocked-banner-visible.png": {
+      "scenario": "studio.js blocked/missing \u2014 watchdog reveals banner at DOMContentLoaded",
+      "viewport": "1280x900 desktop, light OS",
+      "command": "okf serve samples/demo_bundle; studio.js route aborted",
+      "test": "test_first_paint_lifecycle_browser.py::test_banner_visible_when_studio_blocked",
+      "terminal_state": "html.okf-studio-unavailable (banner display:block)"
+    },
+    "04-nojs-banner-visible.png": {
+      "scenario": "JavaScript disabled \u2014 noscript fallback banner only",
+      "viewport": "1280x900 desktop, dark OS, java_script_enabled=False",
+      "command": "okf serve samples/demo_bundle; Playwright java_script_enabled=False",
+      "test": "test_first_paint_lifecycle_browser.py::test_nojs_desktop_geometry_no_overflow",
+      "terminal_state": "no settlement classes (JS off); noscript banner visible",
+      "capture_timing": "immediate at wait_until=load (no sleep/retry)",
+      "nojs_static_geometry": {
+        "jsEnabled": false,
+        "htmlClasses": "",
+        "docSW": 1280,
+        "docCW": 1280,
+        "docContained": true,
+        "hasWrapper": false,
+        "tableDisplay": "block",
+        "tableOverX": "auto",
+        "tableSW": 676,
+        "tableCW": 676,
+        "tableOverflows": false,
+        "tableTabindex": "0",
+        "tableRole": null,
+        "tableAriaLabel": "Table. Scroll horizontally to view all columns."
+      },
+      "nojs_static_proof": "Durable no-JS earliest-available geometry: captured at the deterministic `load` event (all CSS parsed + applied), immediately, with NO sleep/retry. Because java_script_enabled=False, no scripts run, requestAnimationFrame never fires, and a JS frame sampler is UNAVAILABLE \u2014 there is also no async settlement to sample. The proof is the static DOM/CSS invariant: <html> carries no settlement classes, the table uses the static fallback CSS (display:block; overflow-x:auto) with the server tabindex=\"0\" + aria-label no-JS keyboard affordance, and document width is contained."
+    },
+    "05-mobile-successful-boot.png": {
+      "scenario": "Mobile successful boot \u2014 table contained, no banner",
+      "viewport": "414x900 mobile, dark OS",
+      "command": "okf serve samples/demo_bundle (current branch feature/new-layout)",
+      "test": "test_first_paint_lifecycle_browser.py::test_mobile_frame_geometry_stable_no_overflow",
+      "terminal_state": "html.okf-studio-booted; table locally contained (no doc overflow)"
+    },
+    "06-mobile-nojs-table-scrollable.png": {
+      "scenario": "Mobile no-JS \u2014 bare table is a keyboard-focusable scrollport (tabindex+aria-label), scrolls natively, no enhancer wrapper",
+      "viewport": "414x900 mobile, dark OS, java_script_enabled=False",
+      "command": "okf serve samples/demo_bundle; Playwright java_script_enabled=False",
+      "test": "test_first_paint_lifecycle_browser.py::test_nojs_mobile_table_no_enhancer_and_scrollable + test_nojs_mobile_table_reachable_by_tab + test_nojs_geometry_is_static_at_first_layout",
+      "terminal_state": "no settlement classes (JS off); bare table display:block overflow-x:auto tabindex=0, no wrapper",
+      "capture_timing": "immediate at wait_until=load (no sleep/retry)",
+      "nojs_static_geometry": {
+        "jsEnabled": false,
+        "htmlClasses": "",
+        "docSW": 414,
+        "docCW": 414,
+        "docContained": true,
+        "hasWrapper": false,
+        "tableDisplay": "block",
+        "tableOverX": "auto",
+        "tableSW": 324,
+        "tableCW": 316,
+        "tableOverflows": true,
+        "tableTabindex": "0",
+        "tableRole": null,
+        "tableAriaLabel": "Table. Scroll horizontally to view all columns."
+      },
+      "nojs_static_proof": "Durable no-JS earliest-available geometry: captured at the deterministic `load` event (all CSS parsed + applied), immediately, with NO sleep/retry. Because java_script_enabled=False, no scripts run, requestAnimationFrame never fires, and a JS frame sampler is UNAVAILABLE \u2014 there is also no async settlement to sample. The proof is the static DOM/CSS invariant: <html> carries no settlement classes, the table uses the static fallback CSS (display:block; overflow-x:auto) with the server tabindex=\"0\" + aria-label no-JS keyboard affordance, and document width is contained."
+    },
+    "07-mobile-nojs-table-keyboard-focus.png": {
+      "scenario": "Mobile no-JS \u2014 bare table keyboard-focused (Tab), showing the visible :focus-visible outline on the server-side tabindex=0 scrollport",
+      "viewport": "414x900 mobile, dark OS, java_script_enabled=False",
+      "command": "okf serve samples/demo_bundle; Playwright java_script_enabled=False; Tab to table",
+      "test": "test_first_paint_lifecycle_browser.py::test_nojs_mobile_table_reachable_by_tab",
+      "terminal_state": "table focused via real Tab keypress; :focus-visible outline rendered",
+      "capture_timing": "immediate after Tab focus (no sleep/retry)"
+    }
+  }
+}

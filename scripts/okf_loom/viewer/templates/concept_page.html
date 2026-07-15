@@ -51,7 +51,14 @@
 __WIKI_CSS_LINK__
 __THEME_JS_LINK__
 </head>
-<body class="okf-viewer okf-viewer--page" __DATA_ATTRS__>
+<!-- okf-has-rail is SERVER-RENDERED here (not added later by studio.js) so
+     studio.css's desktop rail reserve (body.okf-has-rail padding-right) is
+     present from FIRST PAINT and the centered .okf-page never recentres when
+     the rail mounts. Harmless where studio.css is absent: that stylesheet only
+     loads when the live studio is attached (serve), so static/SPA builds and
+     the <=900px mobile case (studio.css @media max-width:900 override) see no
+     reserve. studio.js still re-adds the class idempotently at boot. -->
+<body class="okf-viewer okf-viewer--page okf-has-rail" __DATA_ATTRS__>
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>
 <header class="okf-topbar">
   <div class="okf-topbar__brand">
