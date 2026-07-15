@@ -1,5 +1,9 @@
 {
   "browser_source": "system-channel:chrome",
+  "evidence": {
+    "status": "historical-pre-closeout",
+    "description": "Curated README media captured before the Editorial Workbench closeout. The recorded revision below is intentionally preserved; use docs/screenshots/boot-settlement/provenance.json for the later focused boot-settlement proof."
+  },
   "captures": [
     {
       "artifact_type": "still",

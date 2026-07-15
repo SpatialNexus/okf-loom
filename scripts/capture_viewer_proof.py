@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Browser screenshot capture for the OKF viewer (current spec §17).
+"""Lightweight dated live/static browser smoke proof for the OKF viewer.
+
+This is the small recurring viewer proof, not the stable curated media set
+(``capture_readme_media.py``) or the comprehensive Editorial Workbench parity
+matrix (``capture_final_workbench_proof.py``).
 
 Renders the demo bundle BOTH live (``scripts/okf-loom serve``) AND as a static build
 (``scripts/okf-loom build --target static``), then captures full-page screenshots of:
@@ -356,10 +360,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="capture_viewer_proof.py",
         description=(
-            "Capture browser screenshots of the OKF viewer for the demo "
+            "Capture a lightweight dated live/static smoke proof of the OKF viewer for the demo "
             "bundle, both live (scripts/okf-loom serve) and static (scripts/okf-loom build --target "
             "static), under docs/screenshots/<date>-viewer/ "
-            "(current spec §17)."
+            "(current spec §17); this is not the final parity matrix."
         ),
     )
     p.add_argument(

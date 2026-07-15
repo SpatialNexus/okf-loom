@@ -513,7 +513,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--skip-gifs",
         action="store_true",
-        help="capture only the PNG stills",
+        help="skip the two GIF animations; still capture PNGs and comment-loop.mp4",
     )
     return p
 

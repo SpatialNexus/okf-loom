@@ -4,6 +4,6 @@ Execution plans for coordinated changes to okf-loom.
 
 <!-- okf:generated:index begin -->
 
-- [Editorial Workbench hardening implementation plan](editorial-workbench-hardening.md) — Execution plan for unifying theme state, fixing accessibility and responsive defects, hardening visual behavior, and proving runtime/export parity.
+- [Editorial Workbench hardening implementation plan](editorial-workbench-hardening.md) — Completed plan for theme-state, accessibility, responsive, visual, and runtime/export hardening; closed at `be52770` with post-closeout stabilization at `ded047c`.
 
 <!-- okf:generated:index end -->

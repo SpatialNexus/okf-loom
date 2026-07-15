@@ -1,9 +1,11 @@
 ---
 type: ImplementationPlan
 title: Editorial Workbench hardening implementation plan
-description: Execution plan for unifying theme state, fixing accessibility and responsive
-  defects, hardening visual behavior, and proving runtime/export parity.
+description: Completed execution plan for unified theme state, accessibility and responsive
+  hardening, visual stabilization, and runtime/export parity.
 resource: /plans/editorial-workbench-hardening.md
+status: completed
+completed_at: '2026-07-15T06:52:57Z'
 tags:
 - editorial-workbench
 - theme
@@ -27,6 +29,13 @@ provenance:
   note: Derived from code, browser, accessibility, visual, validation, and evidence
     reviews.
 ---
+
+> **Completed historical plan.** The hardening work closed in merge commit
+> `be52770`; graph overlay-focus and LOD proof fixes are included immediately
+> before that merge (`c04ee12`, `6627614`). Post-closeout first-paint, boot
+> settlement, responsive table accessibility, and capture evidence landed in
+> `ded047c`. The phases below are retained as the execution record, not an open
+> backlog. Current behavior is defined by the [specification](/reference/spec.md).
 
 # Objective
 
@@ -168,3 +177,23 @@ Precedence is: **saved user preference → configured preference → Swiss Auto/
 - Fresh desktop/mobile captures have no unresolved critical or major visual-review findings.
 - Public configuration and user documentation match runtime behavior.
 - Optional polish is implemented and verified rather than left as an untracked backlog.
+
+# Closure and final evidence
+
+- **Closed:** merge commit `be52770` records completion of the hardening plan
+  and includes the generated final proof matrix under
+  `docs/screenshots/2026-07-14-editorial-workbench-final/`. Its manifest records
+  semantically ready live, static, and single-file captures across the bounded
+  theme, viewport, modifier, reduced-motion, forced-colors, and no-JS matrix.
+- **Graph stabilization included at close:** `c04ee12` adds overlay ownership
+  and focus-restoration regression coverage in `tests/test_viewer_browser.py`;
+  `6627614` stabilizes browser-internal LOD timing/lifecycle proof in
+  `tests/test_studio_iter1_browser.py` and `tests/test_viewer_browser.py`.
+- **Post-closeout stabilization:** `ded047c` adds
+  `tests/test_first_paint_lifecycle_browser.py`, extends responsive/table tests,
+  and records seven boot-settlement/no-JS/table screenshots plus scenario
+  provenance under `docs/screenshots/boot-settlement/`.
+- **Maintainer gates:** `scripts/lint-js.sh`, the focused browser suites named
+  in `CONTRIBUTING.md`, and `scripts/okf-loom validate docs-bundle --strict`.
+  Capture output is regenerated only when the corresponding rendered output
+  changes.

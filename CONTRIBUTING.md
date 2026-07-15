@@ -26,6 +26,40 @@ scripts/okf-loom validate docs-bundle --strict
 ```
 
 For runtime changes, add or update tests and run the relevant pytest selection.
+Frontend changes should also run the JavaScript syntax check and the focused
+browser suites covering the changed surface:
+
+```bash
+scripts/lint-js.sh
+
+# First paint, responsive chrome, keyboard behavior, and table containment.
+uv run --with pytest --with playwright --with pyyaml \
+  pytest -q tests/test_first_paint_lifecycle_browser.py \
+  tests/test_responsive_keyboard_browser.py
+
+# Graph disclosure/readability/invariants, overlay focus, and LOD behavior.
+uv run --with pytest --with playwright --with pyyaml \
+  pytest -q tests/test_graph_disclosure_browser.py \
+  tests/test_graph_invariant_closure_browser.py \
+  tests/test_graph_readability_browser.py tests/test_viewer_browser.py \
+  tests/test_studio_iter1_browser.py
+```
+
+Install the managed browser once when the environment has no usable system
+Chrome/Chromium: `uv run --with playwright playwright install chromium`.
+
+When a viewer change intentionally changes captured output, regenerate the
+affected proof rather than leaving stale images or manifests:
+
+```bash
+uv run --with playwright --with pillow python scripts/capture_readme_media.py
+uv run --with playwright python scripts/capture_viewer_proof.py
+uv run --with playwright python scripts/capture_final_workbench_proof.py
+python tests/capture_boot_settlement_proof.py  # requires Playwright in this environment
+```
+
+Do not regenerate every capture set for an unrelated change. Review the
+resulting images and provenance manifests before submitting them.
 
 ## Security-sensitive changes
 

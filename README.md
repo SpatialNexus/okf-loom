@@ -17,7 +17,7 @@ bundle as a static build (the live studio adds commenting on top).
 
 </div>
 
-![The okf-loom graph view: 30 documentation concepts grouped into six colour-coded themes, with a ranked theme summary panel on the right](docs/media/graph-map.png)
+![The okf-loom graph view, with documentation concepts grouped into colour-coded themes and a ranked theme summary panel on the right](docs/media/graph-map.png)
 
 okf-loom is a toolkit and loadable agent skill for
 [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
@@ -102,6 +102,12 @@ grey metadata dump: types become badges, entities become chips, typed
 relations become navigable links, and citations and provenance are laid
 out as a dressed header band.
 
+Internal links remain native browser links: keyboard activation, modified
+clicks, and Back/Forward navigation keep their expected behaviour. The studio
+also preserves the resolved theme from the first painted frame through native
+page navigation, without flashing the fallback banner during a successful
+boot.
+
 ![A concept page rendering Mermaid flowchart and sequence diagrams, with a section outline and quick actions in the sidebar](docs/media/showcase-rendering.png)
 
 The dashboard index shows bundle-level stats and per-area entry points;
@@ -126,6 +132,12 @@ evidence, not just pixels:
 
 ![Animated cycle through the Map, Themes, Flow, Bridges, and Recent graph lenses](docs/media/graph-lenses.gif)
 
+On a first visit, the graph tour behaves as an accessible dialog: focus stays
+inside it and returns to a stable graph control when it closes. If Appearance
+is open, the tour waits rather than stealing focus; layered Escape handling
+closes only the topmost surface. Graph labels also remain readable as you
+search, switch lenses, or focus a neighbourhood.
+
 ### Four colour themes
 
 Two aesthetics — **Technical** (dev-tool: Inter UI, teal accent, subtle
@@ -137,11 +149,23 @@ the graph canvas follows along):
 
 ![Animated cycle through the technical-light, technical-dark, swiss-light, and swiss-dark themes on the showcase page](docs/media/themes.gif)
 
+Theme resolution runs before first paint, so the configured or saved theme
+(including automatic OS light/dark mode) is stable from the initial frame and
+across native navigation.
+
 > **Migration:** the earlier `light/dark/pastel/sepia/midnight` palette is
 > retired. A `theme:` pinned to an old value in `okf-loom.config.yaml` must
 > move to `auto` or one of the four new names; returning browsers auto-migrate
 > their saved theme (`dark→technical-dark`, `light→technical-light`, the warmer
 > palettes → `swiss-light`).
+
+### Tables that work on small screens
+
+Wide tables are contained in their page instead of forcing document-level
+horizontal scrolling. On mobile they expose a labelled, keyboard-focusable
+horizontal scroll area with a visible focus indicator; that safe fallback is
+present even when JavaScript is disabled, while the enhanced studio retains
+sorting, filtering, resizing, and CSV copy controls.
 
 ### Search that understands the bundle
 
@@ -271,6 +295,7 @@ okf-loom/
 │   ├── okf_loom/             # checkout-local runtime (stdlib-only)
 │   ├── capture_readme_media.py   # regenerates docs/media/
 │   ├── capture_viewer_proof.py
+│   ├── capture_final_workbench_proof.py
 │   ├── capture_signal_controls.py
 │   ├── build_skill_archive.py
 │   └── lint-js.sh
@@ -285,17 +310,37 @@ only for pytest/coverage configuration.
 
 ## Regenerating media & browser proof
 
-The screenshots and GIFs on this page live in [`docs/media/`](docs/media/)
-and are reproducible from a live studio; browser-marked tests skip cleanly
-when Playwright is absent:
+The media sets have different purposes and provenance. Do not treat every
+screenshot directory as proof of the current revision:
+
+- [`docs/media/`](docs/media/) is the small, curated set embedded in this
+  README. Its manifest records a historical pre-closeout capture revision.
+- `capture_viewer_proof.py` creates broad, dated live/static viewer evidence.
+- [`docs/screenshots/2026-07-14-editorial-workbench-final/`](docs/screenshots/2026-07-14-editorial-workbench-final/)
+  is the historical pre-closeout Workbench surface/theme/mobile matrix; its
+  manifest preserves the revision actually captured.
+- [`docs/screenshots/boot-settlement/`](docs/screenshots/boot-settlement/) is
+  the later, focused first-paint, fallback-banner, native-layout, and mobile
+  table proof captured at `ded047c70d5c653ddc1021aa7cf191cabf24d7c0`.
+  See its [`provenance.json`](docs/screenshots/boot-settlement/provenance.json)
+  for the scenario-to-test mapping and exact environment.
+
+Browser-marked tests skip cleanly when Playwright is absent. These commands
+regenerate the corresponding evidence and can be expensive, especially the
+full Workbench matrix:
 
 ```bash
 python -m pip install pytest playwright pillow
 python -m playwright install chromium
 
-PYTHONPATH=scripts python scripts/capture_readme_media.py   # this page's media
-PYTHONPATH=scripts python scripts/capture_viewer_proof.py   # dated spec §17 proofs
-PYTHONPATH=scripts pytest tests/test_viewer_browser.py      # browser tests
+PYTHONPATH=scripts python scripts/capture_readme_media.py
+PYTHONPATH=scripts python scripts/capture_viewer_proof.py
+PYTHONPATH=scripts python scripts/capture_final_workbench_proof.py \
+    --out-dir docs/screenshots/$(date +%F)-editorial-workbench-final
+python3 tests/capture_boot_settlement_proof.py
+
+PYTHONPATH=scripts pytest tests/test_viewer_browser.py
+PYTHONPATH=scripts pytest tests/test_first_paint_lifecycle_browser.py
 ```
 
 ## License

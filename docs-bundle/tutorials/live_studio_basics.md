@@ -29,6 +29,8 @@ By the end of this tutorial you will have:
 - Served a bundle with `scripts/okf-loom serve`.
 - Navigated the root index, a concept page, the source and split views,
   the graph view, and search.
+- Changed Appearance settings, exercised native link navigation, and used the
+  keyboard and mobile table affordances.
 - Posted a comment from the studio.
 - Found that comment on disk in `directives.jsonl`.
 
@@ -103,6 +105,18 @@ Try editing the file on disk while the studio is running and saving it.
 The page updates in place without a full reload — that is the live-update
 layer at work.
 
+Open **Appearance** in the top bar. Choose a family (**Swiss** or
+**Technical**), a mode (**Auto**, **Light**, or **Dark**), and, if useful, the
+contrast or border modifiers. Arrow keys move within an option group; Home and
+End jump within it; Tab moves between groups; Enter or Space chooses an option;
+Escape closes the menu and returns focus to its trigger. Auto follows your OS
+light/dark preference while retaining the chosen family.
+
+Now follow an ordinary concept link. The studio deliberately leaves it as a
+native browser link: Back and Forward traverse document history, Enter activates
+a focused link, and Ctrl/Cmd-click opens it in a new tab. The chosen Appearance
+state is resolved before the destination paints.
+
 # Step 4: Switch to source and split view
 
 The concept page has a view-mode switcher with three options:
@@ -171,6 +185,26 @@ Concepts with no links sit apart with a dashed "not yet linked" outline —
 this view is still the fastest way to spot orphans and clusters that
 ought to be connected. If a file changes on disk while you watch, the
 canvas updates in place and a "Graph updated" chip offers a re-layout.
+
+The first-visit tour is a modal keyboard surface. Focus stays inside it, and
+Escape closes only the topmost open surface. If you open Appearance before the
+graph finishes loading, the tour waits rather than stealing focus; closing
+Appearance allows the tour to begin once. If Appearance is opened over an active
+tour, the first Escape returns focus to the tour and the second dismisses the
+tour. Dismissing or finishing it records completion so it does not reopen.
+
+On a narrow viewport the node index appears before the canvas with an
+**Explore map** action. Activate it to move keyboard focus to the graph and fit
+the map; reduced-motion preferences are respected. Large bundles may initially
+show a reduced level of detail. Selecting a hidden item from the node index
+reveals and lays it out; **Show all** reveals the complete overlap-free grid.
+
+If a concept contains a wide table, narrow the browser window. The table stays
+inside the article rather than widening the whole page. With JavaScript, Tab
+reaches the labelled horizontal-scroll region only when it actually overflows;
+use Left/Right to reach off-screen columns and follow the visible edge cue. A
+table that fits adds no extra tab stop. With JavaScript disabled, Tab reaches the
+bare table itself and the same arrow-key scrolling remains available.
 
 # Step 6: Search
 

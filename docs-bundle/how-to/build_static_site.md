@@ -104,6 +104,21 @@ of your choice.
 Because the `static` target is JS-optional, the site renders legibly even
 in a restricted browser.
 
+The static target does not depend on JavaScript for basic reading and
+navigation. Concept links remain native anchors, so keyboard activation,
+browser history, and modifier-click behavior come from the browser rather than
+an SPA interceptor. Rendered tables keep native table semantics and are locally
+contained: with JavaScript disabled, a wide bare table is a named, tabbable
+horizontal scrollport, and arrow keys can reach every column without creating a
+document-wide scrollbar.
+
+When JavaScript is available, `renderers.js` progressively wraps tables. Only a
+table that overflows becomes a labelled, focusable scroll region with a visible
+cue and edge state; a fitting table has no extra tab stop. This enhancement is
+additive—the no-JS HTML and CSS remain the fallback guarantee. Static pages also
+keep ordinary native link navigation; JavaScript is not required to move between
+rendered documents.
+
 # Step 6: Embed the site inside another site
 
 The `single-file` target is the easiest embed: drop the `viz.html` into
@@ -153,6 +168,8 @@ You now have a repeatable build that:
 - Turns a bundle into a hostable site in one command.
 - Picks the right target for the shipping context.
 - Honours the active-code gate when overrides or plugins are present.
+- Keeps native document links and contained, keyboard-reachable wide tables in
+  the `static` target even when JavaScript is disabled.
 
 # See also
 

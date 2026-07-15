@@ -1,5 +1,9 @@
 {
   "browser_source": "system-channel:chrome",
+  "evidence": {
+    "status": "historical-pre-closeout",
+    "description": "Editorial Workbench surface/theme/mobile matrix captured before closeout. The recorded revision below is intentionally preserved; this matrix is not evidence of the later boot-settlement revision."
+  },
   "captures": [
     {
       "artifact_type": "still",

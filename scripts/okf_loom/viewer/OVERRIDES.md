@@ -101,7 +101,7 @@ of defence apply:
 |------------------|---------|-----------|------------------------------------------------|
 | `name`           | string  | bundle dir name | Display name for the viewer / browser title. |
 | `default_layout` | string  | `"cose"`  | Initial Cytoscape layout: `cose` / `concentric` / `breadthfirst` / `circle` / `grid`. |
-| `theme`          | string  | `"technical-light"` | Concrete initial colour theme: `"swiss-light"` / `"swiss-dark"` / `"technical-light"` / `"technical-dark"`. A saved user preference takes precedence. |
+| `theme`          | string or null | unconfigured (`null`) | Concrete initial colour theme: `"swiss-light"` / `"swiss-dark"` / `"technical-light"` / `"technical-dark"`. Omission or `null` leaves the configured preference empty, so Swiss Auto resolves from the OS colour scheme. A saved user preference takes precedence over an explicit configured theme. |
 | `cdn`            | bool    | `true`    | If `false`, omit the Cytoscape.js CDN `<script>` tags from the single-file viewer and the `/__graph` page (for fully offline packaging — supply your own copy in that case). Markdown is rendered server-side by okf-loom's own stdlib renderer, so there is no client-side markdown parser to gate. |
 
 `config.json` is strict: malformed JSON, a non-object top level, unknown keys,
@@ -117,7 +117,7 @@ characters; renderer escaping remains mandatory and prevents interpolation.
 {
   "name": "Acme OKF",
   "default_layout": "breadthfirst",
-  "theme": "dark",
+  "theme": "technical-dark",
   "cdn": true
 }
 ```

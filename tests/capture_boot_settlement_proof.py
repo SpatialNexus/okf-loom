@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import shlex
 import socket
 import subprocess
 import sys
@@ -25,6 +27,7 @@ DEMO = TK / "samples" / "demo_bundle"
 OUT = TK / "docs" / "screenshots" / "boot-settlement"
 OUT.mkdir(parents=True, exist_ok=True)
 CONCEPT = "/tables/orders"
+DEVICE_SCALE_FACTOR = 1
 
 
 def okf_env():
@@ -53,16 +56,64 @@ def wait_up(base):
     raise RuntimeError("server not ready")
 
 
+def git_identity():
+    """Return the HEAD identity captured before the browser/server starts.
+
+    Revision identifies the committed HEAD only; it deliberately does not
+    imply that the working tree was clean when the screenshots were made.
+    """
+    def git_value(*args):
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=str(TK), check=True, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ).stdout.strip(), None
+        except (OSError, subprocess.CalledProcessError) as exc:
+            detail = getattr(exc, "stderr", None)
+            return None, (detail.strip() if detail else str(exc))
+
+    revision, revision_error = git_value("rev-parse", "HEAD")
+    branch, branch_error = git_value("symbolic-ref", "--short", "HEAD")
+    return {
+        "revision": revision,
+        "revision_source": "git rev-parse HEAD",
+        "revision_fallback": revision_error,
+        "revision_scope": "HEAD commit only; working-tree modifications are not represented",
+        "branch": branch,
+        "branch_source": "git symbolic-ref --short HEAD",
+        "branch_fallback": branch_error,
+    }
+
+
 def launch(p):
     chrome = os.environ.get("AIC_PLAYWRIGHT_CHROME_PATH") or ""
     attempts = []
     if chrome:
-        attempts.append({"executable_path": chrome, "args": ["--no-sandbox"]})
-    attempts.append({"channel": "chrome"})
-    attempts.append({})
-    for kw in attempts:
+        attempts.append((
+            {"executable_path": chrome, "args": ["--no-sandbox"]},
+            "AIC_PLAYWRIGHT_CHROME_PATH",
+            shlex.join([chrome, "--no-sandbox"]),
+            chrome,
+        ))
+    attempts.append((
+        {"channel": "chrome"}, "system channel: chrome",
+        "playwright.chromium.launch(channel='chrome')", None,
+    ))
+    attempts.append((
+        {}, "Playwright-managed Chromium",
+        "playwright.chromium.launch()", None,
+    ))
+    for kw, selection, command, executable in attempts:
         try:
-            return p.chromium.launch(**kw)
+            browser = p.chromium.launch(**kw)
+            return browser, {
+                "engine": "chromium",
+                "version": browser.version,
+                "selection": selection,
+                "executable": executable,
+                "command": command,
+                "launch_flags": list(kw.get("args", [])),
+            }
         except Exception:
             continue
     raise RuntimeError("no chrome available")
@@ -126,6 +177,8 @@ def nojs_geometry(pg):
 
 
 def main():
+    repository = git_identity()
+    invocation_argv = [sys.executable, *sys.argv]
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(
@@ -138,11 +191,12 @@ def main():
     try:
         wait_up(base)
         with sync_playwright() as p:
-            browser = launch(p)
+            browser, browser_metadata = launch(p)
 
             # 01 — Desktop successful boot (dark OS): no banner.
             ctx = browser.new_context(color_scheme="dark",
-                                      viewport={"width": 1280, "height": 900})
+                                      viewport={"width": 1280, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR)
             pg = ctx.new_page()
             pg.goto(f"{base}{CONCEPT}", wait_until="domcontentloaded")
             pg.wait_for_function(
@@ -155,7 +209,7 @@ def main():
             manifest["01-successful-boot-no-banner.png"] = {
                 "scenario": "Successful studio boot — JS fallback banner hidden",
                 "viewport": "1280x900 desktop, dark OS",
-                "command": "okf serve samples/demo_bundle (current branch feature/new-layout)",
+                "command": "okf serve samples/demo_bundle (HEAD recorded in top-level revision)",
                 "test": "test_first_paint_lifecycle_browser.py::test_no_banner_flash_during_successful_boot",
                 "terminal_state": "html.okf-studio-booted (banner display:none)",
             }
@@ -163,7 +217,8 @@ def main():
 
             # 02 — Boot failure AFTER genuine mutation (dark OS): banner visible.
             ctx = browser.new_context(color_scheme="dark",
-                                      viewport={"width": 1280, "height": 900})
+                                      viewport={"width": 1280, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR)
             pg = ctx.new_page()
             pg.add_init_script(
                 """window.__okfBootProbe = function(phase) {
@@ -180,7 +235,7 @@ def main():
             manifest["02-boot-failure-banner-visible.png"] = {
                 "scenario": "Boot failure AFTER genuine DOM mutation — banner revealed",
                 "viewport": "1280x900 desktop, dark OS",
-                "command": "okf serve samples/demo_bundle (current branch); __okfBootProbe post-mount throws",
+                "command": "okf serve samples/demo_bundle; __okfBootProbe post-mount throws",
                 "test": "test_first_paint_lifecycle_browser.py::test_boot_failure_after_genuine_mutation",
                 "terminal_state": "html.okf-studio-unavailable (banner display:block)",
             }
@@ -188,7 +243,8 @@ def main():
 
             # 03 — Studio.js blocked (light OS): banner visible via watchdog.
             ctx = browser.new_context(color_scheme="light",
-                                      viewport={"width": 1280, "height": 900})
+                                      viewport={"width": 1280, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR)
             pg = ctx.new_page()
 
             def block_studio(route):
@@ -214,6 +270,7 @@ def main():
             # 04 — No-JS (dark OS): noscript banner visible + static first-layout geometry.
             ctx = browser.new_context(color_scheme="dark",
                                       viewport={"width": 1280, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR,
                                       java_script_enabled=False)
             pg = ctx.new_page()
             # wait_until="load" is the deterministic earliest-available layout
@@ -252,7 +309,8 @@ def main():
 
             # 05 — Mobile successful boot (dark OS, 414px): no banner, table contained.
             ctx = browser.new_context(color_scheme="dark",
-                                      viewport={"width": 414, "height": 900})
+                                      viewport={"width": 414, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR)
             pg = ctx.new_page()
             pg.goto(f"{base}{CONCEPT}", wait_until="domcontentloaded")
             pg.wait_for_function(
@@ -265,7 +323,7 @@ def main():
             manifest["05-mobile-successful-boot.png"] = {
                 "scenario": "Mobile successful boot — table contained, no banner",
                 "viewport": "414x900 mobile, dark OS",
-                "command": "okf serve samples/demo_bundle (current branch feature/new-layout)",
+                "command": "okf serve samples/demo_bundle (HEAD recorded in top-level revision)",
                 "test": "test_first_paint_lifecycle_browser.py::test_mobile_frame_geometry_stable_no_overflow",
                 "terminal_state": "html.okf-studio-booted; table locally contained (no doc overflow)",
             }
@@ -276,6 +334,7 @@ def main():
             # enhancer wrapper. Captured at the earliest-available layout point.
             ctx = browser.new_context(color_scheme="dark",
                                       viewport={"width": 414, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR,
                                       java_script_enabled=False)
             pg = ctx.new_page()
             # wait_until="load": earliest durable geometry; no JS to settle.
@@ -318,6 +377,7 @@ def main():
             # visible, named, scrollable focus target with no JS enhancer.
             ctx = browser.new_context(color_scheme="dark",
                                       viewport={"width": 414, "height": 900},
+                                      device_scale_factor=DEVICE_SCALE_FACTOR,
                                       java_script_enabled=False)
             pg = ctx.new_page()
             pg.goto(f"{base}{CONCEPT}", wait_until="load")
@@ -349,12 +409,24 @@ def main():
         manifest_path = OUT / "provenance.json"
         with open(manifest_path, "w") as f:
             json.dump({
+                "schema": "okf-loom-boot-settlement-provenance-v2",
                 "description": "Fresh current-branch proof screenshots for the "
                                "first-paint boot-settlement + table-containment slice.",
-                "branch": "feature/new-layout",
+                **repository,
                 "captured_by": "tests/capture_boot_settlement_proof.py",
-                "capture_date": time.strftime("%Y-%m-%d"),
+                "capture_invocation": shlex.join(invocation_argv),
+                "capture_invocation_argv": invocation_argv,
+                "capture_date": time.strftime("%Y-%m-%d", time.gmtime()),
+                "capture_timezone": "UTC",
+                "capture_timezone_fallback": None,
                 "server": "python -m okf_loom serve samples/demo_bundle --no-watch --no-open",
+                "environment": {
+                    "platform": platform.platform(),
+                    "python": platform.python_version(),
+                    "browser": browser_metadata,
+                    "device_scale_factor": DEVICE_SCALE_FACTOR,
+                    "automation": "Playwright synchronous Python API",
+                },
                 "screenshots": manifest,
             }, f, indent=2)
             f.write("\n")

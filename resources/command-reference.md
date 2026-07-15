@@ -92,3 +92,53 @@ python -m pip install pytest playwright
 python -m playwright install chromium
 PYTHONPATH=scripts pytest
 ```
+
+The browser suites and capture scripts use Playwright, but the repo itself is
+still consumed directly from the checkout. An equivalent isolated invocation
+is:
+
+```bash
+uv run --with pytest --with playwright --with pyyaml pytest -q <test paths>
+```
+
+The shared capture helpers resolve a Chromium-family browser in this order: an
+explicit `--chrome PATH`, `OKF_CHROME`, `AIC_PLAYWRIGHT_CHROME_PATH`,
+Playwright-managed Chromium, then a system Chrome/Chromium channel or
+executable. The browser sandbox remains enabled; only constrained root
+containers should explicitly set `OKF_CAPTURE_NO_SANDBOX=1`.
+
+`tests/capture_boot_settlement_proof.py` is a standalone exception rather than
+a `capture_support.py` consumer. It first tries `AIC_PLAYWRIGHT_CHROME_PATH`,
+when present, and automatically launches that environment-provided executable
+with `--no-sandbox`; this supports the constrained AIC Chrome environment. Its
+system Chrome channel and Playwright-managed fallbacks do not add
+`--no-sandbox`. Normal shared capture support remains opt-in only through
+`OKF_CAPTURE_NO_SANDBOX=1`.
+
+## Frontend checks and browser proof
+
+```bash
+scripts/lint-js.sh
+scripts/okf-loom validate docs-bundle --strict
+
+# Stable curated media used by the project overview.
+uv run --with playwright --with pillow python scripts/capture_readme_media.py
+
+# Lightweight dated smoke proof for live and static viewer output.
+uv run --with playwright python scripts/capture_viewer_proof.py
+
+# Bounded Editorial Workbench matrix: live/static/single-file, themes,
+# responsive states, modifiers, reduced motion, forced colors, and no-JS.
+uv run --with playwright python scripts/capture_final_workbench_proof.py
+
+# First-paint boot settlement and no-JS/table artifact set.
+uv run --with playwright python tests/capture_boot_settlement_proof.py
+```
+
+`scripts/capture_support.py` is the shared, import-safe support layer for the
+capture entrypoints under `scripts/`: browser launch, server and semantic target
+readiness, graph-layout settlement, and normalized provenance manifests. Those
+commands fail rather than taking a screenshot of an unavailable, hidden,
+unreadable, or not-yet-ready target. The standalone boot-settlement driver owns
+its boot-state readiness and provenance independently. Regenerate only the sets
+affected by an intentional output change.
