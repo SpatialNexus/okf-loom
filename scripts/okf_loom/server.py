@@ -50,18 +50,20 @@ from .render import (
     _render_index_page,
     _render_search_page,
     _render_graph_page,
+    _render_concept_body_html,
     _content_index_json,
 )
 from .viewer.assets import (
     BUNDLE_MEDIA_EXTENSIONS,
-    list_builtin_static,
     load_config,
     load_static,
     resolve_palette,
     effective_allow_active_code,
     clear_overrides_cache,
+    versioned_asset_url,
+    is_known_static_asset,
 )
-from .viewer.markdown import markdown_to_html, rewrite_internal_links, url_for_concept
+from .viewer.markdown import markdown_to_html
 
 # ---------------------------------------------------------------------------
 # DoS size caps (P2-55). The authoritative YAML/body size cap lives in
@@ -1505,8 +1507,6 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
 
     def _handle_data_doc(self, query: dict[str, list[str]]) -> None:
         """One concept's rendered+raw+meta JSON for in-place re-render (§6)."""
-        from .render import _render_link_map
-
         cid_str = (query.get("id", [""])[0] or "").strip()
         if not cid_str:
             return self._send_json(400, {"error": "id required"})
@@ -1519,17 +1519,14 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         if concept is None:
             return self._send_json(404, {"error": f"unknown concept: {cid_str}"})
         graph = bundle.graph()
-        # Render the concept body HTML the same way the concept page does, so a
-        # live `changed` patch swaps in identical markup (§7.3 no-refresh).
-        body_html = markdown_to_html(concept.body)
-        link_map = _render_link_map(bundle, concept, "serve")
-        body_html = rewrite_internal_links(body_html, link_map)
-        # F13: apply the plugin hook so a plugin's body injection survives the
-        # first live patch — parity with _handle_concept's render path, which
-        # routes the page through ``on_concept_render``. Use ``self._plugin()``
-        # (NoOpPlugin fallback) for the same crash-safety the concept page has;
-        # the snapshot's ``plugin`` may be None when an embedder sets
-        # ``server.plugin = None`` (the test harness does exactly that).
+        # Use the concept page's canonical body transform so ready/resync is a
+        # structural no-op when source content has not changed (§7.3).
+        body_html = _render_concept_body_html(concept, bundle, mode="serve")
+        # F13: this invocation gives the plugin a BODY FRAGMENT so body
+        # injection survives a live patch. The initial-page invocation in
+        # _handle_concept receives the FULL PAGE after template assembly; the
+        # hook intentionally supports both scopes. Use ``self._plugin()``
+        # (NoOpPlugin fallback) because embedders may set server.plugin = None.
         body_html = self._plugin().on_concept_render(concept, body_html)
         backlinks = sorted({
             concept_id_to_str(link.source)
@@ -1547,6 +1544,8 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             "html": body_html,
             "raw": concept.body,
             "frontmatter": concept.frontmatter,
+            # Metadata reflects source Markdown levels. Rendered HTML levels
+            # are offset by the canonical body transform (h1→h2, etc.).
             "headings": [{"level": h.level, "text": h.text} for h in concept.headings],
             "backlinks": backlinks,
             "outgoing": outgoing,
@@ -1609,6 +1608,13 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
         name = posixpath.normpath("/" + name).lstrip("/")
         if "/" in name or ".." in name or not name:
             return self._send_text(404, "Not found", content_type="text/plain")
+        # Single explicit scope (STATIC_ASSET_NAMES): only built-in viewer
+        # asset names may be served here, whether from a bundle override or
+        # the built-ins. This closes the previous gap where the override
+        # branch served ANY file under .okf-loom/viewer/static/ regardless of
+        # whether it was a real viewer asset.
+        if not is_known_static_asset(name):
+            return self._send_text(404, f"Unknown static asset: {name}", content_type="text/plain")
         # Bundle override first — gated on the effective active-code gate
         # (security: overrides can carry arbitrary JS/HTML, same trust
         # boundary as plugins/templates). The operator must consent via
@@ -1630,11 +1636,9 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
                 body = override.read_bytes()
                 ctype = _content_type_for(name)
                 return self._send_bytes(200, body, content_type=ctype)
-        if name in list_builtin_static():
-            body = load_static(name, self.bundle).encode("utf-8")
-            ctype = _content_type_for(name)
-            return self._send_bytes(200, body, content_type=ctype)
-        return self._send_text(404, f"Unknown static asset: {name}", content_type="text/plain")
+        body = load_static(name, self.bundle).encode("utf-8")
+        ctype = _content_type_for(name)
+        return self._send_bytes(200, body, content_type=ctype)
 
     def _handle_bundle_asset(self, rel: str) -> None:
         """Serve a bundle-local media file (screenshots, diagrams, video, PDF).
@@ -1751,6 +1755,12 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             "theme": getattr(self.server, "studio_theme", "auto"),
         }
         payload = json.dumps(cfg, default=str)
+        # Asset URLs carry a content-derived ``?v=`` cache-busting query
+        # (viewer/assets.versioned_asset_url) so an edited studio.css/live.js/
+        # studio.js invalidates browser/CDN caches. The live router parses
+        # ``urlparse().path`` for routing, so the query is ignored; CSP
+        # ``'self'`` is unaffected. The version is the same digest the
+        # rendered pages emit for their assets (single contract).
         bits = [
             # CSP-safe bootstrap: a non-executable JSON data block. The
             # served CSP is ``script-src 'self' ...`` with NO 'unsafe-inline',
@@ -1761,9 +1771,9 @@ class OKFWikiHandler(BaseHTTPRequestHandler):
             # modules (live.js/studio.js) read it on boot and expose it as
             # ``window.__OKF_LOOM_STUDIO__`` for parity with the documented API.
             f'<script type="application/json" id="okf-studio-bootstrap">{payload}</script>',
-            '<link rel="stylesheet" href="/__static/studio.css">',
-            '<script type="module" src="/__static/live.js"></script>',
-            '<script type="module" src="/__static/studio.js"></script>',
+            f'<link rel="stylesheet" href="{versioned_asset_url("studio.css", "/__static", self.bundle)}">',
+            f'<script type="module" src="{versioned_asset_url("live.js", "/__static", self.bundle)}"></script>',
+            f'<script type="module" src="{versioned_asset_url("studio.js", "/__static", self.bundle)}"></script>',
         ]
         return "\n".join(bits)
 

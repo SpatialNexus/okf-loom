@@ -42,6 +42,7 @@ from .roundtrip import (
     patch_frontmatter_block,
     serialize_document_round_trip,
 )
+from .viewer.markdown import _FENCE_RE as _RENDER_FENCE_RE
 
 
 # ---------------------------------------------------------------------------
@@ -856,9 +857,53 @@ def _relative_link(source: Concept, target: Concept) -> str:
     return rel.replace(os.sep, "/")
 
 
+def _terminal_citations_appendix_start(body: str) -> int | None:
+    """Return the offset of a terminal body ``Citations`` heading, if any.
+
+    Frontmatter citations are rendered separately.  A terminal body appendix
+    is therefore omitted from canonical page and live-data HTML, so implicit
+    link additions must remain in the visible content preceding it.  Fenced
+    examples are ignored using the canonical viewer's fence grammar, so a code
+    example cannot become an invisible insertion point.
+    """
+    last_heading: tuple[int, bool] | None = None
+    offset = 0
+    fence_spans = [match.span() for match in _RENDER_FENCE_RE.finditer(body)]
+    fence_index = 0
+
+    for raw_line in body.splitlines(keepends=True):
+        while fence_index < len(fence_spans) and fence_spans[fence_index][1] <= offset:
+            fence_index += 1
+        in_rendered_fence = (
+            fence_index < len(fence_spans)
+            and fence_spans[fence_index][0] <= offset < fence_spans[fence_index][1]
+        )
+        if not in_rendered_fence:
+            heading = re.match(
+                r"^(#{1,6})\s+(.*?)(?:\s+#+)?$", raw_line.strip()
+            )
+            if heading:
+                last_heading = (
+                    offset,
+                    heading.group(2).strip().casefold() == "citations",
+                )
+        offset += len(raw_line)
+
+    if last_heading and last_heading[1]:
+        return last_heading[0]
+    return None
+
+
 def _append_to_section(body: str, section: str | None, line: str) -> str:
-    """Append ``line`` into the named ``# section`` (or end of body)."""
+    """Append ``line`` into the named ``# section`` (or visible body end)."""
     if not section:
+        citations_start = _terminal_citations_appendix_start(body)
+        if citations_start is not None:
+            prefix = body[:citations_start]
+            suffix = body[citations_start:]
+            if prefix and not prefix.endswith("\n"):
+                prefix += "\n"
+            return prefix + line + "\n" + suffix
         return body.rstrip("\n") + "\n" + line + "\n"
     pat = re.compile(
         rf"^(#*)\s*{re.escape(section)}\s*#*\s*$", re.MULTILINE

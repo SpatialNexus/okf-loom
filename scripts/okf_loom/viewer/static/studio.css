@@ -54,25 +54,24 @@
  * override here anymore. Ambient state (presence/◆N concepts/●Live) clusters
  * right, mono + quiet, separated from the actions by a thin divider. Sticky
  * to the viewport bottom so it stays visible as the reading column scrolls. */
-.okf-studio-bar--status {
-  position: sticky;
-  bottom: 0;
-  z-index: 9;
-  min-height: var(--okf-status-h);  /* now 40px (bumped in wiki.css :root): a real
-                                       toolbar, and the SAME token .okf-rail/.okf-panel
-                                       use for their bottom clearance, so they stay flush */
-  padding: 0 var(--okf-space-4);
-  gap: var(--okf-space-3);
-  background: var(--okf-bg-inset);  /* recover the original bar feel */
-  border-top: var(--okf-border-w) solid var(--okf-border);
-  border-bottom: none;
-  /* The bar is now 3 children (left group / divider / right group). The base
-   * .okf-studio-bar rule's `justify-content: space-between` would float the
-   * divider in the dead centre with the groups pinned to the edges — pack
-   * left instead, then push the right group out with its own auto margin
-   * (below) so actions+divider hug together on the left. */
-  justify-content: flex-start;
-}
+  .okf-studio-bar--status {
+    position: sticky;
+    bottom: 0;
+    z-index: 9;
+    min-height: var(--okf-status-h);
+    padding: 0 var(--okf-space-4);
+    gap: var(--okf-space-3);
+    background: var(--okf-bg-inset);
+    border-top: var(--okf-border-w) solid var(--okf-border);
+    border-bottom: none;
+    justify-content: flex-start;
+    /* Prevent ambient chips (presence/conn/statseg, all white-space:nowrap)
+     * from causing document-level horizontal overflow at narrow desktop
+     * widths (901-1024px). The bar clips internally; children keep
+     * min-width:0 so flexbox can shrink them. */
+    overflow: hidden;
+    max-width: 100vw;
+  }
 /* Round 2: push the divider (and the ambient group after it) to the right so
  * the divider sits BESIDE the ambient readouts, not hugging the actions. */
 .okf-studio-bar--status .okf-studio-bar__divider {
@@ -90,7 +89,7 @@
 .okf-studio-bar--status .okf-conn,
 .okf-studio-bar--status .okf-presence {
   font-family: var(--okf-font-mono);
-  font-size: var(--okf-text-xs);
+  font-size: var(--okf-text-sm);
 }
 /* Ambient dash stat (e.g. "◆ 30 concepts"). */
 .okf-statseg {
@@ -435,8 +434,8 @@
   background: var(--okf-accent);
   color: var(--okf-accent-on);
 }
-.okf-toast[data-tone="error"]   .okf-toast__icon { background: var(--okf-error); color: #fff; }
-.okf-toast[data-tone="success"] .okf-toast__icon { background: var(--okf-ok);    color: #fff; }
+.okf-toast[data-tone="error"]   .okf-toast__icon { background: var(--okf-error); color: var(--okf-on-error); }
+.okf-toast[data-tone="success"] .okf-toast__icon { background: var(--okf-ok);    color: var(--okf-on-ok); }
 .okf-toast__msg { flex: 1 1 auto; min-width: 0; }
 .okf-toast__close {
   font: inherit;
@@ -512,8 +511,8 @@
   outline-offset: 1px;
 }
 /* iter1 CRI-011: marker state colours now theme-aware tokens. */
-.okf-comment-marker[data-state="resolved"] { background: var(--okf-ok); color: #fff; border-color: var(--okf-ok); }
-.okf-comment-marker[data-state="claimed"]  { background: var(--okf-warn); color: #fff; border-color: var(--okf-warn); }
+.okf-comment-marker[data-state="resolved"] { background: var(--okf-ok); color: var(--okf-on-ok); border-color: var(--okf-ok); }
+.okf-comment-marker[data-state="claimed"]  { background: var(--okf-warn); color: var(--okf-on-warn); border-color: var(--okf-warn); }
 .okf-comment-marker[data-state="dismissed"] { opacity: 0.5; }
 /* A small "resolved" stub for collapsed resolved marks (no count). iter2
  * CRI2-010: 16×16 is below the 24×24 AA target but stubs were claimed to
@@ -572,6 +571,19 @@
   background: transparent;
   text-decoration: underline dotted var(--okf-fg-muted);
   text-underline-offset: 2px;
+}
+/* Stale anchor paragraph: a discrete indicator at the end of the body. */
+.okf-comment-stale-anchor {
+  margin: var(--okf-space-3) 0 0;
+  padding: var(--okf-space-1) var(--okf-space-2);
+  font-size: var(--okf-text-sm);
+  color: var(--okf-fg-muted);
+  border-top: 1px dashed var(--okf-border);
+  cursor: pointer;
+}
+.okf-comment-stale-anchor:focus-within {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 2px;
 }
 .okf-comment-mark.okf-pulse, .okf-comment-marker.okf-pulse, .okf-comment.okf-pulse {
   animation: okf-pulse-highlight 1.4s ease-out 1;
@@ -655,6 +667,14 @@
   background: var(--okf-bg-elev);
   padding: var(--okf-space-2) var(--okf-space-3);
   margin-bottom: var(--okf-space-2);
+}
+/* Jumped-to context: full outline + subtle background tint (non-color cue
+   that survives Border Off). Transient — cleared by JS after 4s or on
+   new jump/close/rerender. NOT a side-stripe/inset-left accent. */
+.okf-comment--jumped {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: -2px;
+  background: var(--okf-accent-bg);
 }
 .okf-comment[data-state="resolved"] { border-color: var(--okf-border); background: var(--okf-bg-inset); }
 /* iter1 CRI-008: claimed comments no longer use a 3px border-left stripe.
@@ -1226,7 +1246,8 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   gap: var(--okf-space-1);
   padding: var(--okf-space-2) 0;
   background: var(--okf-bg-elev);
-  border-left: var(--okf-border-w) solid var(--okf-border);
+  border-left: var(--okf-border-w) solid var(--okf-border-strong);
+  border-top: var(--okf-border-w) solid var(--okf-border);
   z-index: 8;
 }
 .okf-rail[hidden] { display: none; }
@@ -1335,8 +1356,16 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
    * carries Comments/Changes, so the panel is opened from the Command Palette. */
   .okf-rail { display: none; }
   body.okf-has-rail { padding-right: 0; }
-  .okf-panel { top: 0; right: 0; bottom: 0; z-index: 71; }
-  .okf-panel-overlay { background: rgba(15, 23, 42, 0.35); z-index: 70; } /* modal dim on mobile */
+  .okf-panel {
+    top: 0; right: 0; bottom: 0; z-index: 71;
+    width: 100vw; max-width: 100vw; max-height: 100dvh;
+    display: flex; flex-direction: column;
+  }
+  .okf-panel-overlay { background: rgba(15, 23, 42, 0.35); z-index: 70; }
+  /* Sticky header + tabs; body scrolls within the panel. */
+  .okf-panel__header { position: sticky; top: 0; z-index: 2; }
+  .okf-panel__tabs { position: sticky; top: var(--okf-status-h); z-index: 1; }
+  .okf-panel__body { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 }
 .okf-panel__header {
   display: flex;
@@ -1371,6 +1400,12 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   cursor: pointer;
 }
 .okf-panel__tab:hover { color: var(--okf-fg); }
+/* High-contrast focus outline distinct from the selected underline.
+   Visible in forced colors (outline, not border, so it survives). */
+.okf-panel__tab:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: -2px;
+}
 .okf-panel__tab[aria-selected="true"] {
   color: var(--okf-accent);
   border-bottom-color: var(--okf-accent);
@@ -1439,6 +1474,11 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
    * padding (→ ~27.6px tall) so the panel's only-by-mouse exit clears
    * the target. Matches the toast-close fix from CRI-016. */
   padding: 4px 10px;
+}
+/* High-contrast focus outline on the close button. */
+.okf-panel__close:focus-visible {
+  outline: 2px solid var(--okf-accent);
+  outline-offset: 1px;
 }
 
 /* ---- 9. Live highlight pulse (§13.2) --------------------------------- */
@@ -1521,8 +1561,7 @@ body.okf-has-rail { padding-right: var(--okf-rail-w); }
   text-align: center;
 }
 .okf-studio-fallback-banner a { color: inherit; font-weight: 600; }
-html.okf-studio-booted .okf-studio-fallback-banner { display: none; }
-[data-okf-mode="static"] .okf-studio-fallback-banner { display: none; }
+/* Visibility rules are in wiki.css (loaded on ALL surfaces including static). */
 
 /* ---- 9d. Change-list windowing sentinel (§13.7) --------------------- */
 .okf-changes__sentinel { height: 1px; }
@@ -1538,36 +1577,53 @@ html.okf-studio-booted .okf-studio-fallback-banner { display: none; }
 .okf-changes__cap-note button { font: inherit; color: var(--okf-accent); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
 
 /* ---- 10. Responsive + reduced motion --------------------------------- */
-@media (max-width: 900px) {
-  /* iter2 CRI2-001: studio bar is non-sticky on every viewport (see §1).
-   * On small screens it still wraps so all controls stay reachable, but it
-   * scrolls with the page rather than stacking sticky under the topbar. */
-  .okf-studio-bar {
-    position: static;
-    flex-wrap: wrap;
-    padding: var(--okf-space-2) var(--okf-space-3);
-    gap: var(--okf-space-2);
+  @media (max-width: 900px) {
+    /* iter2 CRI2-001: studio bar is non-sticky on every viewport (see §1).
+     * Editorial Workbench hardening: the status footer becomes an in-flow
+     * TWO-ZONE layout — action group wraps full-width on the first row,
+     * ambient group wraps on the second row, and the decorative divider is
+     * hidden so the zones read as distinct clusters. Every child has
+     * min-width:0 so no single button can force document-level overflow. */
+    .okf-studio-bar {
+      position: static;
+      flex-wrap: wrap;
+      padding: var(--okf-space-2) var(--okf-space-3);
+      gap: var(--okf-space-2);
+    }
+    .okf-studio-bar--status {
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+    }
+    .okf-studio-bar--status .okf-studio-bar__group {
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .okf-studio-bar--status .okf-studio-bar__group > * { min-width: 0; }
+    .okf-studio-bar--status .okf-studio-bar__divider { display: none; }
+    .okf-presence { max-width: 100%; }
+    .okf-view[data-okf-view="split"] {
+      /* iter2 G8 mobile fallback: stack vertically (Bundle B behaviour). The
+       * draggable divider + proportional scroll are desktop niceties; on a
+       * narrow screen the two panes flow in reading order at natural height. */
+      grid-template-columns: 1fr;
+      gap: var(--okf-space-3);
+    }
+    .okf-view[data-okf-view="split"] > .okf-page__body,
+    .okf-view[data-okf-view="split"] > .okf-source {
+      max-height: none;
+      min-height: 0;
+      overflow-y: visible;
+      padding-right: 0;
+      padding-left: 0;
+    }
+    .okf-split__divider { display: none; }
+    .okf-panel {
+      width: 100vw; top: 0; right: 0; bottom: 0;
+      z-index: 71; max-height: 100dvh;
+    }
+    .okf-comment-rail { display: none; }
   }
-  .okf-presence { max-width: 100%; }
-  .okf-view[data-okf-view="split"] {
-    /* iter2 G8 mobile fallback: stack vertically (Bundle B behaviour). The
-     * draggable divider + proportional scroll are desktop niceties; on a
-     * narrow screen the two panes flow in reading order at natural height. */
-    grid-template-columns: 1fr;
-    gap: var(--okf-space-3);
-  }
-  .okf-view[data-okf-view="split"] > .okf-page__body,
-  .okf-view[data-okf-view="split"] > .okf-source {
-    max-height: none;
-    min-height: 0;
-    overflow-y: visible;
-    padding-right: 0;
-    padding-left: 0;
-  }
-  .okf-split__divider { display: none; }
-  .okf-panel { width: 100vw; }
-  .okf-comment-rail { display: none; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .okf-pulse { animation: none !important; }

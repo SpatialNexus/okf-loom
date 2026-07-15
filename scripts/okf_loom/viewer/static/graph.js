@@ -21,18 +21,11 @@
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "okf-theme";
-
-  // Theme cycle order + button glyphs. KEEP IN SYNC with the copies in
-  // wiki.js / studio.js and render.py:_theme_button_html — this file must
-  // stand alone in the single-file viewer, which has no wiki.js.
-  var THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
-  var THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
-  // Map a returning user's retired theme choice to the nearest new theme.
-  var LEGACY_THEMES = {
-    light: "technical-light", dark: "technical-dark",
-    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
-  };
+  // Theme preference/resolution state is owned by theme.js
+  // (window.OKFLoomTheme), inlined/loaded before this file in both graph
+  // contexts (full-page view and single-file viewer). This file only READS
+  // the resolved data-theme for its canvas palette and re-syncs on the
+  // okf-loom:themeChanged event.
 
   // ---- Canvas colour constants (P2-5 iter-2) -------------------------------
   // Cytoscape canvas styles CANNOT read CSS custom properties directly, so
@@ -65,7 +58,7 @@
       select: "#0c7373",
     },
     "technical-dark": {
-      nodeText: "#e6edf3", nodeBorder: "#0f1319", bridgeBorder: "#e6edf3",
+      nodeText: "#e6edf3", nodeBorder: "#161b22", bridgeBorder: "#e6edf3",
       edge: "#3b444f", edgeLabel: "#8b949e", edgeLabelBg: "#161b22",
       select: "#2dd4bf",
     },
@@ -75,15 +68,38 @@
       select: "#0c7373",
     },
     "swiss-dark": {
-      nodeText: "#f0f2f4", nodeBorder: "#121417", bridgeBorder: "#f0f2f4",
+      nodeText: "#f0f2f4", nodeBorder: "#181b1f", bridgeBorder: "#f0f2f4",
       edge: "#f0f2f4", edgeLabel: "#9aa1a9", edgeLabelBg: "#181b1f",
       select: "#2dd4bf",
     },
   };
 
-  // Resolve the palette for the CURRENT data-theme (swiss-light fallback).
+  // Resolve the palette for the CURRENT data-theme. Tries computed CSS custom
+  // properties first (so the canvas tracks theme/modifier changes without
+  // duplicated literals); falls back to the categorical GRAPH_COLORS block.
   function graphPalette() {
     var t = document.documentElement.getAttribute("data-theme") || "swiss-light";
+    // Try computed CSS tokens first.
+    try {
+      var cs = getComputedStyle(document.documentElement);
+      var fg = cs.getPropertyValue("--okf-fg").trim();
+      var fgMuted = cs.getPropertyValue("--okf-fg-muted").trim();
+      var bgElev = cs.getPropertyValue("--okf-bg-elev").trim();
+      var borderStrong = cs.getPropertyValue("--okf-border-strong").trim();
+      var select = cs.getPropertyValue("--okf-select").trim();
+      var border = cs.getPropertyValue("--okf-border").trim();
+      if (fg && select) {
+        return {
+          nodeText: fg,
+          nodeBorder: /-dark$/.test(t) ? bgElev : fg,
+          bridgeBorder: fg,
+          edge: borderStrong || border || fg,
+          edgeLabel: fgMuted || fg,
+          edgeLabelBg: bgElev,
+          select: select,
+        };
+      }
+    } catch (e) { /* getComputedStyle may fail in some contexts */ }
     return GRAPH_COLORS[t] || GRAPH_COLORS["swiss-light"];
   }
 
@@ -102,10 +118,12 @@
     // viewers and older embedded pages).
   var MODE = (document.body && document.body.getAttribute("data-okf-mode")) || "serve";
 
-  // ---- Theme (kept here so single-file viewers without wiki.js still work)
-  var themeBtn = document.getElementById("okf-theme");
   var REDUCED_MOTION = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Centralized min-zoomed-font-size constants for desktop/mobile.
+  var DESKTOP_MIN_FONT = 6;
+  var MOBILE_MIN_FONT = 8;
 
   // Layout parameters tuned for spread. The previous default
   // ({ name: 'cose', padding: 30 }) packed nodes too tightly — users
@@ -223,16 +241,6 @@
     }
     // Fallback for any custom layout: hand back the common options.
     return common;
-  }
-
-  var onThemeApplied = null;   // registered by init() → syncLabelColour (canvas re-sync)
-  function applyTheme(t, persist) {
-    if (THEMES.indexOf(t) < 0) t = "swiss-light";
-    document.documentElement.setAttribute("data-theme", t);
-    if (persist !== false) { try { localStorage.setItem(STORAGE_KEY, t); } catch (e) {} }
-    // (Round 2) The trigger is the Appearance popover ("Aa ▾") — no glyph to
-    // sync. Any theme change recolours the canvas through onThemeApplied.
-    if (onThemeApplied) onThemeApplied();
   }
 
   // ---- Luminance-aware chip foreground (P0-4 / P2-23) ------------------
@@ -355,108 +363,6 @@
     function lin(v) { return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   }
-  // Swiss-first OS resolution — IDENTICAL to wiki.js resolveAuto, so the graph /
-  // single-file viewer resolves the SAME theme as the reading pages (no legacy
-  // "light"/"dark" names, no INITIAL_THEME divergence). Consistency fix.
-  function resolveAutoTheme() {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return dark ? "swiss-dark" : "swiss-light";
-  }
-  // Honour a saved preference (migrating a retired name); else follow OS within
-  // the Swiss family — same logic as wiki.js currentTheme/resolveAuto boot.
-  try {
-    var saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && LEGACY_THEMES[saved]) saved = LEGACY_THEMES[saved];
-    if (saved && THEMES.indexOf(saved) >= 0) applyTheme(saved);
-    else applyTheme(resolveAutoTheme(), false);
-  } catch (e) { applyTheme("swiss-light"); }
-  // ---- Appearance menu (Round 2 §5.3) --------------------------------
-  // Same popover as wiki.js, wired here for the graph + single-file viewers
-  // (graph.js is inlined into single_file). Reuses graph's applyTheme (which
-  // drives the canvas re-sync via onThemeApplied). contrast/border apply
-  // post-paint and do NOT reach the Cytoscape canvas (documented P2 limit).
-  var CONTRAST_KEY = "okf-contrast", BORDER_KEY = "okf-border";
-  var apMenu = document.getElementById("okf-appearance-menu");
-  var apWrap = themeBtn && themeBtn.closest ? themeBtn.closest(".okf-appearance") : null;
-
-  function applyModifier(kind, val, persist) {
-    var attr = kind === "contrast" ? "data-okf-contrast" : "data-okf-border";
-    var key = kind === "contrast" ? CONTRAST_KEY : BORDER_KEY;
-    var def = kind === "contrast" ? "high" : "on";
-    if (val && val !== def) document.documentElement.setAttribute(attr, val);
-    else document.documentElement.removeAttribute(attr);
-    if (persist !== false) {
-      try {
-        if (val && val !== def) localStorage.setItem(key, val);
-        else localStorage.removeItem(key);
-      } catch (e) {}
-    }
-  }
-  try { applyModifier("contrast", localStorage.getItem(CONTRAST_KEY), false); } catch (e) {}
-  try { applyModifier("border", localStorage.getItem(BORDER_KEY), false); } catch (e) {}
-
-  function apFamily() {
-    return (document.documentElement.getAttribute("data-theme") || "swiss-light")
-      .indexOf("technical") === 0 ? "technical" : "swiss";
-  }
-  function apMode() {
-    var s = null; try { s = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-    if (s && LEGACY_THEMES[s]) s = LEGACY_THEMES[s];
-    if (!s || THEMES.indexOf(s) < 0) return "auto";
-    return s.indexOf("dark") >= 0 ? "dark" : "light";
-  }
-  function apAutoFamily(fam) {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    return fam + (dark ? "-dark" : "-light");
-  }
-  function apSetFamily(fam) {
-    if (apMode() === "auto") applyTheme(apAutoFamily(fam), false);
-    else applyTheme(fam + "-" + apMode());
-  }
-  function apSetMode(mode) {
-    if (mode === "auto") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-      applyTheme(apAutoFamily(apFamily()), false);
-    } else applyTheme(apFamily() + "-" + mode);
-  }
-  function apReflect() {
-    if (!apMenu) return;
-    var st = {
-      family: apFamily(), mode: apMode(),
-      contrast: document.documentElement.getAttribute("data-okf-contrast") || "high",
-      border: document.documentElement.getAttribute("data-okf-border") || "on",
-    };
-    var opts = apMenu.querySelectorAll(".okf-appearance__opt"), i, o;
-    for (i = 0; i < opts.length; i++) {
-      o = opts[i];
-      o.setAttribute("aria-checked",
-        st[o.getAttribute("data-okf-set")] === o.getAttribute("data-okf-val") ? "true" : "false");
-    }
-  }
-  function apOpen() { if (apMenu) { apMenu.hidden = false; if (themeBtn) themeBtn.setAttribute("aria-expanded", "true"); apReflect(); } }
-  function apClose() { if (apMenu) { apMenu.hidden = true; if (themeBtn) themeBtn.setAttribute("aria-expanded", "false"); } }
-
-  if (themeBtn) themeBtn.addEventListener("click", function (e) {
-    e.stopPropagation();
-    if (apMenu && apMenu.hidden) apOpen(); else apClose();
-  });
-  if (apMenu) apMenu.addEventListener("click", function (e) {
-    var opt = e.target && e.target.closest ? e.target.closest(".okf-appearance__opt") : null;
-    if (!opt) return;
-    var k = opt.getAttribute("data-okf-set"), v = opt.getAttribute("data-okf-val");
-    if (k === "family") apSetFamily(v);
-    else if (k === "mode") apSetMode(v);
-    else applyModifier(k, v);
-    apReflect();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && apMenu && !apMenu.hidden) { apClose(); if (themeBtn) themeBtn.focus(); }
-  });
-  document.addEventListener("click", function (e) {
-    if (apMenu && !apMenu.hidden && apWrap && !apWrap.contains(e.target)) apClose();
-  });
-  apReflect();
-
   // ---- Bundle acquisition ------------------------------------------------
   function acquireBundle() {
     if (window.BUNDLE) return Promise.resolve(window.BUNDLE);
@@ -494,6 +400,27 @@
   }
 
   function init(bundle) {
+    // CRI2-006 hardening: graph-internal readiness marks (DIAGNOSTIC/TEST-ONLY,
+    // not a public API). CSP-safe (no inline script — this runs inside the
+    // 'self'-served graph.js). These let the browser LOD proof measure the
+    // OWNED graph-init workload (init-start -> first-frame) with
+    // performance.now() timestamps captured INSIDE the page, excluding
+    // navigation, CDN load, and Playwright controller scheduling that the old
+    // Python wall-clock proof (goto -> selector-visible) could not isolate.
+    // init-start fires here because acquireBundle() has already resolved
+    // (window.BUNDLE is synchronous) and the guard below confirms the Cytoscape
+    // library is loaded — so page navigation and resource timing are already
+    // complete before this mark. Field shape may change with the implementation.
+    var _now = (typeof performance !== "undefined" && typeof performance.now === "function")
+      ? function () { return performance.now(); }
+      : function () { return Date.now(); };
+    var lodMarks = (window.__okfGraphLodMarks = {
+      initStart: _now(),
+      lodReady: null,
+      firstFrame: null,
+      nodeCount: null,
+      totalNodeCount: null,
+    });
     if (typeof window.cytoscape !== "function") {
       showLoadError("Cytoscape.js failed to load (CDN unavailable?). " +
         "Reopen with network access or see config option {\"cdn\": false}.");
@@ -1077,11 +1004,12 @@
             "text-margin-y": 4,
             "text-wrap": "wrap",
             "text-max-width": 110,
-            // Review feedback: a soft label plate keeps node names legible over
-            // edges and neighbouring nodes (reviewer blocker 1 collisions); the
-            // plate is a touch more opaque (0.72→0.85) so the bolder text stays
-            // crisp over edges at high spread. Padding stays 2 so the plate does
-            // not enlarge the label footprint at the compact default.
+            // Progressive label disclosure: base text-opacity is 0 (labels
+            // hidden). The .okf-label-on class (added by JS to top-degree
+            // visible nodes) and contextual states (selected, hovered,
+            // focused, path, bridge) set text-opacity to 1. This keeps the
+            // initial desktop Map readable while retaining all data.
+            "text-opacity": 0,
             "text-background-color": GRAPH_COLORS["technical-light"].edgeLabelBg,
             "text-background-opacity": 0.85,
             "text-background-padding": 2,
@@ -1094,8 +1022,15 @@
         },
         {
           selector: "node:selected",
-          style: { "border-width": 3, "border-color": GRAPH_COLORS["technical-light"].select },
+          style: { "border-width": 3, "border-color": GRAPH_COLORS["technical-light"].select, "text-opacity": 1 },
         },
+        // Contextual label disclosure: selected, hovered, focused, path,
+        // bridge, and high-signal (top-degree) nodes show labels.
+        { selector: "node.okf-hover", style: { "text-opacity": 1 } },
+        { selector: "node.okf-focus-root", style: { "text-opacity": 1 } },
+        { selector: "node.okf-path", style: { "text-opacity": 1 } },
+        { selector: "node.okf-bridge", style: { "text-opacity": 1 } },
+        { selector: "node.okf-label-on", style: { "text-opacity": 1 } },
         {
           selector: "edge",
           style: {
@@ -1103,8 +1038,8 @@
             // Signal "Primary signal" + boost controls compute. mapData keeps
             // the mapping in the stylesheet so .dim / :selected class selectors
             // still override (an inline ele.style() bypass would not).
-            "width": "mapData(weight, 0, 1, 1.2, 4.8)",
-            "opacity": "mapData(weight, 0, 1, 0.5, 1)",
+            "width": "mapData(weight, 0, 1, 1, 4)",
+            "opacity": "mapData(weight, 0, 1, 0.3, 0.8)",
             "line-color": GRAPH_COLORS["technical-light"].edge,
             "target-arrow-color": GRAPH_COLORS["technical-light"].edge,
             "target-arrow-shape": "triangle",
@@ -1253,7 +1188,9 @@
     //   block (mirrors wiki.css theme tokens). Selection border + edge
     //   selection line/arrow are also re-synced here so a theme change
     //   updates them to the active theme's --okf-select value.
+    var _syncCount = 0;
     function syncLabelColour() {
+      _syncCount++;
       var pal = graphPalette();
       cy.style().selector("node").style("color", pal.nodeText).update();
       cy.style().selector("node").style("border-color", pal.nodeBorder).update();
@@ -1265,39 +1202,68 @@
       cy.style().selector("node:selected").style("border-color", pal.select).update();
       cy.style().selector("edge:selected").style("line-color", pal.select).update();
       cy.style().selector("edge:selected").style("target-arrow-color", pal.select).update();
+      // Resync path-node, path-edge, and focus/bridge cues from the CURRENT
+      // palette (they were initialized with technical-light literals and
+      // must follow theme/modifier changes).
+      cy.style().selector("node.okf-path").style("border-color", pal.select).update();
+      cy.style().selector("node.okf-path").style("underlay-color", pal.select).update();
+      cy.style().selector("edge.okf-path").style("line-color", pal.select).update();
+      cy.style().selector("edge.okf-path").style("target-arrow-color", pal.select).update();
       syncBridgeColour();
     }
     syncLabelColour();
-    // (Round 2) Any applyTheme() recolours the canvas via this hook — so a
-    // theme change from the Appearance menu (or OS) re-syncs, even though the
-    // trigger click now opens the popover instead of cycling.
-    onThemeApplied = syncLabelColour;
-    // P3-11: keep Cytoscape label colours in sync with OS colour-scheme.
-    if (window.matchMedia) {
-      var colourSchemeMq = window.matchMedia("(prefers-color-scheme: dark)");
-      var colourSchemeHandler = function (e) {
-        // Only follow OS pref when the user has not explicitly chosen.
-        try {
-          var saved = localStorage.getItem(STORAGE_KEY);
-          if (saved && THEMES.indexOf(saved) >= 0) return;
-        } catch (err) {}
-        applyTheme(resolveAutoTheme());
-        syncLabelColour();
-      };
-      if (colourSchemeMq.addEventListener) {
-        colourSchemeMq.addEventListener("change", colourSchemeHandler);
-      } else if (colourSchemeMq.addListener) {
-        colourSchemeMq.addListener(colourSchemeHandler);
-      }
-    }
+    // Every ACTUAL resolved-theme change (Appearance menu, studio palette,
+    // or an OS scheme change while Auto — all resolved by theme.js, which
+    // never persists the Auto result, so consecutive OS flips keep landing
+    // here) recolours the canvas from the new data-theme.
+    window.addEventListener("okf-loom:themeChanged", syncLabelColour);
 
-    // Legend overlay. Rebuilt by updateLegend() so it reflects the
-    // active "Colour by" mode (type palette, per-group colours, or an
-    // importance ramp) — never a stale key that disagrees with the canvas.
+    // Also re-sync canvas palette when contrast/border modifiers change.
+    // Theme transitions are owned by okf-loom:themeChanged above — NOT this
+    // observer (avoids duplicate sync on data-theme mutation).
+    var _modifierObserver = new MutationObserver(function () { syncLabelColour(); });
+    _modifierObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-okf-contrast", "data-okf-border"],
+    });
+
+    // Legend. Rebuilt by updateLegend() so it reflects the active "Colour by"
+    // mode. Lives in the RIGHT DETAIL PANE as a native <details>/<summary>.
+    // Initial default: open on desktop (>=901px), closed on mobile. After
+    // load, breakpoint transitions follow the default UNLESS the user has
+    // explicitly toggled the legend — their choice is preserved.
+    var legendHost = document.createElement("details");
+    legendHost.className = "okf-graph-legend";
+    legendHost.setAttribute("aria-label", "Graph colour key");
+    var legendSummary = document.createElement("summary");
+    legendSummary.textContent = "Colour key";
+    legendHost.appendChild(legendSummary);
     var legend = document.createElement("div");
-    legend.className = "okf-graph-legend";
-    legend.setAttribute("aria-label", "Graph colour key");
-    container.appendChild(legend);
+    legend.className = "okf-graph-legend__body";
+    legendHost.appendChild(legend);
+    // Initial default follows breakpoint.
+    var _legendUserToggled = false;
+    if (!window.matchMedia("(max-width: 900px)").matches) legendHost.setAttribute("open", "");
+    // Track explicit user toggles via summary CLICK (not the toggle event,
+    // which also fires for programmatic attribute changes and can't be
+    // reliably distinguished from user actions in async dispatch).
+    legendSummary.addEventListener("click", function () {
+      _legendUserToggled = true;
+    });
+    // Breakpoint transition: if the user hasn't explicitly toggled, follow the
+    // breakpoint default (open desktop, closed mobile).
+    var _legendMq = window.matchMedia("(max-width: 900px)");
+    var _legendBpHandler = function (e) {
+      if (_legendUserToggled) return;
+      if (e.matches) legendHost.removeAttribute("open");
+      else legendHost.setAttribute("open", "");
+    };
+    if (_legendMq.addEventListener) _legendMq.addEventListener("change", _legendBpHandler);
+    else if (_legendMq.addListener) _legendMq.addListener(_legendBpHandler);
+    // Append to the detail pane (right panel), after signal controls.
+    var detailEl = document.getElementById("okf-detail");
+    if (detailEl) detailEl.appendChild(legendHost);
+    else container.appendChild(legendHost); // fallback (single-file without detail pane)
     function legendRow(swatchBg, text) {
       var item = document.createElement("div");
       item.className = "okf-graph-legend__item";
@@ -1313,14 +1279,20 @@
     // type's visibility, alt-click solos it (alt-click again shows all).
     // State lives in controlState.hiddenTypes; applyFilters consumes it.
     function legendTypeChip(swatchBg, t) {
-      var item = legendRow(swatchBg, t);
-      item.classList.add("okf-graph-legend__item--chip");
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "okf-graph-legend__item okf-graph-legend__item--chip";
       var off = !!controlState.hiddenTypes[t];
       item.classList.toggle("okf-graph-legend__item--off", off);
-      item.setAttribute("role", "button");
-      item.setAttribute("tabindex", "0");
       item.setAttribute("aria-pressed", String(!off));
       item.title = "Click: show/hide " + t + " · Alt-click: only " + t;
+      var sw = document.createElement("span");
+      sw.className = "okf-graph-legend__swatch";
+      sw.style.background = swatchBg;
+      sw.setAttribute("aria-hidden", "true");
+      var label = document.createElement("span");
+      label.textContent = t;
+      item.appendChild(sw); item.appendChild(label);
       function toggle(alt) {
         var ht = controlState.hiddenTypes;
         if (alt) {
@@ -1338,9 +1310,6 @@
         updateStatus();
       }
       item.addEventListener("click", function (e) { toggle(e.altKey); });
-      item.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e.altKey); }
-      });
       return item;
     }
     // A legend row whose swatch is a coloured line segment (for edge keys),
@@ -1518,6 +1487,31 @@
       refreshLodPill();
     }
     refreshLodPill();
+    // LOD readiness: the capped Cytoscape collection + LOD pill are ready.
+    // nodeCount proves the initial collection was capped (100 for a 500-node
+    // bundle), not the full set — the test asserts this directly. The delayed
+    // initial layout (scheduleLayout's 220ms timer, fired later by applyLens)
+    // runs AFTER the first-frame rAF below fires, so it cannot inflate the
+    // owned init->frame metric or force 500 nodes before Show all.
+    lodMarks.lodReady = _now();
+    lodMarks.nodeCount = cy.nodes().length;
+    lodMarks.totalNodeCount = totalNodeCount;
+    // First paint (paint-crossing signal): the FIRST requestAnimationFrame
+    // callback runs BEFORE the paint/composite of that frame, so a timestamp
+    // taken there is still pre-paint. To prove the render loop actually
+    // crossed the paint boundary, the first rAF schedules a SECOND rAF and
+    // records the post-first-paint timestamp in its callback. rAF is the
+    // render-sync primitive, NOT a timer/sleep — each callback fires once on
+    // the next frame, so the two-step chain captures the real owned
+    // first-paint workload without polling or retries. Monotonicity holds:
+    // initStart <= lodReady <= firstPaint.
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { lodMarks.firstFrame = _now(); });
+      });
+    } else {
+      lodMarks.firstFrame = lodMarks.lodReady;
+    }
 
     // P1-4 / P2-2 (iter-1): keyboard-accessible node index. Populates the
     // <details class="okf-node-index"> overlay with one <button> per node,
@@ -1525,6 +1519,101 @@
     // - the same handler Cytoscape's tap uses - so keyboard users get full
     // graph access (WCAG 2.1.1).
     buildNodeIndex(bundle);
+
+    // ---- Mobile list-first graph experience --------------------------------
+    // On <=430px, reparent the node-index <details> from the canvas overlay
+    // into normal flow BEFORE the graph section, open it by default, and add
+    // an "Explore interactive map" button. On desktop (>=431px), restore the
+    // node-index to its canvas overlay position and collapsed state.
+    // Idempotent: re-inserts in [index, explore, graph] order every time.
+    // Lifecycle: a single disposeGraph() removes the matchMedia listener,
+    // the MutationObserver, and the pagehide handler exactly once.
+    var _nodeIndexEl = container.querySelector(".okf-node-index");
+    var _nodeIndexDesktopParent = _nodeIndexEl ? _nodeIndexEl.parentElement : null;
+    var _mobileExploreBtn = null;
+    var _mobileGraphMq = window.matchMedia("(max-width: 430px)");
+    var _mobileGraphListenerActive = false;
+    var _graphDisposed = false;
+
+    function _applyMobileNodeIndex(isMobile) {
+      if (!_nodeIndexEl || _graphDisposed) return;
+      if (isMobile) {
+        // Idempotent: always insert in [index, explore, graph] order.
+        container.parentNode.insertBefore(_nodeIndexEl, container);
+        _nodeIndexEl.setAttribute("open", "");
+        _nodeIndexEl.classList.add("okf-node-index--mobile");
+        // Create Explore button once.
+        if (!_mobileExploreBtn) {
+          _mobileExploreBtn = document.createElement("button");
+          _mobileExploreBtn.type = "button";
+          _mobileExploreBtn.className = "okf-studiobtn okf-graph-explore-map";
+          _mobileExploreBtn.textContent = "Explore interactive map";
+          _mobileExploreBtn.setAttribute("aria-label", "Open the interactive graph canvas");
+          _mobileExploreBtn.addEventListener("click", function () {
+            _nodeIndexEl.removeAttribute("open");
+            // Use 'auto' under reduced-motion, 'smooth' otherwise.
+            var behavior = REDUCED_MOTION ? "auto" : "smooth";
+            container.scrollIntoView({ behavior: behavior, block: "start" });
+            // Focus the graph container (now tabindex=-1).
+            try { container.focus({ preventScroll: true }); } catch(e) {}
+            // Fit after a frame so scroll/layout settles.
+            (window.requestAnimationFrame || function(fn) { setTimeout(fn, 16); })(function() {
+              overlayAwareFit();
+              try { cy.style().selector("node").style("min-zoomed-font-size", MOBILE_MIN_FONT).update(); } catch(e) {}
+            });
+          });
+        }
+        // Ensure explore button is after index, before graph.
+        container.parentNode.insertBefore(_mobileExploreBtn, container);
+        _mobileExploreBtn.hidden = false;
+        try { cy.style().selector("node").style("min-zoomed-font-size", MOBILE_MIN_FONT).update(); } catch(e) {}
+      } else {
+        // Desktop: restore to canvas overlay.
+        if (_nodeIndexEl.parentElement !== _nodeIndexDesktopParent && _nodeIndexDesktopParent) {
+          _nodeIndexDesktopParent.appendChild(_nodeIndexEl);
+        }
+        _nodeIndexEl.removeAttribute("open");
+        _nodeIndexEl.classList.remove("okf-node-index--mobile");
+        if (_mobileExploreBtn) _mobileExploreBtn.hidden = true;
+        try { cy.style().selector("node").style("min-zoomed-font-size", DESKTOP_MIN_FONT).update(); } catch(e) {}
+      }
+    }
+    _applyMobileNodeIndex(_mobileGraphMq.matches);
+    var _mobileGraphBpHandler = function (e) { _applyMobileNodeIndex(e.matches); };
+    if (_mobileGraphMq.addEventListener) {
+      _mobileGraphMq.addEventListener("change", _mobileGraphBpHandler);
+      _mobileGraphListenerActive = true;
+    } else if (_mobileGraphMq.addListener) {
+      _mobileGraphMq.addListener(_mobileGraphBpHandler);
+      _mobileGraphListenerActive = true;
+    }
+
+    // Lifecycle disposal: removes matchMedia listener, disconnect observers,
+    // and removes the pagehide listener — all exactly once (idempotent via
+    // _graphDisposed flag). Survives removal of the entire route subtree
+    // (observes documentElement with subtree:true).
+    var _pageHideHandler = function () { disposeGraph(); };
+    function disposeGraph() {
+      if (_graphDisposed) return;
+      _graphDisposed = true;
+      if (_mobileGraphListenerActive) {
+        if (_mobileGraphMq.removeEventListener) _mobileGraphMq.removeEventListener("change", _mobileGraphBpHandler);
+        else if (_mobileGraphMq.removeListener) _mobileGraphMq.removeListener(_mobileGraphBpHandler);
+        _mobileGraphListenerActive = false;
+      }
+      if (_bodyObserver) { _bodyObserver.disconnect(); _bodyObserver = null; }
+      if (_modifierObserver) { _modifierObserver.disconnect(); _modifierObserver = null; }
+      window.removeEventListener("pagehide", _pageHideHandler);
+    }
+    // Observe documentElement subtree so removing #okf-main (or any ancestor)
+    // triggers disposal even if the container's immediate parent is gone.
+    var _bodyObserver = new MutationObserver(function () {
+      if (_graphDisposed) return;
+      if (!document.contains(container)) disposeGraph();
+    });
+    _bodyObserver.observe(document.documentElement, { childList: true, subtree: true });
+    // Also clean up on pagehide (SPA navigation, browser back/forward).
+    window.addEventListener("pagehide", _pageHideHandler);
 
     // ====================================================================
     // Signal controls — apply layer (style / filter / layout / status)
@@ -1561,6 +1650,11 @@
           // Phase 3: degree-zero concepts carry the "not yet linked" cue.
           n.toggleClass("okf-orphan", n.degree(false) === 0);
         });
+        // Progressive label disclosure is recomputed from visible nodes by
+        // _recomputeProgressiveLabels (called after applyFilters). This
+        // inline computation in applyVisualEncoding is a fallback for the
+        // initial render before any filter has been applied.
+        _recomputeProgressiveLabels();
         cy.edges().forEach(function (e) {
           e.data("weight", edgeWeight(e.id()));
           var cross = controlState.groupBy !== "none" && groupOf[e.source().id()] !== groupOf[e.target().id()];
@@ -1626,6 +1720,28 @@
     // ONE combined filter pass: search + type + focus-neighbourhood +
     // minimum-signal threshold, all expressed as `.dim`. Replaces the old
     // independent handlers that each cleared the others' dim state.
+    // Recompute progressive label disclosure from currently visible (non-dimmed)
+    // nodes. Called after applyFilters and from applyVisualEncoding. Determines
+    // the top-N by degree (tie-break: stable id) and marks them okf-label-on.
+    // Guarantees at least one label whenever visible nodes exist.
+    function _recomputeProgressiveLabels() {
+      var visibleNodes = cy.nodes().filter(function(n) { return !n.hasClass("dim"); });
+      cy.nodes().removeClass("okf-label-on");
+      if (!visibleNodes.length) return;
+      var degList = visibleNodes.map(function (n) {
+        return { id: n.id(), deg: n.degree(false) };
+      }).sort(function (a, b) {
+        if (b.deg !== a.deg) return b.deg - a.deg;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+      var labelCount = Math.min(8, Math.max(1, Math.floor(degList.length / 3)));
+      var labelIds = {};
+      for (var i = 0; i < labelCount && i < degList.length; i++) labelIds[degList[i].id] = true;
+      visibleNodes.forEach(function (n) {
+        if (labelIds[n.id()]) n.addClass("okf-label-on");
+      });
+    }
+
     function applyFilters() {
       var q = controlState.search, ty = controlState.type;
       var thresh = MIN_THRESH[controlState.minLevel] || 0;
@@ -1658,6 +1774,10 @@
           if (fr && fr.length) fr.addClass("okf-focus-root");
         }
       });
+      // Recompute progressive labels from the now-visible (non-dimmed) set
+      // so search/type/focus filters always leave at least one orientation
+      // label on the remaining visible nodes.
+      _recomputeProgressiveLabels();
     }
 
     // Debounced, stale-safe layout rerun. The latest control values always
@@ -1866,7 +1986,7 @@
     // never re-position or re-fit after a newer one started.
     // layoutStats is exposed via window.__okfLoomGraph for durable async proof.
     var runningLayout = null, layoutTimer = null, layoutSeq = 0, lastAppliedSeq = 0;
-    var layoutStats = { starts: 0, applied: 0, skippedStale: 0, lastAppliedSeq: 0 };
+    var layoutStats = { starts: 0, applied: 0, skippedStale: 0, lastAppliedSeq: 0, lastStartedNodeCount: null };
 
     // Apply a layout's settle result exactly ONCE, and only if it is still the
     // current layout. Stale (superseded) completions are counted + dropped.
@@ -1888,6 +2008,12 @@
       var mySeq = ++layoutSeq;
       if (runningLayout) { try { runningLayout.stop(); } catch (e) {} }
       layoutStats.starts++;
+      // Capture the collection size SYNCHRONOUSLY at layout start (before
+      // creating/running the layout) so the LOD proof can assert the EXACT
+      // node count this layout ran on, independent of any later mutation
+      // (e.g. a subsequent Show all). Diagnostic/test-only snapshot; it does
+      // not influence the layout algorithm, its thresholds, or its result.
+      layoutStats.lastStartedNodeCount = cy.nodes().length;
       var l = cy.layout(layoutOpts(currentLayoutName,
         Object.assign({ animate: false, randomize: !!randomize, fit: false }, layoutTuning(controlState))));
       runningLayout = l;
@@ -2722,12 +2848,19 @@
     (function buildZoomCluster() {
       var wrap = document.createElement("div");
       wrap.className = "okf-graph-zoom";
-      function zbtn(label, title, fn) {
+      // Inline SVG icons for zoom/action buttons (deterministic, not font-dependent).
+      var ZOOM_SVG = {
+        plus: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+        minus: '<path d="M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+        fit: '<path d="M3 3h4M3 3v4M13 3h-4M13 3v4M3 13h4M3 13v-4M13 13h-4M13 13v-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+        rerun: '<path d="M4 8a4 4 0 0 1 7-2.6M12 2v3.5h-3.5M12 8a4 4 0 0 1-7 2.6M4 14v-3.5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+      };
+      function zbtn(iconName, title, fn) {
         var b = document.createElement("button");
         b.type = "button";
-        b.textContent = label;
         b.title = title;
         b.setAttribute("aria-label", title);
+        b.innerHTML = '<svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;pointer-events:none">' + (ZOOM_SVG[iconName] || '') + '</svg>';
         b.addEventListener("click", fn);
         wrap.appendChild(b);
         return b;
@@ -2737,10 +2870,10 @@
         cy.zoom({ level: Math.min(MAX_ZOOM, Math.max(0.06, z)),
                   renderedPosition: { x: container.clientWidth / 2, y: container.clientHeight / 2 } });
       }
-      zbtn("+", "Zoom in", function () { zoomBy(1.3); });
-      zbtn("−", "Zoom out", function () { zoomBy(1 / 1.3); });
-      zbtn("⤢", "Fit graph (f)", function () { overlayAwareFit(); });
-      zbtn("↻", "Re-run layout", function () { runLayoutNow(true); });
+      zbtn("plus", "Zoom in", function () { zoomBy(1.3); });
+      zbtn("minus", "Zoom out", function () { zoomBy(1 / 1.3); });
+      zbtn("fit", "Fit graph (f)", function () { overlayAwareFit(); });
+      zbtn("rerun", "Re-run layout", function () { runLayoutNow(true); });
       container.appendChild(wrap);
     })();
 
@@ -3307,7 +3440,9 @@
       var idx = 0;
       // Remember what had focus so the tour can restore it on close (a11y:
       // dialogs must move focus in on open and hand it back on dismiss).
-      var previousFocus = document.activeElement;
+      // Captured at ACTIVATION (see activateTour) — after any deferred wait
+      // — so finish() hands focus back to whoever truly owned it then.
+      var previousFocus = null;
       var card = document.createElement("div");
       card.className = "okf-graph-tour";
       card.setAttribute("role", "dialog");
@@ -3352,11 +3487,33 @@
           catch (e) { try { target.focus(); } catch (e2) {} }
         }
       }
+      var finished = false;
       function finish() {
+        if (finished) return;
+        finished = true;
         try { window.localStorage.setItem(KEY, "1"); } catch (e) {}
+        // Authoritative bookkeeping: while mounted the tour is a registered
+        // overlay (see activateTour), so release its slot on dismiss BEFORE the
+        // card is detached. The depth-0 notify this fires has no active defer
+        // subscriber (that subscription was released when the tour activated),
+        // so it can never re-trigger activation — and the idempotent guard
+        // above makes finish() safe from any double-invocation path.
+        if (canTrack) { try { overlayStack.remove(tourOverlayEntry); } catch (e) {} }
         card.removeEventListener("keydown", onKey);
         if (card.parentNode) card.parentNode.removeChild(card);
         restoreFocus();
+      }
+      // Claim focus INSIDE the still-mounted tour for the stack/top-owner
+      // focus-restoration protocol: when a higher popover (e.g. Appearance)
+      // closes above this active modal tour, focus must land inside the tour
+      // (its focus trap) rather than on the popover's trigger left behind it.
+      // Mirrors the activation focus-in (the dialog's primary action). Returns
+      // true when the tour claimed focus, false when it cannot (finished or
+      // unmounted) so the caller falls back to its own trigger restoration.
+      function claimTourFocus() {
+        if (finished || !card.parentNode) return false;
+        try { next.focus({ preventScroll: true }); return true; }
+        catch (e) { try { next.focus(); return true; } catch (e2) { return false; } }
       }
       function render() {
         var s = steps[idx];
@@ -3393,13 +3550,113 @@
       });
       skip.addEventListener("click", finish);
       card.addEventListener("keydown", onKey);
-      render();
-      container.appendChild(card);
-      // Move focus into the dialog (the primary action) so keyboard + screen
-      // reader users land inside the trapped tour rather than behind it.
-      try { next.focus({ preventScroll: true }); }
-      catch (e) { try { next.focus(); } catch (e2) {} }
-    })();
+
+      // ---- Activation is gated on focus ownership -----------------------
+      // The first-visit tour initializes from graph.js's async data fetch
+      // (acquireBundle().then(init)), which can resolve AFTER the user has
+      // already opened a transient surface like the Appearance popover. If
+      // the tour appended + focused itself then, it would steal focus from
+      // the open popover and trip theme.js's (correct) focus-exit close,
+      // slamming the menu shut mid-interaction. So we do NOT take focus
+      // while a user-owned overlay is open: the shared overlay stack is the
+      // single authority on who owns focus. The tour activates immediately
+      // when nobody is open, otherwise it defers and resumes exactly once
+      // when the stack empties (the user intentionally closed their popover).
+        var overlayStack = window.OKFOverlayStack;
+        var canTrack = !!(overlayStack && typeof overlayStack.depth === "function");
+        // While mounted, the tour IS an overlay: register it so the shared
+        // Escape layer treats it as the topmost surface — one Escape closes
+        // only the tour, and if a user-owned popover opens on top, THAT closes
+        // first (one-Escape-topmost semantics). `close` routes back into
+        // finish(), preserving the existing role=dialog, aria-modal, focus
+        // trap, Escape-only-tour, and focus-restore behaviour. The card's own
+        // onKey Escape handler remains as the fallback when the shared stack is
+        // unavailable. `restoreFocus` opts the tour INTO the stack/top-owner
+        // focus-restoration protocol: when a higher popover closes above us it
+        // hands focus INSIDE this active modal instead of to its own trigger
+        // (which would sit behind the still-open tour and bypass its trap).
+        var tourOverlayEntry = canTrack ? {
+          close: function () { finish(); },
+          restoreFocus: claimTourFocus
+        } : null;
+        var activated = false;
+
+        function activateTour() {
+          if (activated) return;
+          // Re-check ownership IMMEDIATELY before mounting. The deferred path
+          // schedules this call via a microtask on the depth-0 notify; another
+          // overlay may have opened in that window. The shared stack is the
+          // single authority: if it is non-empty now, do NOT steal focus —
+          // re-defer and wait for the next depth-0 transition. No timers, no
+          // polling: this is a synchronous state check at the instant of
+          // activation.
+          if (canTrack && overlayStack.depth() > 0) {
+            startDeferring();
+            return;
+          }
+          activated = true;
+          // Capture the real focus owner the instant the tour opens, so
+          // finish() restores focus to it (not to a stale pre-init element).
+          previousFocus = document.activeElement;
+          render();
+          container.appendChild(card);
+          // Register as the active overlay so Escape/focus bookkeeping is
+          // authoritative for the lifetime of the tour.
+          if (canTrack) { try { overlayStack.push(tourOverlayEntry); } catch (e) {} }
+          // Move focus into the dialog (the primary action) so keyboard + screen
+          // reader users land inside the trapped tour rather than behind it.
+          try { next.focus({ preventScroll: true }); }
+          catch (e) { try { next.focus(); } catch (e2) {} }
+        }
+
+        // Defer until every user-owned overlay has closed. subscribe fires once
+        // immediately with the current depth (>0 here → no-op) and then on every
+        // change. On the transition to depth 0 we unsubscribe and schedule
+        // activation as a microtask so the closing overlay's OWN focus restore
+        // (e.g. the Appearance trigger on Escape) completes first; the tour
+        // then takes focus as the final, intentional move. queueMicrotask runs
+        // after the current task unwinds and before paint — deterministic, NOT
+        // a timer/sleep. activateTour() re-checks depth before mounting, so an
+        // overlay that opens between the depth-0 notify and the microtask keeps
+        // the tour deferred (and re-subscribes for the next depth-0). Each call
+        // creates exactly one subscriber that unregisters itself before
+        // scheduling, so re-defer never leaks or double-activates.
+        function startDeferring() {
+          if (!canTrack || typeof overlayStack.subscribe !== "function") return;
+          var unsubscribe = overlayStack.subscribe(function (depth) {
+            if (depth > 0) return;
+            if (typeof unsubscribe === "function") { try { unsubscribe(); } catch (e) {} unsubscribe = null; }
+            // Microtask scheduling ONLY — deterministic, pre-paint, NEVER a
+            // timer/sleep/retry. Prefer the native queueMicrotask primitive;
+            // fall back to a resolved Promise (also a microtask) on engines
+            // where queueMicrotask is absent. Either way activateTour runs in
+            // the current task's microtask queue, after the closing overlay's
+            // own focus restore and before paint — never a setTimeout
+            // macrotask. activateTour() re-checks depth before mounting, so an
+            // overlay that opens between the depth-0 notify and the microtask
+            // keeps the tour deferred (and re-subscribes for the next depth-0).
+            if (typeof window.queueMicrotask === "function") {
+              window.queueMicrotask(activateTour);
+            } else {
+              Promise.resolve().then(activateTour);
+            }
+          });
+        }
+
+        if (!canTrack || overlayStack.depth() === 0) {
+          // Common first-visit path: nobody owns focus → open the tour now,
+          // exactly as before (no behaviour change for the happy path). When the
+          // shared stack is unavailable we also activate immediately and rely
+          // on the card's own Escape handler.
+          activateTour();
+        } else {
+          // An overlay is open. Defer; resume exactly once on the next depth-0.
+          startDeferring();
+        }
+        // (If an overlay is open but no subscribe channel exists, startDeferring
+        // is a no-op and the first-visit tour stays pending for the next load.
+        // This branch does not occur when theme.js provides OKFOverlayStack.)
+        })();
 
     // ---- Diagnostic / test hook (non-visual; NOT a public API) ---------
     // This is a TEST/DIAGNOSTIC hook, not a stable read-only runtime API. It
@@ -3413,12 +3670,22 @@
     // not affect rendering. Field shape may change with the implementation.
     try {
       window.__okfLoomGraph = {
-        cy: cy,   // live, mutable Cytoscape core — for tests/diagnostics only
+        cy: cy,
         getState: function () { try { return JSON.parse(JSON.stringify(controlState)); } catch (e) { return null; } },
+        syncCount: function () { return _syncCount; },
+        fallbackColors: function (theme) { return JSON.parse(JSON.stringify(GRAPH_COLORS[theme] || GRAPH_COLORS["swiss-light"])); },
         applyLens: applyLens,
         communityOf: function () { try { return JSON.parse(JSON.stringify(communityOf)); } catch (e) { return {}; } },
         focusRoot: function () { return focusRoot; },
         layoutStats: layoutStats,
+        dispose: disposeGraph,
+        progressiveLabelIds: function () {
+          var ids = [];
+          cy.nodes().forEach(function (n) {
+            if (n.hasClass("okf-label-on")) ids.push(n.id());
+          });
+          return ids;
+        },
         // Live-refresh fence counters (present only when the live layer wired
         // the DATA_URL refresh). Used to prove stale responses are dropped.
         refreshStats: (typeof refreshStats !== "undefined") ? refreshStats : null

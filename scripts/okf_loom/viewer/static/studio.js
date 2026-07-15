@@ -215,55 +215,11 @@
   // ====================================================================
   // 2. Themes (§13.5)
   // ====================================================================
-  // Theme names + button glyphs. KEEP IN SYNC with the copies in wiki.js /
-  // graph.js and render.py:_theme_button_html.
-  const THEMES = ["swiss-light", "swiss-dark", "technical-light", "technical-dark"];
-  const THEME_GLYPHS = { "swiss-light": "◑", "swiss-dark": "◐", "technical-light": "☀", "technical-dark": "☾" };
-  // Map a returning user's retired theme choice to the nearest new theme.
-  const LEGACY_THEMES = {
-    light: "technical-light", dark: "technical-dark",
-    pastel: "swiss-light", sepia: "swiss-light", midnight: "technical-dark",
-  };
-  function effectiveTheme(choice) {
-    if (THEMES.indexOf(choice) >= 0) return choice;
-    if (choice && LEGACY_THEMES[choice]) return LEGACY_THEMES[choice];
-    // auto (or unknown): follow OS preference within the Swiss family
-    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "swiss-dark" : "swiss-light";
-  }
-  function applyThemeAttr(t, opts) {
-    if (THEMES.indexOf(t) < 0) t = "swiss-light";
-    document.documentElement.setAttribute("data-theme", t);
-    // Persist by default so a palette-chosen theme survives navigation
-    // (wiki.js reads localStorage['okf-theme'] on every page). Boot and
-    // "Auto (follow OS)" pass persist:false — a resolved OS preference
-    // must not be frozen as an explicit user choice.
-    if (!opts || opts.persist !== false) {
-      try { localStorage.setItem("okf-theme", t); } catch (e) {}
-    }
-    // (Round 2) The topbar control is the Appearance popover ("Aa ▾"), wired by
-    // wiki.js — no glyph to sync here (studio.js does not own the popover).
-  }
-  function currentThemeChoice() {
-    const t = document.documentElement.getAttribute("data-theme");
-    return THEMES.indexOf(t) >= 0 ? t : "swiss-light";
-  }
-  // Apply the bootstrap theme on boot. A saved user choice (wiki.js theme
-  // button / command palette) outranks the server-side studio.theme config —
-  // otherwise every navigation would stomp the user's pick back to the
-  // config default.
-  (function bootTheme() {
-    let saved = null;
-    try { saved = localStorage.getItem("okf-theme"); } catch (e) {}
-    // Migrate a retired saved theme to its nearest new value (and persist it).
-    if (saved && LEGACY_THEMES[saved]) {
-      saved = LEGACY_THEMES[saved];
-      try { localStorage.setItem("okf-theme", saved); } catch (e) {}
-    }
-    const t = (saved && THEMES.indexOf(saved) >= 0)
-      ? saved
-      : effectiveTheme(BOOT.theme || "auto");
-    applyThemeAttr(t, { persist: false });
-  })();
+  // Theme state is owned by theme.js (window.OKFLoomTheme), loaded before
+  // this module. It boots the resolved theme (saved preference > configured
+  // — including this page's studio bootstrap theme — > Swiss Auto/OS),
+  // follows the OS while Auto, and owns the Appearance popover. Studio only
+  // issues preference changes from the command palette through that API.
 
   // ====================================================================
   // 3. Studio bar
@@ -377,17 +333,18 @@
 
   // View-mode switch (concept pages only)
   const viewSwitch = el("div", { class: "okf-viewswitch", role: "group", "aria-label": "View mode" });
-  function viewBtn(mode, label) {
+  function viewBtn(mode, label, desc) {
     const b = el("button", { type: "button", class: "okf-viewswitch__btn",
-      "aria-pressed": state.view === mode ? "true" : "false", text: label });
+      "aria-pressed": state.view === mode ? "true" : "false", text: label,
+      title: desc || label });
     b.addEventListener("click", () => setView(mode));
     b.dataset.mode = mode;
     return b;
   }
   const viewBtns = {
-    rendered: viewBtn("rendered", "Rendered"),
-    source: viewBtn("source", "Source"),
-    split: viewBtn("split", "Split"),
+    rendered: viewBtn("rendered", "Rendered", "Show the rendered page"),
+    source: viewBtn("source", "Source", "Show the raw markdown source"),
+    split: viewBtn("split", "Split", "Show rendered and source side by side"),
   };
   Object.keys(viewBtns).forEach((k) => viewSwitch.appendChild(viewBtns[k]));
 
@@ -472,8 +429,9 @@
     const btn = el("button", {
       type: "button", class: "okf-navtoggle",
       "aria-label": "Toggle navigation", "aria-pressed": collapsed ? "true" : "false",
-      title: "Collapse navigation for a full-width read", text: "☰",
+      title: "Collapse navigation for a full-width read",
     });
+    btn.innerHTML = svgIcon("navCollapse");
     btn.addEventListener("click", function () {
       collapsed = !collapsed;
       document.body.classList.toggle("okf-nav-collapsed", collapsed);
@@ -791,8 +749,21 @@
     if (tag === "table" || tag === "pre") {
       return tag + "|" + id + "|" + (el.textContent || "").replace(/\s+/g, " ").trim();
     }
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200);
-    return tag + "|" + id + "|" + text;
+    // For headings, exclude the client-only heading-anchor glyph (¶) that
+    // bindHeadingAnchors injects into the live DOM, so an unchanged heading
+    // compares equal to the server-rendered version (which has no anchor).
+    // This keeps heading DOM identity stable across no-op re-renders and
+    // prevents unnecessary block replacement on every patch. Intentional
+    // heading-level changes (H2→H1) still trigger replacement via the tag
+    // component of the signature.
+    var text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (/^h[1-6]$/.test(tag) && el.querySelector && el.querySelector(".okf-heading-anchor")) {
+      var clone = el.cloneNode(true);
+      var anchors = clone.querySelectorAll(".okf-heading-anchor");
+      for (var ai = 0; ai < anchors.length; ai++) anchors[ai].remove();
+      text = (clone.textContent || "").replace(/\s+/g, " ").trim();
+    }
+    return tag + "|" + id + "|" + text.slice(0, 200);
   }
   function parseHtmlToBlocks(html) {
     const tmp = document.createElement("div");
@@ -877,39 +848,77 @@
   // Captures the current in-body selection. Because unchanged blocks keep
   // their DOM identity (diffChildren never touches them), a selection that
   // lives entirely inside an unchanged block survives automatically. Only
-  // selections spanning a CHANGED block need a best-effort text-search
-  // restore after the patch. Returns {restore(changedBlocks)}.
+  // selections whose boundary nodes were disconnected/replaced need a
+  // best-effort text-search restore after the patch.
+  //
+  // CRITICAL: the "did the selection survive?" check must use ACTUAL node
+  // connectivity/containment, NOT text equality. A replaced block can carry
+  // different text (e.g. an H2→H1 patch that also drops a client-only
+  // heading-anchor ¶ glyph), so comparing old-vs-inserted block text would
+  // incorrectly treat a detached anchor block as unchanged — collapsing the
+  // selection and preventing the comment affordance from appearing.
+  //
+  // AMBIGUITY FAIL-CLOSED: when re-resolving by text, the search is scoped
+  // to the replacement block (by captured block ID / tag / index + local
+  // before/after context). If multiple viable ranges remain or identity
+  // cannot be established, NO range is restored — never the first global
+  // duplicate. Returns {restore(changedBlocks)}.
   function saveSelectionAcrossPatch(body) {
     const sel = window.getSelection && window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return { restore() {} };
     const range = sel.getRangeAt(0);
     if (!body.contains(range.commonAncestorContainer)) return { restore() {} };
-    const text = sel.toString();
+    const text = sel.toString().trim();
     if (!text) return { restore() {} };
-    // Record the text of the block containing the anchor so we can tell
-    // whether that block was replaced.
-    const anchorBlock = containingBlock(range.startContainer, body);
-    const anchorBlockText = anchorBlock ? (anchorBlock.textContent || "").replace(/\s+/g, " ").trim() : "";
+    // Retain the EXACT boundary node references + their containing blocks.
+    const startNode = range.startContainer;
+    const startOffset = range.startOffset;
+    const endNode = range.endContainer;
+    const endOffset = range.endOffset;
+    const anchorBlock = containingBlock(startNode, body);
+    const focusBlock = containingBlock(endNode, body);
+    // Direction: backward when the Selection anchor is NOT at the range start.
+    const backward = sel.anchorNode !== range.startContainer ||
+      (sel.anchorNode === range.startContainer && sel.anchorOffset !== range.startOffset);
+    // Capture structural identity for scoped re-resolution. This lets us
+    // search the CORRECT replacement block after a patch instead of blindly
+    // matching the first global occurrence of the text (which would be wrong
+    // if the same text appears in multiple blocks).
+    const ident = captureBlockIdentity(anchorBlock, range, body);
     return {
       _text: text,
-      _anchorBlockText: anchorBlockText,
       restore(changedBlocks) {
         if (!text) return;
-        // If the anchor block wasn't changed, the live Selection is still
-        // valid (the DOM node is untouched). Only re-resolve when a changed
-        // block overlaps the prior selection.
-        const changedSigs = changedBlocks.map((b) => (b.textContent || "").replace(/\s+/g, " ").trim());
-        const anchorChanged = !anchorBlockText || changedSigs.indexOf(anchorBlockText) >= 0;
-        if (!anchorChanged) return; // selection survived untouched
-        // Best-effort: find the text anywhere in the body and reselect it.
-        const found = findTextNode(body, text);
+        // Selection survived ONLY if BOTH boundary nodes are still connected
+        // AND contained by the current body AND live inside a real block
+        // element (not the body root).
+        const startLive = startNode && startNode.isConnected &&
+          body.contains(startNode) && anchorBlock && anchorBlock !== body &&
+          anchorBlock.isConnected && body.contains(anchorBlock);
+        const endLive = endNode && endNode.isConnected &&
+          body.contains(endNode) && focusBlock && focusBlock !== body &&
+          focusBlock.isConnected && body.contains(focusBlock);
+        if (startLive && endLive) return; // selection survived untouched
+        // At least one boundary node was disconnected/replaced. Re-resolve
+        // using scoped search with structural identity. findScopedTextRange
+        // fails closed (returns null) when the text is ambiguous or not
+        // found, so we never create a wrong range.
+        const found = findScopedTextRange(body, text, ident, changedBlocks);
         if (!found) return;
         try {
-          const r = document.createRange();
-          r.setStart(found.node, found.start);
-          r.setEnd(found.node, found.end);
-          sel.removeAllRanges();
-          sel.addRange(r);
+          if (backward && typeof sel.setBaseAndExtent === "function") {
+            sel.removeAllRanges();
+            sel.setBaseAndExtent(
+              found.endNode, found.endOffset,
+              found.startNode, found.startOffset
+            );
+          } else {
+            const r = document.createRange();
+            r.setStart(found.startNode, found.startOffset);
+            r.setEnd(found.endNode, found.endOffset);
+            sel.removeAllRanges();
+            sel.addRange(r);
+          }
         } catch (e) { /* give up silently; selection is best-effort */ }
       },
     };
@@ -924,14 +933,279 @@
     }
     return root;
   }
-  function findTextNode(root, text) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-      const idx = node.nodeValue ? node.nodeValue.indexOf(text) : -1;
-      if (idx >= 0) return { node: node, start: idx, end: idx + text.length };
+  // Capture structural identity of the anchor block + local text context
+  // around the selection. Used after a patch to scope the text search to the
+  // correct replacement block and disambiguate duplicate text.
+  function captureBlockIdentity(anchorBlock, range, body) {
+    if (!anchorBlock || anchorBlock === body) return null;
+    var id = anchorBlock.getAttribute("id") || "";
+    var tag = anchorBlock.tagName.toLowerCase();
+    var index = -1;
+    try {
+      var el = body.firstElementChild, i = 0;
+      while (el) { if (el === anchorBlock) { index = i; break; } el = el.nextElementSibling; i++; }
+    } catch (e) {}
+    // Local before/after context: text within the anchor block immediately
+    // before/after the selection. Used to disambiguate when the same text
+    // appears multiple times within the same block.
+    var before = "", after = "";
+    try {
+      var br = document.createRange();
+      br.setStart(anchorBlock, 0);
+      br.setEnd(range.startContainer, range.startOffset);
+      before = br.toString().slice(-60); // last 60 chars before selection
+    } catch (e) {}
+    try {
+      var ar = document.createRange();
+      ar.setStart(range.endContainer, range.endOffset);
+      ar.setEnd(anchorBlock, anchorBlock.childNodes.length);
+      after = ar.toString().slice(0, 60); // first 60 chars after selection
+    } catch (e) {}
+    return { id: id, tag: tag, index: index, before: before, after: after };
+  }
+  // Tiered scoped search for re-resolving selection text after a body patch.
+  // 1. Block ID match → search within that block.
+  // 2. Changed blocks with matching tag → search within each; fail closed
+  //    if text is found in more than one.
+  // 3. All changed blocks → same fail-closed principle.
+  // 4. Entire body → last resort; still fail closed on multiple matches.
+  // If identity cannot be established (null ident) and no changed blocks
+  // narrow the scope, fail closed — never restore to an unscoped global match.
+  function findScopedTextRange(body, text, ident, changedBlocks) {
+    // Tier 1: block ID match.
+    if (ident && ident.id) {
+      var scopeById = body.querySelector('#' + cssEscape(ident.id));
+      if (scopeById) {
+        var found = findTextRange(scopeById, text, { contextBefore: ident.before, contextAfter: ident.after });
+        if (found) return found;
+      }
     }
-    return null;
+    // Tier 2: changed blocks with matching tag.
+    if (changedBlocks && changedBlocks.length && ident && ident.tag) {
+      var matches = [];
+      for (var ci = 0; ci < changedBlocks.length; ci++) {
+        if (changedBlocks[ci].tagName.toLowerCase() === ident.tag) {
+          var m = findTextRange(changedBlocks[ci], text, { contextBefore: ident.before, contextAfter: ident.after });
+          if (m) { matches.push(m); if (matches.length > 1) return null; }
+        }
+      }
+      if (matches.length === 1) return matches[0];
+    }
+    // Tier 3: all changed blocks.
+    if (changedBlocks && changedBlocks.length) {
+      var matches3 = [];
+      for (var cj = 0; cj < changedBlocks.length; cj++) {
+        var m3 = findTextRange(changedBlocks[cj], text, ident ? { contextBefore: ident.before, contextAfter: ident.after } : {});
+        if (m3) { matches3.push(m3); if (matches3.length > 1) return null; }
+      }
+      if (matches3.length === 1) return matches3[0];
+    }
+    // Tier 4: entire body — only when we have identity to disambiguate via
+    // context. Without identity, a global search is too ambiguous.
+    if (ident && (ident.id || ident.tag)) {
+      return findTextRange(body, text, { contextBefore: ident.before, contextAfter: ident.after });
+    }
+    return null; // fail closed
+  }
+    // Find `text` anywhere under `root` (or within `opts.scopeEl`). Models
+    // actual browser Selection.toString() semantics: block elements produce
+    // `\n\n` separators, adjacent inline elements concatenate directly
+    // (<strong>foo</strong><em>bar</em> → "foobar"), and authored whitespace
+    // is preserved. A bounded candidate enumeration finds all occurrences;
+    // each is verified by mapping offsets back to DOM nodes. Fails closed
+    // (returns null) when 0 or >1 verified matches are found. Context
+    // (before/after) disambiguates only when multiple candidates exist.
+    function findTextRange(root, text, opts) {
+      opts = opts || {};
+      if (!text) return null;
+      var scopeEl = opts.scopeEl || root;
+      var ctxBefore = opts.contextBefore || "";
+      var ctxAfter = opts.contextAfter || "";
+      var textNodes = collectTextNodes(scopeEl);
+      if (!textNodes.length) return null;
+      // Build a flat string modeling Selection.toString() semantics:
+      // - \n\n between text nodes in DIFFERENT block elements
+      // - direct concatenation for text nodes in the SAME block (inline)
+      // - authored whitespace preserved as-is
+      // - whitespace-only text nodes that are direct children of scopeEl
+      //   (inter-block template whitespace) are skipped
+      var flat = "";
+      var map = []; // map[flatIndex] = {node, offset} | null for separator
+      var prevBlock = null;
+      for (var i = 0; i < textNodes.length; i++) {
+        var tn = textNodes[i];
+        var nv = tn.nodeValue;
+        if (!nv) continue;
+        // Skip inter-block whitespace (direct child of scope, whitespace-only).
+        if (nv.trim() === "" && tn.parentElement === scopeEl) continue;
+        var block = containingBlock(tn, scopeEl);
+        // Insert block separator when transitioning between block elements.
+        if (prevBlock !== null && block !== prevBlock && flat.length > 0) {
+          flat += "\n\n";
+          map.push(null);
+          map.push(null);
+        }
+        for (var j = 0; j < nv.length; j++) {
+          map.push({ node: tn, offset: j });
+          flat += nv.charAt(j);
+        }
+        prevBlock = block;
+      }
+      // Find all occurrences of text in the scope text.
+      var candidates = [];
+      var MAX_CANDIDATES = 50;
+      var found = 0;
+      var idx = 0;
+      while (idx <= flat.length - text.length && found < MAX_CANDIDATES) {
+        idx = flat.indexOf(text, idx);
+        if (idx < 0) break;
+        found++;
+        var startPos = mapPosToDom(map, idx);
+        var endPos = mapPosToDom(map, idx + text.length - 1);
+        if (startPos && endPos) {
+          candidates.push({
+            startNode: startPos.node, startOffset: startPos.offset,
+            endNode: endPos.node, endOffset: endPos.offset + 1
+          });
+        }
+        idx++;
+      }
+      // Phase 2: if no exact match, try normalized match (collapse whitespace
+      // runs to single spaces). This handles cross-block selections where
+      // Selection.toString() produces element-specific separators (\n for
+      // <blockquote>, \n\n for <p>) that may differ from our \n\n model.
+      if (candidates.length === 0) {
+        var normResult = searchNormalizedMatch(map, flat, text, MAX_CANDIDATES);
+        if (normResult) return normResult;
+        return null;
+      }
+      // Single candidate: accept without context check.
+      if (candidates.length === 1) return candidates[0];
+      if (candidates.length === 0) return null;
+      // Multiple: use context to disambiguate.
+      var ctxMatches = [];
+      for (var ci = 0; ci < candidates.length; ci++) {
+        if (contextCheck(candidates[ci], ctxBefore, ctxAfter, scopeEl)) {
+          ctxMatches.push(candidates[ci]);
+          if (ctxMatches.length > 1) return null;
+        }
+      }
+      if (ctxMatches.length === 1) return ctxMatches[0];
+      return null;
+    }
+    // Map a position in the flat string to a DOM (node, offset).
+    // Separator chars (null map entries) are resolved to the next real node.
+    function mapPosToDom(map, position) {
+      var si = position;
+      while (si < map.length && !map[si]) si++;
+      if (si >= map.length) {
+        // Position is in trailing separators; use last real entry.
+        si = position;
+        while (si >= 0 && !map[si]) si--;
+      }
+      if (si < 0 || si >= map.length || !map[si]) return null;
+      return { node: map[si].node, offset: map[si].offset };
+    }
+    // Normalized search: collapse whitespace runs in both the flat string
+    // and the needle to single spaces, then find matches. Maps normalized
+    // positions back to DOM nodes via the original map. Handles cross-block
+    // selections where Selection.toString() produces element-specific
+    // separators (\n, \n\n) that differ from our \n\n model.
+    function searchNormalizedMatch(map, flat, text, maxCandidates) {
+      var normNeedle = text.replace(/\s+/g, " ").trim();
+      if (!normNeedle) return null;
+      // Build normalized flat string, keeping track of which original map
+      // entry each normalized character came from.
+      var nflat = "";
+      var nmap = []; // nmap[nflatIndex] = original map entry | null
+      var lastWasSpace = false;
+      for (var i = 0; i < flat.length; i++) {
+        var ch = flat.charAt(i);
+        if (/\s/.test(ch)) {
+          if (!lastWasSpace && nflat.length > 0) {
+            nflat += " ";
+            nmap.push(null);
+            lastWasSpace = true;
+          }
+        } else {
+          nflat += ch;
+          nmap.push(map[i]);
+          lastWasSpace = false;
+        }
+      }
+      // Trim leading space.
+      if (nflat.charAt(0) === " ") { nflat = nflat.substring(1); nmap.shift(); }
+      var matches = [];
+      var idx = 0;
+      while (idx <= nflat.length - normNeedle.length && matches.length < 2) {
+        idx = nflat.indexOf(normNeedle, idx);
+        if (idx < 0) break;
+        var startPos = mapPosToDom(nmap, idx);
+        var endPos = mapPosToDom(nmap, idx + normNeedle.length - 1);
+        if (startPos && endPos) {
+          matches.push({
+            startNode: startPos.node, startOffset: startPos.offset,
+            endNode: endPos.node, endOffset: endPos.offset + 1
+          });
+        }
+        idx++;
+      }
+      return matches.length === 1 ? matches[0] : null;
+    }
+    function collectTextNodes(root) {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var out = [];
+      var n;
+      while ((n = walker.nextNode())) { if (n.nodeValue && n.nodeValue.length > 0) out.push(n); }
+      return out;
+    }
+    // Check if a candidate's surrounding text matches the captured context.
+    function contextCheck(cand, ctxBefore, ctxAfter, scopeEl) {
+      if (!ctxBefore && !ctxAfter) return true;
+      try {
+        if (ctxBefore) {
+          var br = document.createRange();
+          br.setStart(scopeEl, 0);
+          br.setEnd(cand.startNode, cand.startOffset);
+          if (!br.toString().endsWith(ctxBefore)) return false;
+        }
+        if (ctxAfter) {
+          var ar = document.createRange();
+          ar.setStart(cand.endNode, cand.endOffset);
+          ar.setEnd(scopeEl, scopeEl.childNodes.length);
+          if (!ar.toString().startsWith(ctxAfter)) return false;
+        }
+        return true;
+      } catch (e) { return false; }
+    }
+    // Backward-compatible wrapper: comment-mark resolution (applyCommentMarks,
+  // applyPendingDraftMark, resolveSelectionDraft) expects {node, start, end}
+  // and creates a single-node range. Delegates to findTextRange but only
+  // returns single-node matches so callers using surroundContents are safe.
+  function findTextNode(root, text) {
+    var found = findTextRange(root, text);
+    if (!found || found.startNode !== found.endNode) return null;
+    return { node: found.startNode, start: found.startOffset, end: found.endOffset };
+  }
+  // Resolve a comment anchor text to a Range, using scoped search (block ID
+  // first, then full body) and cross-node findTextRange so a comment whose
+  // anchor spans inline elements (<strong>foo</strong>bar) is found and
+  // wrapped correctly via wrapRangeInMark → wrapRangeAcrossElements.
+  // Returns a Range or null.
+  function resolveCommentRange(root, text, blockId) {
+    if (!text) return null;
+    var scope = null;
+    if (blockId) scope = root.querySelector('#' + cssEscape(blockId));
+    var found = null;
+    if (scope) found = findTextRange(scope, text);
+    if (!found) found = findTextRange(root, text);
+    if (!found) return null;
+    try {
+      var r = document.createRange();
+      r.setStart(found.startNode, found.startOffset);
+      r.setEnd(found.endNode, found.endOffset);
+      return r;
+    } catch (e) { return null; }
   }
 
   // ====================================================================
@@ -1100,6 +1374,34 @@
     affordance.style.left = left + "px";
     affordance.style.top = top + "px";
   }
+  // Central cleanup for abandoned comment draft state. Removes the optimistic
+  // pending mark from the DOM, clears transient selection/range/anchor.
+  // opts.preserveDraftBody: when true (panel close/navigation), keeps the
+  // typed draft text so the user doesn't lose their work. When false/absent
+  // (Cancel), clears draftBody too.
+  function clearPendingCommentDraft(opts) {
+    // Remove ALL matching optimistic marks via the existing helper (handles
+    // cross-element marks — a pending ID may have marks in multiple roots).
+    if (state._pendingMarkId) {
+      removeCommentMark(state._pendingMarkId);
+      state._pendingMarkId = null;
+    }
+    state.selectionDraft = null;
+    if (!opts || !opts.preserveDraftBody) {
+      state.draftBody = "";
+    }
+    state.draftAnchor = { kind: "concept", ref: state.conceptId };
+    hideAffordance();
+    try {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        var r = sel.getRangeAt(0);
+        var body = $(".okf-page__body");
+        if (body && body.contains(r.commonAncestorContainer)) sel.removeAllRanges();
+      }
+    } catch (e) {}
+  }
+
   function hideAffordance() {
     if (affordance) affordance.hidden = true;
     state.selectionDraft = null;
@@ -1177,19 +1479,13 @@
         };
       } catch (e) { /* fall through to text re-resolution */ }
     }
-    let found = null;
-    if (!draft.inSource && !draft.inGraph && draft.block_id) {
-      const block = root.querySelector('#' + cssEscape(draft.block_id));
-      if (block) found = findTextNode(block, draft.text);
-    }
-    if (!found) found = findTextNode(root, draft.text);
-    if (!found) return null;
-    try {
-      const range = document.createRange();
-      range.setStart(found.node, found.start);
-      range.setEnd(found.node, found.end);
-      return { range, text: draft.text, inSource: draft.inSource, inGraph: draft.inGraph };
-    } catch (e) { return null; }
+    // Cross-node re-resolution: use resolveCommentRange (findTextRange) so a
+    // draft whose anchor spans inline elements is found and restored as a
+    // proper Range, not just a single-node match.
+    const blockId = (!draft.inSource && !draft.inGraph && draft.block_id) ? draft.block_id : "";
+    const range = resolveCommentRange(root, draft.text, blockId);
+    if (!range) return null;
+    return { range, text: draft.text, inSource: draft.inSource, inGraph: draft.inGraph };
   }
 
   function commentConceptForSelection(inBody) {
@@ -1301,27 +1597,31 @@
       const id = m.getAttribute("data-comment-id");
       if (id) (existing[id] || (existing[id] = [])).push(m);
     });
-    mine.forEach((c) => {
-      c._stale = false;
-      if (existing[c.id] && existing[c.id].length) {
-        // Mark exists: just sync its state attribute.
-        setCommentMarkState(c.id, c.state || "open");
-        return;
-      }
-      // Resolve the anchor: prefer the block_id heading, else search the
-      // whole body. Wrap the first match of the ref snippet.
-      const block = c.anchor.block_id ? body.querySelector('#' + cssEscape(c.anchor.block_id)) : null;
-      const root = block || body;
-      const found = findTextNode(root, c.anchor.ref);
-      if (!found) {
-        // Try the full body as a last resort (block may have been renamed).
-        const found2 = block ? findTextNode(body, c.anchor.ref) : null;
-        if (!found2) { c._stale = true; return; }
-        wrapTextNode(found2, c.id, c.state || "open");
-        return;
-      }
-      wrapTextNode(found, c.id, c.state || "open");
-    });
+      mine.forEach((c) => {
+        c._stale = false;
+        if (existing[c.id] && existing[c.id].length) {
+          // Mark exists: just sync its state attribute.
+          setCommentMarkState(c.id, c.state || "open");
+          return;
+        }
+        // Resolve the anchor: prefer the block_id heading, else search the
+        // whole body. Use cross-node resolveCommentRange so a comment whose
+        // anchor spans inline elements is wrapped correctly via
+        // wrapRangeInMark → wrapRangeAcrossElements.
+        const range = resolveCommentRange(body, c.anchor.ref, c.anchor.block_id);
+        if (range) {
+          wrapRangeInMark(range, c.id, c.state || "open");
+        } else {
+          // Try the full body as a last resort (block may have been renamed).
+          const range2 = c.anchor.block_id ? resolveCommentRange(body, c.anchor.ref, "") : null;
+          if (!range2) {
+            c._stale = true;
+            appendStaleMark(body, c);
+          } else {
+            wrapRangeInMark(range2, c.id, c.state || "open");
+          }
+        }
+      });
   }
   // A user can select text and open the comment composer before the lazy
   // /__data/doc load (or a live patch) settles. The body patch correctly
@@ -1338,20 +1638,51 @@
     const body = $(".okf-page__body");
     if (!body) return;
     const selector = '.okf-comment-mark[data-comment-id="' + cssEscape(pendingId) + '"]';
-    if (body.querySelector(selector)) return;
-    const block = anchor.block_id ? body.querySelector('#' + cssEscape(anchor.block_id)) : null;
-    const found = (block && findTextNode(block, anchor.ref)) || findTextNode(body, anchor.ref);
-    if (found) wrapTextNode(found, pendingId, "open");
+    if (body.querySelector(selector)) return; // visible mark exists
+    // Cross-node resolution so a pending highlight spanning inline elements
+    // survives body patch. Do not keep the pending ID without a visible mark.
+    const range = resolveCommentRange(body, anchor.ref, anchor.block_id);
+    if (range) wrapRangeInMark(range, pendingId, "open");
   }
+  // Retained for compatibility: wraps a single-node {node, start, end} result
+  // in a comment mark. New callers should use resolveCommentRange +
+  // wrapRangeInMark for full cross-node support.
   function wrapTextNode(found, commentId, commentState) {
     try {
       const range = document.createRange();
       range.setStart(found.node, found.start);
       range.setEnd(found.node, found.end);
-      const mark = el("mark", { class: "okf-comment-mark", "data-comment-id": commentId });
-      if (commentState) mark.setAttribute("data-comment-state", commentState);
-      range.surroundContents(mark);
-    } catch (e) { /* selection crossed a boundary; skip this mark */ }
+      wrapRangeInMark(range, commentId, commentState);
+    } catch (e) { /* invalid range; skip */ }
+  }
+  // Render a visible stale anchor indicator at the end of the body. The
+  // comment's original text was edited or removed; this mark gives users a
+  // non-color cue (dotted underline via .okf-comment-mark--stale) and a
+  // clickable pin to jump to the comment card. Does NOT falsify exact text
+  // anchoring — it is clearly appended at the end with its own label.
+  function appendStaleMark(body, c) {
+    // Don't duplicate if a stale mark for this comment already exists.
+    var existing = body.querySelector('.okf-comment-mark--stale[data-comment-id="' + cssEscape(c.id) + '"]');
+    if (existing) return;
+    var ref = (c.anchor && c.anchor.ref) || "";
+    var mark = el("mark", {
+      class: "okf-comment-mark okf-comment-mark--stale",
+      "data-comment-id": c.id,
+      "data-comment-state": c.state || "open",
+      role: "button",
+      tabindex: "0",
+      title: "Comment anchor: \"" + ref + "\" (text was edited or removed)",
+      "aria-label": "Stale comment anchor: " + ref.substring(0, 60) + (ref.length > 60 ? "…" : ""),
+    });
+    mark.textContent = "💬 " + ref.substring(0, 40) + (ref.length > 40 ? "…" : "");
+    mark.addEventListener("click", function () { jumpToCommentCard(c.id); });
+    mark.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpToCommentCard(c.id); }
+    });
+    // Wrap in a subtle paragraph so it flows as a separate line at the end.
+    var p = el("p", { class: "okf-comment-stale-anchor" });
+    p.appendChild(mark);
+    body.appendChild(p);
   }
   function jumpToCommentMark(commentId) {
     const mark = document.querySelector('.okf-comment-mark[data-comment-id="' + cssEscape(commentId) + '"]');
@@ -1375,23 +1706,51 @@
   // the card for a given comment id. Mirrors jumpToActivity (Changes panel,
   // ~line 3507). Requires cards to carry data-comment-id (tagged in
   // commentCard below) so the pin's click target can be found post-render.
+  // Single-owner jump state: only one active comment-id/card/timer at a time.
+  // New jump, close, rerender, or resolve cancels the previous and clears
+  // transient state without detached-node mutation.
+  var _jumpState = { id: null, card: null, timer: null, retryTimer: null, prevTabindex: null };
+
+  function _clearJumpContext() {
+    if (_jumpState.timer) { clearTimeout(_jumpState.timer); _jumpState.timer = null; }
+    if (_jumpState.retryTimer) { clearTimeout(_jumpState.retryTimer); _jumpState.retryTimer = null; }
+    if (_jumpState.card && _jumpState.card.isConnected) {
+      _jumpState.card.classList.remove("okf-comment--jumped");
+      if (_jumpState.prevTabindex === null) _jumpState.card.removeAttribute("tabindex");
+      else _jumpState.card.setAttribute("tabindex", _jumpState.prevTabindex);
+    }
+    _jumpState.id = null;
+    _jumpState.card = null;
+    _jumpState.prevTabindex = null;
+  }
+
   function jumpToCommentCard(commentId) {
+    _clearJumpContext();
     openPanel("comments");
     const body = panelBodyEl();
     if (!body) return false;
-    // The card renders synchronously inside openPanel's p.render() call, but
-    // poll briefly anyway (defensive, mirrors jumpToActivity's setTimeout
-    // lookup) in case a future render path makes it async.
+    _jumpState.id = commentId;
     let tries = 0;
     (function find() {
+      if (_jumpState.id !== commentId) return; // superseded by new jump/close
       const card = body.querySelector('.okf-comment[data-comment-id="' + cssEscape(commentId) + '"]');
-      if (!card) { if (tries++ < 20) setTimeout(find, 25); return; }
+      if (!card) {
+        if (tries++ < 20) _jumpState.retryTimer = setTimeout(find, 25);
+        return;
+      }
+      if (_jumpState.id !== commentId) return; // superseded
       card.scrollIntoView({ block: "center", behavior: REDUCED_MOTION ? "auto" : "smooth" });
       if (!REDUCED_MOTION) {
         card.classList.remove("okf-pulse");
         void card.offsetWidth;
         card.classList.add("okf-pulse");
       }
+      _jumpState.prevTabindex = card.getAttribute("tabindex");
+      card.setAttribute("tabindex", "-1");
+      try { card.focus({ preventScroll: true }); } catch (e) {}
+      card.classList.add("okf-comment--jumped");
+      _jumpState.card = card;
+      _jumpState.timer = setTimeout(_clearJumpContext, 4000);
     })();
     return true;
   }
@@ -1431,8 +1790,7 @@
     }
     refreshAnchor();
     cancel.addEventListener("click", () => {
-      state.draftAnchor = { kind: "concept", ref: state.conceptId };
-      state.draftBody = "";
+      clearPendingCommentDraft(); // Cancel: clear draftBody too
       textarea.value = "";
       refreshAnchor();
     });
@@ -2411,9 +2769,10 @@
       var c = state.comments.find(function (x) { return x.id === commentId; });
       if (c) {
         c.state = newState;
-        // Stamp a fresh updated_at so "newest"/"updated" sorts reorder
-        // correctly before the SSE echo arrives.
         c.updated_at = new Date().toISOString();
+        // Clear jump context if the resolved/canceled comment was the active
+        // jump target — its card will be destroyed by renderCommentsPanel.
+        if (_jumpState.id === commentId) _clearJumpContext();
         renderCommentsPanel();
       }
     } catch (e) {
@@ -3185,8 +3544,8 @@
         }
       }
       if (!paletteState.open) return;
-      if (e.key === "Escape") { e.preventDefault(); closePalette(); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); }
+      // Escape is handled by the shared overlay stack — no separate handler.
+      if (e.key === "ArrowDown") { e.preventDefault(); movePalette(1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); movePalette(-1); }
       else if (e.key === "Enter") { e.preventDefault(); activatePalette(); }
       // iter1 CRI-016: trap focus inside the modal so Tab/Shift+Tab can't
@@ -3197,14 +3556,35 @@
       }
     });
   }
-  // iter1 CRI-016: focus trap shared by the palette and the slide-over panel.
-  // Returns the focusable elements of a container in DOM order, skipping
-  // hidden/disabled/negative-tabindex nodes.
+  // iter1 CRI-016: focus trap shared by the palette, panel, and conflict
+  // modal. Returns the focusable elements of a container in DOM order,
+  // skipping hidden/disabled/negative-tabindex/inert-ancestor nodes.
   function focusableIn(root) {
     if (!root) return [];
-    const sel = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
+    const sel = 'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex]:not([tabindex="-1"])';
     return $$(sel, root).filter((n) => {
+      if (n.getAttribute("tabindex") === "-1") return false;
       if (n.hasAttribute("hidden")) return false;
+      if (n.disabled) return false;
+      // Ancestor walk: reject if any ancestor (up to root) is hidden via the
+      // HTML hidden attribute or CSS display:none. (visibility:hidden is
+      // inherited, so the node's OWN computed style already reflects it —
+      // checked below.)
+      var parent = n.parentElement;
+      while (parent && parent !== root) {
+        if (parent.hidden) return false;
+        if (getComputedStyle(parent).display === "none") return false;
+        parent = parent.parentElement;
+      }
+      // Closed <details>: a descendant of a closed <details> is not rendered
+      // (and thus not focusable) UNLESS it is inside that <details>'s
+      // <summary> element (the summary is always visible).
+      var closedDetails = n.closest('details:not([open])');
+      if (closedDetails) {
+        var summary = closedDetails.querySelector(':scope > summary');
+        if (!summary || !summary.contains(n)) return false;
+      }
+      if (n.closest("[inert]")) return false;
       const cs = getComputedStyle(n);
       return cs.display !== "none" && cs.visibility !== "hidden" && cs.pointerEvents !== "none";
     });
@@ -3221,22 +3601,63 @@
     else next = focusables[(idx - 1 + focusables.length) % focusables.length];
     try { next.focus({ preventScroll: true }); } catch (e) {}
   }
+  // Safe focus restoration: validates the saved target is connected, visible,
+  // not inside an inert ancestor, and focusable — then uses a deterministic
+  // fallback chain: saved → mobile Studio opener → Appearance trigger →
+  // first topbar control → #okf-main. Returns true if focus landed somewhere.
+  function safeFocus(saved) {
+    // Validate saved target: connected, visible, not inert, not disabled,
+    // not negative-tabindex (unless it's a programmatic-focus container like
+    // #okf-main with tabindex=-1 which IS valid for .focus()). Then call
+    // .focus() and verify document.activeElement actually became the target.
+    function tryFocus(el) {
+      if (!el || !el.isConnected || typeof el.focus !== "function") return false;
+      if (el === document.body || el === document.documentElement) return false;
+      if (el.closest("[inert]") || el.hasAttribute("hidden")) return false;
+      if (el.disabled) return false;
+      var cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.visibility === "hidden") return false;
+      try { el.focus({ preventScroll: true }); } catch (e) { return false; }
+      return document.activeElement === el;
+    }
+    if (tryFocus(saved)) return true;
+    // Deterministic fallback chain.
+    var sels = [".okf-studio-open-btn", "#okf-theme", ".okf-topbar button", ".okf-topbar a[href]", "#okf-main"];
+    for (var i = 0; i < sels.length; i++) {
+      if (tryFocus(document.querySelector(sels[i]))) return true;
+    }
+    return false;
+  }
+  var _paletteOverlay = null;
+  var _paletteFocusTimer = null;
   function openPalette() {
     if (!paletteState.overlay) buildPalette();
+    // Cancel any pending focus timer from a previous open.
+    if (_paletteFocusTimer) { clearTimeout(_paletteFocusTimer); _paletteFocusTimer = null; }
     paletteState.open = true;
     paletteState.overlay.hidden = false;
     paletteState.input.value = "";
     refreshPaletteList("");
     paletteState._lastFocus = document.activeElement;
-    setTimeout(() => paletteState.input.focus(), 20);
+    if (!_paletteOverlay) _paletteOverlay = { close: function () { closePalette(); } };
+    if (window.OKFOverlayStack) window.OKFOverlayStack.push(_paletteOverlay);
+    // Generation guard: if close fires before the timer, the callback no-ops.
+    var gen = paletteState._gen = (paletteState._gen || 0) + 1;
+    _paletteFocusTimer = setTimeout(function () {
+      _paletteFocusTimer = null;
+      if (paletteState.open && paletteState._gen === gen) {
+        try { paletteState.input.focus(); } catch (e) {}
+      }
+    }, 20);
   }
   function closePalette() {
     if (!paletteState.overlay) return;
+    if (_paletteFocusTimer) { clearTimeout(_paletteFocusTimer); _paletteFocusTimer = null; }
     paletteState.open = false;
     paletteState.overlay.hidden = true;
-    if (paletteState._lastFocus && typeof paletteState._lastFocus.focus === "function") {
-      try { paletteState._lastFocus.focus(); } catch (e) {}
-    }
+    if (_paletteOverlay && window.OKFOverlayStack) window.OKFOverlayStack.remove(_paletteOverlay);
+    safeFocus(paletteState._lastFocus);
+    paletteState._lastFocus = null;
   }
   function togglePalette() { paletteState.open ? closePalette() : openPalette(); }
   function movePalette(delta) {
@@ -3259,15 +3680,16 @@
     if (EDIT && isConceptPage()) items.push({ label: "Post a comment / ask the agent", sub: "comment", run: () => openPanel("comments", { focusComposer: true }) });
     items.push({ label: "Open Comments panel", sub: "panel", run: () => openPanel("comments") });
     items.push({ label: "Open Changes panel", sub: "panel", run: () => openPanel("changes") });
-    items.push({ label: "Theme: Technical Light", sub: "theme", run: () => applyThemeAttr("technical-light") });
-    items.push({ label: "Theme: Technical Dark", sub: "theme", run: () => applyThemeAttr("technical-dark") });
-    items.push({ label: "Theme: Swiss Light", sub: "theme", run: () => applyThemeAttr("swiss-light") });
-    items.push({ label: "Theme: Swiss Dark", sub: "theme", run: () => applyThemeAttr("swiss-dark") });
-    items.push({ label: "Theme: Auto (follow OS)", sub: "theme", run: () => {
-      // Clear the saved choice so the OS preference governs again.
-      try { localStorage.removeItem("okf-theme"); } catch (e) {}
-      applyThemeAttr(effectiveTheme("auto"), { persist: false });
-    } });
+    const themeApi = window.OKFLoomTheme;
+    if (themeApi) {
+      // Concrete picks persist family AND mode; "Auto" persists mode only,
+      // keeping the user's family (family and mode are orthogonal).
+      items.push({ label: "Theme: Technical Light", sub: "theme", run: () => themeApi.setTheme("technical-light") });
+      items.push({ label: "Theme: Technical Dark", sub: "theme", run: () => themeApi.setTheme("technical-dark") });
+      items.push({ label: "Theme: Swiss Light", sub: "theme", run: () => themeApi.setTheme("swiss-light") });
+      items.push({ label: "Theme: Swiss Dark", sub: "theme", run: () => themeApi.setTheme("swiss-dark") });
+      items.push({ label: "Theme: Auto (follow OS)", sub: "theme", run: () => themeApi.setMode("auto") });
+    }
     if (window.okfLoomLive && window.okfLoomLive.resync) items.push({ label: "Resync now", sub: "live", run: () => window.okfLoomLive.resync() });
     // Registered panels.
     Object.keys(panels).forEach((id) => {
@@ -3332,29 +3754,50 @@
   const panelTitle = el("h2", { class: "okf-panel__title" });
   const panelClose = el("button", { type: "button", class: "okf-panel__close", "aria-label": "Close panel", text: "Esc" });
   panelHeader.appendChild(panelTitle); panelHeader.appendChild(panelClose);
-  // Editorial Workbench: one pop-over with tabs (Comments/Changes/Outline/
-  // Metadata) instead of separately-opened panels. Clicking a tab swaps the
-  // rendered panel; the active tab is underlined with --okf-accent.
-  const panelTabs = el("div", { class: "okf-panel__tabs", role: "tablist", "aria-label": "Panel sections" });
-  const PANEL_TABS = [["comments", "Comments"], ["changes", "Changes"], ["outline", "Outline"], ["metadata", "Metadata"]];
-  const panelTabBtns = {};
-  PANEL_TABS.forEach(function (t) {
-    const b = el("button", { type: "button", class: "okf-panel__tab", role: "tab", "aria-selected": "false", text: t[1] });
-    b.addEventListener("click", function () { openPanel(t[0]); });
-    panelTabs.appendChild(b);
-    panelTabBtns[t[0]] = b;
-  });
-  const panelBody = el("div", { class: "okf-panel__body", id: "okf-panel-body" });
+    // Editorial Workbench: one pop-over with tabs (Comments/Changes/Outline/
+    // Metadata) instead of separately-opened panels. Clicking a tab swaps the
+    // rendered panel; the active tab is underlined with --okf-accent.
+    // Roving tabindex: selected tab = 0, peers = -1. Arrows/Home/End activate.
+    const panelTabs = el("div", { class: "okf-panel__tabs", role: "tablist", "aria-label": "Panel sections" });
+    const PANEL_TABS = [["comments", "Comments"], ["changes", "Changes"], ["outline", "Outline"], ["metadata", "Metadata"]];
+    const panelTabBtns = {};
+    PANEL_TABS.forEach(function (t) {
+      const b = el("button", {
+        type: "button", class: "okf-panel__tab", role: "tab",
+        id: "okf-panel-tab--" + t[0],
+        "aria-controls": "okf-panel-body",
+        "aria-selected": "false", tabindex: "-1", text: t[1],
+      });
+      b.addEventListener("click", function () { openPanel(t[0]); });
+      panelTabs.appendChild(b);
+      panelTabBtns[t[0]] = b;
+    });
+    // Tablist keyboard: arrows wrap+activate, Home/End first/last. Tab exits
+    // naturally (roving tabindex → only one tab stop in the tablist).
+    panelTabs.addEventListener("keydown", (e) => {
+      if (!state.openPanel) return;
+      var keys = Object.keys(panelTabBtns);
+      var cur = keys.indexOf(state.openPanel);
+      if (cur < 0) return;
+      var key = e.key;
+      if (key === "ArrowRight" || key === "ArrowDown") { e.preventDefault(); openPanel(keys[(cur + 1) % keys.length]); }
+      else if (key === "ArrowLeft" || key === "ArrowUp") { e.preventDefault(); openPanel(keys[(cur - 1 + keys.length) % keys.length]); }
+      else if (key === "Home") { e.preventDefault(); openPanel(keys[0]); }
+      else if (key === "End") { e.preventDefault(); openPanel(keys[keys.length - 1]); }
+    });
+    const panelBody = el("div", { class: "okf-panel__body", id: "okf-panel-body", role: "tabpanel" });
   panelShell.appendChild(panelHeader); panelShell.appendChild(panelTabs); panelShell.appendChild(panelBody);
   document.body.appendChild(panelOverlay); document.body.appendChild(panelShell);
+  // Desktop backdrop click-away: the overlay is a genuine visible scrim on
+  // desktop (panel is 360px with real space around it). On mobile the panel
+  // covers 100vw so there is no visible backdrop — the close button (labeled
+  // "Esc") and the Escape key are the primary mobile dismissal paths. The
+  // overlay click handler stays for desktop; mobile dismissal is via the
+  // close button + overlay-stack Escape.
   panelOverlay.addEventListener("click", closePanel);
   panelClose.addEventListener("click", closePanel);
-  document.addEventListener("keydown", (e) => {
-    if (!state.openPanel) return;
-    // The overlay is non-modal: Escape dismisses it; Tab flows naturally
-    // between the panel and the reading column (no focus trap).
-    if (e.key === "Escape") { e.preventDefault(); closePanel(); }
-  });
+  // Escape is handled by the shared overlay stack (capture-phase keydown on
+  // document) — no separate document-level handler here.
   function panelBodyEl() { return panelBody; }
   // iter1 CRI-016: remember the trigger so focus is restored on close.
   let panelLastFocus = null;
@@ -3362,73 +3805,239 @@
   // closePanel reflect the active tab onto them via aria-pressed.
   var railButtons = [];
 
-  function openPanel(id, opts) {
-    opts = opts || {};
-    const p = panels[id];
-    if (!p) return;
-    state.openPanel = id;
-    panelShell.hidden = false;
-    panelOverlay.hidden = false;  // overlay: show the click-away scrim
-    panelTitle.textContent = p.label;
-    panelShell.setAttribute("aria-label", p.label);
-    // Reflect the active tab in the pop-over tab bar.
-    Object.keys(panelTabBtns).forEach(function (k) {
-      panelTabBtns[k].setAttribute("aria-selected", k === id ? "true" : "false");
-    });
-    // Reflect the open tab on the rail icons.
-    (railButtons || []).forEach(function (b) {
-      b.setAttribute("aria-pressed", b.dataset.railId === id ? "true" : "false");
-    });
-    // Save the trigger so closePanel can restore focus. Skipped on the
-    // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
-    // scroll on page load.
-    if (!opts.noFocus && !panelLastFocus) panelLastFocus = document.activeElement;
-    // Render.
-    panelBody.innerHTML = "";
-    panelBody._focusComposer = !!opts.focusComposer;
-    try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
-    if (!opts.noFocus) { try { panelShell.focus(); } catch (e) {} }
-  }
-  function closePanel() {
-    state.openPanel = null;
-    panelShell.hidden = true;
-    panelOverlay.hidden = true;
-    (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
-    // iter1 CRI-016: restore focus to the button/link that opened the panel.
-    if (panelLastFocus && typeof panelLastFocus.focus === "function") {
-      try { panelLastFocus.focus({ preventScroll: true }); } catch (e) {}
+  var _panelOverlay = null;
+    function openPanel(id, opts) {
+      opts = opts || {};
+      const p = panels[id];
+      if (!p) return;
+      // Distinguish initial open (panel was hidden) from tab-switch (already
+      // visible). Tab-switches keep focus on the active tab (WAI-ARIA tabs
+      // pattern); initial opens manage focus per modal/non-modal rules.
+      const isTabSwitch = !panelShell.hidden && state.openPanel;
+      state.openPanel = id;
+      panelShell.hidden = false;
+      panelOverlay.hidden = false;  // overlay: show the click-away scrim
+      panelTitle.textContent = p.label;
+      panelShell.setAttribute("aria-label", p.label);
+      // Reflect the active tab in the pop-over tab bar (aria-selected + roving
+      // tabindex + tabpanel aria-labelledby).
+      Object.keys(panelTabBtns).forEach(function (k) {
+        var btn = panelTabBtns[k];
+        var isActive = k === id;
+        btn.setAttribute("aria-selected", isActive ? "true" : "false");
+        btn.setAttribute("tabindex", isActive ? "0" : "-1");
+      });
+      panelBody.setAttribute("aria-labelledby", "okf-panel-tab--" + id);
+      // Reflect the open tab on the rail icons.
+      (railButtons || []).forEach(function (b) {
+        b.setAttribute("aria-pressed", b.dataset.railId === id ? "true" : "false");
+      });
+      // Save the trigger so closePanel can restore focus. Skipped on the
+      // boot-time auto-open (opts.noFocus) so the dock doesn't steal focus /
+      // scroll on page load.
+      if (!opts.noFocus && !panelLastFocus) panelLastFocus = document.activeElement;
+      // Register with the shared overlay stack (initial open only).
+      if (!isTabSwitch) {
+        if (!_panelOverlay) _panelOverlay = { close: function () { closePanel(); } };
+        if (window.OKFOverlayStack) window.OKFOverlayStack.push(_panelOverlay);
+      }
+      // Clear jump context before DOM replacement (card element will be
+      // destroyed by innerHTML="" below). Unconditional — even tab-switches
+      // and re-renders within the same panel destroy the jumped card.
+      _clearJumpContext();
+      // Render.
+      panelBody.innerHTML = "";
+      panelBody._focusComposer = !!opts.focusComposer;
+      try { p.render(panelBody, ctx()); } catch (e) { console.error("[okf-studio] panel render", e); }
+
+      // On fresh open (not tab-switch), reset panel body scroll to origin
+      // so the user starts at the top of the content.
+      if (!isTabSwitch && panelBody) panelBody.scrollTop = 0;
+
+      if (isTabSwitch) {
+        // Tab-switch: focus the newly active tab (keyboard activation keeps
+        // focus on the tab list per the WAI-ARIA tabs pattern).
+        try { panelTabBtns[id].focus(); } catch (e) {}
+        return;
+      }
+      // Initial open: acquire mobile modal or focus panel shell on desktop.
+      if (_isMobile()) {
+        _acquireModal(opts);
+      } else {
+        if (!opts.noFocus) { try { panelShell.focus(); } catch (e) {} }
+      }
     }
-    panelLastFocus = null;
-  }
-  function togglePanel(id) { state.openPanel === id ? closePanel() : openPanel(id); }
+    function closePanel() {
+      // Clear any active jump context (timer, transient classes, tabindex).
+      _clearJumpContext();
+      // Clear abandoned comment draft state (preserve typed draftBody per
+      // existing contract — user may reopen the panel and continue typing).
+      clearPendingCommentDraft({ preserveDraftBody: true });
+      // Release mobile modal ownership BEFORE hiding so focus restoration lands
+      // on a non-inert element.
+      if (_modalActive) _releaseModal();
+      // Unregister from the shared overlay stack.
+      if (_panelOverlay && window.OKFOverlayStack) window.OKFOverlayStack.remove(_panelOverlay);
+      state.openPanel = null;
+      panelShell.hidden = true;
+      panelOverlay.hidden = true;
+      (railButtons || []).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+      // Safe focus restoration: validate the saved trigger or use fallback chain.
+      safeFocus(panelLastFocus);
+      panelLastFocus = null;
+    }
+    function togglePanel(id) { state.openPanel === id ? closePanel() : openPanel(id); }
+
+    // ---- Mobile (<=900px) modal ownership --------------------------------
+    // At narrow viewports the panel becomes a full-screen modal dialog:
+    // role=dialog + aria-modal=true, siblings inert, focus trapped, Escape
+    // topmost. Desktop stays complementary/non-modal (no inert/trap).
+    var _modalActive = false;
+    var _modalInerted = [];    // elements we set inert on (for exact restore)
+    var _modalPrevRole = null;
+    var _modalTrapHandler = null;
+    var _modalFocusTimer = null;
+    var _mobileMq = window.matchMedia("(max-width: 900px)");
+
+    function _isMobile() {
+      return _mobileMq.matches;
+    }
+
+    function _acquireModal(opts) {
+      _modalActive = true;
+      _modalPrevRole = panelShell.getAttribute("role");
+      panelShell.setAttribute("role", "dialog");
+      panelShell.setAttribute("aria-modal", "true");
+      // Inert all body children except panel + overlay (scripts are in <head>
+      // or have no visual content). Record prior inert state for exact restore.
+      _modalInerted = [];
+      var bodyChildren = document.body.children;
+      for (var i = 0; i < bodyChildren.length; i++) {
+        var child = bodyChildren[i];
+        if (child === panelShell || child === panelOverlay) continue;
+        if (child.tagName === "SCRIPT" || child.tagName === "LINK" || child.tagName === "STYLE") continue;
+        if (child.inert) continue; // already inert — don't double-record
+        child.inert = true;
+        _modalInerted.push(child);
+      }
+      // Focus: composer if requested, else active tab, else panel shell.
+      // Deferred so the panel render finishes first; cancelable via
+      // _modalFocusTimer so close/release can abort if they fire first.
+      if (_modalFocusTimer) clearTimeout(_modalFocusTimer);
+      _modalFocusTimer = setTimeout(function () {
+        _modalFocusTimer = null;
+        var focusTarget = null;
+        if (opts && opts.focusComposer) {
+          focusTarget = panelBody.querySelector(".okf-composer__textarea");
+        }
+        if (!focusTarget) {
+          var activeTab = panelTabs.querySelector('.okf-panel__tab[aria-selected="true"]');
+          if (activeTab) focusTarget = activeTab;
+        }
+        if (!focusTarget) focusTarget = panelShell;
+        try { focusTarget.focus({ preventScroll: true }); } catch (e) {}
+      }, 0);
+      // Tab trap: reuse the canonical focusableIn helper (filters
+      // hidden/disabled/inert/negative-tabindex/visibility:hidden).
+      _modalTrapHandler = function (e) {
+        if (e.key !== "Tab") return;
+        trapFocusIn(panelShell, !e.shiftKey);
+        // preventDefault for Tab at focus boundaries is handled inside
+        // trapFocusIn's wrapping logic; we also preventDefault here so the
+        // browser's native Tab doesn't escape the panel before trapFocusIn
+        // wraps — but only if focus actually wrapped (focusables exist).
+        var focusables = focusableIn(panelShell);
+        if (focusables.length) e.preventDefault();
+      };
+      panelShell.addEventListener("keydown", _modalTrapHandler);
+      // Escape is handled by the shared overlay stack — no separate
+      // mobile-only Escape handler needed. The panel registers with the
+      // stack in openPanel; closePanel unregisters.
+    }
+
+    function _releaseModal() {
+      if (!_modalActive) return;
+      _modalActive = false;
+      // Cancel any pending deferred focus.
+      if (_modalFocusTimer) { clearTimeout(_modalFocusTimer); _modalFocusTimer = null; }
+      // Restore role.
+      if (_modalPrevRole) panelShell.setAttribute("role", _modalPrevRole);
+      else panelShell.removeAttribute("role");
+      panelShell.removeAttribute("aria-modal");
+      // Restore inert: only undo what we set.
+      for (var i = 0; i < _modalInerted.length; i++) {
+        _modalInerted[i].inert = false;
+      }
+      _modalInerted = [];
+      // Remove modal-only listeners.
+      if (_modalTrapHandler) panelShell.removeEventListener("keydown", _modalTrapHandler);
+      _modalTrapHandler = null;
+    }
+
+    // Breakpoint transition: crossing 900px while the panel is open must
+    // acquire or release modal ownership without losing the selected panel.
+    // addEventListener + addListener fallback for older browsers.
+    var _bpHandler = function (e) {
+      if (!state.openPanel) return;
+      if (e.matches) {
+        // Desktop → mobile: acquire modal.
+        if (!_modalActive) _acquireModal({});
+      } else {
+        // Mobile → desktop: release modal (panel stays open, non-modal).
+        if (_modalActive) _releaseModal();
+        try { panelShell.focus(); } catch (er) {}
+      }
+    };
+    if (_mobileMq.addEventListener) _mobileMq.addEventListener("change", _bpHandler);
+    else if (_mobileMq.addListener) _mobileMq.addListener(_bpHandler);
 
   // Editorial Workbench Round 2: the thin studio rail. Always docked on
   // concept pages (>=900px); each icon opens the matching overlay tab. The
+  // ---- Deterministic inline SVG icon factory -----------------------------
+  // Replaces font-dependent Unicode glyphs (💬 ↻ ☰ ⓘ) that render as tofu in
+  // capture/minimal-font environments. Every icon: viewBox 0 0 16 16, 1em,
+  // currentColor, fill none, aria-hidden=true, focusable=false.
+  var SVG_ICONS = {
+    comments: '<path d="M2 3h12v8H6l-3 3v-3H2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>',
+    changes: '<path d="M4 8a4 4 0 0 1 7-2.6M12 2v3.5h-3.5M12 8a4 4 0 0 1-7 2.6M4 14v-3.5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+    outline: '<path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+    metadata: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+    navCollapse: '<path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+    plus: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+  };
+  function svgIcon(name) {
+    var inner = SVG_ICONS[name];
+    if (!inner) return "";
+    return '<svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;pointer-events:none">' + inner + '</svg>';
+  }
+
   // Comments icon carries a live count badge (synced by updateBadges).
   var railCommentBadge = null;
   function buildRail() {
     // role="group" (not "toolbar") to match the sibling view-switch: the rail
     // has no roving-focus arrow handling, so "toolbar" would over-promise.
     var railEl = el("aside", { class: "okf-rail", role: "group", "aria-label": "Studio" });
-    function railBtn(id, glyph, label) {
+    function railBtn(id, icon, label) {
       var b = el("button", { type: "button", class: "okf-rail__btn",
         "aria-pressed": "false", "aria-controls": "okf-panel",
-        title: label, "aria-label": label, text: glyph });
+        title: label, "aria-label": label });
+      b.innerHTML = svgIcon(icon);
       b.dataset.railId = id;
       b.addEventListener("click", function () { togglePanel(id); });
       railEl.appendChild(b);
       return b;
     }
-    var cBtn = railBtn("comments", "💬", "Comments");   // 💬
+    var cBtn = railBtn("comments", "comments", "Comments");
     railCommentBadge = el("span", { class: "okf-rail__badge", "aria-hidden": "true", hidden: "", text: "0" });
     cBtn.appendChild(railCommentBadge);
-    railBtn("changes", "↻", "Changes");                      // ↻
-    railBtn("outline", "☰", "Outline");                      // ☰
-    railBtn("metadata", "ⓘ", "Metadata");                    // ⓘ
+    railBtn("changes", "changes", "Changes");
+    railBtn("outline", "outline", "Outline");
+    railBtn("metadata", "metadata", "Metadata");
     railEl.appendChild(el("span", { class: "okf-rail__spacer", "aria-hidden": "true" }));
-    // Quick-actions (+) jumps to the Comments overlay (its intents toolbar).
+    // Quick-actions jumps to the Comments overlay (its intents toolbar).
     var plus = el("button", { type: "button", class: "okf-rail__btn",
-      title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel", text: "+" });
+      title: "Quick actions", "aria-label": "Quick actions", "aria-controls": "okf-panel" });
+    plus.innerHTML = svgIcon("plus");
     plus.addEventListener("click", function () { openPanel("comments", { focusComposer: false }); });
     railEl.appendChild(plus);
     document.body.appendChild(railEl);
@@ -3714,6 +4323,10 @@
     window.okfLoomLive.on("presence", renderPresence);
     window.okfLoomLive.on("comment", (c) => {
       if (!c || !c.id) return;
+      // Clear jump context if this comment was the active jump target and its
+      // state changed (agent resolved/dismissed it server-side — the card will
+      // be rebuilt by renderCommentsPanel below).
+      if (_jumpState.id === c.id && c.state && c.state !== "open") _clearJumpContext();
       upsertComment(c);
       if (state.openPanel === "comments") renderCommentsPanel();
       updateBadges();
@@ -4032,10 +4645,20 @@
     conflictState.open = true;
     conflictState.overlay.hidden = false;
     conflictState.lastFocus = document.activeElement;
+    // Register with the shared overlay stack.
+    if (!_conflictOverlayEntry) _conflictOverlayEntry = { close: function () { _closeConflict("keep"); } };
+    if (window.OKFOverlayStack) window.OKFOverlayStack.push(_conflictOverlayEntry);
     // Focus the first action button after a tick (let the modal render).
-    setTimeout(() => {
-      const first = focusableIn(conflictState.overlay)[0];
-      if (first) try { first.focus({ preventScroll: true }); } catch (e) {}
+    // Generation guard: if _closeConflict fires before the timer, the callback
+    // no-ops. Timer is cancelable via _conflictFocusTimer.
+    if (_conflictFocusTimer) clearTimeout(_conflictFocusTimer);
+    var cgen = conflictState._gen = (conflictState._gen || 0) + 1;
+    _conflictFocusTimer = setTimeout(function () {
+      _conflictFocusTimer = null;
+      if (conflictState.open && conflictState._gen === cgen) {
+        const first = focusableIn(conflictState.overlay)[0];
+        if (first) try { first.focus({ preventScroll: true }); } catch (e) {}
+      }
     }, 20);
     // Resolve the caller's promise once the user picks an action.
     return new Promise((resolve) => {
@@ -4221,11 +4844,13 @@
     conflictState.overlay = overlay;
   }
 
+  var _conflictOverlayEntry = null;
+  var _conflictFocusTimer = null;
   function _conflictKeydown(e) {
     if (!conflictState.open) return;
-    if (e.key === "Escape") { e.preventDefault(); _closeConflict("keep"); }
+    // Escape is handled by the shared overlay stack — no separate handler.
     // Focus trap: Tab/Shift+Tab cycles inside the alertdialog.
-    else if (e.key === "Tab") {
+    if (e.key === "Tab") {
       e.preventDefault();
       trapFocusIn(conflictState.overlay, !e.shiftKey);
     }
@@ -4233,14 +4858,14 @@
 
   function _closeConflict(action, newResponse) {
     if (!conflictState.open) return;
+    if (_conflictFocusTimer) { clearTimeout(_conflictFocusTimer); _conflictFocusTimer = null; }
     conflictState.open = false;
+    if (_conflictOverlayEntry && window.OKFOverlayStack) window.OKFOverlayStack.remove(_conflictOverlayEntry);
     conflictState.overlay.hidden = true;
     // Re-enable buttons for the next conflict.
     $$("button", conflictState.overlay).forEach((b) => { b.disabled = false; });
-    // Restore focus to the trigger.
-    if (conflictState.lastFocus && typeof conflictState.lastFocus.focus === "function") {
-      try { conflictState.lastFocus.focus({ preventScroll: true }); } catch (e) {}
-    }
+    // Safe focus restoration: validate saved trigger or use fallback chain.
+    safeFocus(conflictState.lastFocus);
     conflictState.lastFocus = null;
     const resolve = conflictState._resolve;
     conflictState._resolve = null;
@@ -4419,6 +5044,7 @@
     openPanel,
     closePanel,
     openPalette,
+    closePalette,
     setView,
     toggleFocus,
     get state() { return state; },

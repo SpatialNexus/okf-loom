@@ -13,20 +13,38 @@
   position: relative;
 }
 
-/* Legend overlay showing type → colour */
+/* Legend: native <details>/<summary> in the right detail pane.
+ * Never overlays canvas nodes/labels/focus. Open on desktop, closed on mobile. */
 .okf-graph-legend {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
+  margin: 0 0 var(--okf-space-3);
+  padding: var(--okf-space-2) var(--okf-space-3);
   background: var(--okf-bg-elev);
   border: 1px solid var(--okf-border);
   border-radius: var(--okf-radius-sm);
-  padding: 6px 10px;
   font-size: 0.75rem;
-  max-height: 40vh;
-  overflow-y: auto;
-  box-shadow: var(--okf-shadow);
 }
+.okf-graph-legend > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--okf-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--okf-fg-muted);
+  margin-bottom: var(--okf-space-1);
+  list-style: none;  /* custom marker below */
+}
+.okf-graph-legend > summary::-webkit-details-marker { display: none; }
+.okf-graph-legend > summary::before {
+  content: ""; width: 0; height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  margin-right: 4px; display: inline-block;
+  transition: transform 0.12s ease;
+  vertical-align: middle;
+}
+.okf-graph-legend[open] > summary::before { transform: rotate(90deg); }
+.okf-graph-legend__body { max-height: 40vh; overflow-y: auto; }
 .okf-graph-legend__item {
   display: flex;
   align-items: center;
@@ -39,6 +57,7 @@
   height: 10px;
   border-radius: 2px;
   border: 1px solid var(--okf-border-strong);
+  flex-shrink: 0;
 }
 
 /* A small hint overlay while Cytoscape.js is still loading from CDN. */
@@ -53,7 +72,7 @@
   font-size: 0.78rem;
   color: var(--okf-fg-muted);
 }
-.okf-graph-loading--error { color: #dc2626; border-color: #dc2626; }
+.okf-graph-loading--error { color: var(--okf-error); border-color: var(--okf-error); }
 
 /* ---- Keyboard-accessible node index (P1-4 / P2-2 iter-1, P2-4 iter-2) ---- *
  * A collapsible <details> overlay on the canvas. Each entry is a real
@@ -81,6 +100,37 @@
   border-radius: var(--okf-radius-sm);
   box-shadow: var(--okf-shadow);
   font-size: var(--okf-text-sm);
+}
+/* Mobile: node-index is in normal flow (reparented by JS), not an overlay. */
+.okf-node-index--mobile {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box;
+  max-height: 50vh;
+  margin: 0 0 var(--okf-space-3) 0;
+  box-shadow: none;
+}
+.okf-node-index--mobile > summary {
+  font-size: var(--okf-text-base);
+  white-space: normal;
+  overflow: visible;
+}
+.okf-node-index--mobile .okf-node-index__label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.okf-node-index--mobile .okf-node-index__list {
+  max-height: 40vh;
+}
+.okf-graph-explore-map {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--okf-space-3);
+  text-align: center;
 }
 .okf-node-index > summary {
   cursor: pointer;
@@ -241,8 +291,10 @@
 }
 .okf-signal__advanced > summary::-webkit-details-marker { display: none; }
 .okf-signal__advanced > summary::after {
-  content: "▸";
-  color: var(--okf-fg-muted);
+  content: ""; width: 0; height: 0;
+  border-left: 4px solid var(--okf-fg-muted);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
   transition: transform 0.15s ease;
 }
 .okf-signal__advanced[open] > summary::after { transform: rotate(90deg); }
@@ -576,39 +628,61 @@
   padding: 2px;
 }
 
-/* ---- Phase 4: legend rows as type filter chips -------------------------- */
-.okf-graph-legend__item--chip { cursor: pointer; border-radius: var(--okf-radius-sm); padding: 1px 4px; }
+/* ---- Phase 4: legend rows as type filter chips (native buttons) ---------- */
+.okf-graph-legend__item--chip {
+  display: flex; align-items: center; gap: 6px;
+  cursor: pointer; border: none; background: transparent; color: inherit;
+  border-radius: var(--okf-radius-sm); padding: 2px 4px; width: 100%;
+  text-align: left; font: inherit; font-size: 0.75rem;
+}
 .okf-graph-legend__item--chip:hover { background: var(--okf-bg-inset); }
 .okf-graph-legend__item--chip:focus-visible { outline: 2px solid var(--okf-accent); outline-offset: 1px; }
 .okf-graph-legend__item--off { opacity: 0.45; }
 .okf-graph-legend__item--off span:last-child { text-decoration: line-through; }
 
-@media (max-width: 900px) {
-  .okf-graph-legend { display: none; }
-  .okf-node-index { width: min(220px, 70vw); top: 56px; }
-  /* Mobile-open feedback loop: stack the panes in normal
-   * flow so the page scrolls, give the graph a tall fixed viewport (76vh), and
-   * let the detail panel flow at natural height below it. The open drawer is
-   * capped at 36vh, so the graph keeps a ≈39vh readable strip uncovered — well
-   * above the ~35vh the reviewer requires — instead of a thumbnail. */
-  .okf-layout { display: block; min-height: auto; }
-  .okf-layout > .okf-graph { flex: 0 0 auto; height: 76vh; min-height: 360px; }
-  .okf-layout > .okf-detail { flex: 0 0 auto; }
-  /* The signal bar is in-flow at the top of the detail pane (which
-   * stacks below the canvas on mobile) — no overlay geometry needed; just
-   * relax the sticky inset to the pane's mobile padding. */
-  .okf-signal--bar { top: 0; margin: 0 0 var(--okf-space-3); padding: var(--okf-space-2) var(--okf-space-3); }
-  .okf-signal__body { max-height: 29vh; -webkit-overflow-scrolling: touch; }
-  /* Stack the overlays so the collapsed Signal summary, node index, and LOD
-   * pill never sit on top of each other. */
-  .okf-graph-lod-pill { font-size: var(--okf-text-xs); padding: 4px 10px; top: 102px; }
-  /* Topbar controls wrap instead of truncating ("Force n…") (reviewer #10).
-   * Scoped to graph contexts since graph.css only loads on the graph page and
-   * the single-file viewer. */
-  .okf-topbar__controls { flex-wrap: wrap; row-gap: var(--okf-space-2); }
-  .okf-topbar__controls #okf-search { flex: 1 1 100%; }
-  .okf-topbar__controls select { flex: 1 1 auto; min-width: 8.5rem; }
-}
+  @media (max-width: 900px) {
+    .okf-graph-legend:not([open]) { margin-bottom: 0; }
+    .okf-node-index { width: min(220px, 70vw); top: 56px; }
+    /* Mobile-open feedback loop: stack the panes in normal
+     * flow so the page scrolls, give the graph a tall fixed viewport (76vh), and
+     * let the detail panel flow at natural height below it. The open drawer is
+     * capped at 36vh, so the graph keeps a ≈39vh readable strip uncovered — well
+     * above the ~35vh the reviewer requires — instead of a thumbnail. */
+    .okf-layout { display: block; min-height: auto; }
+    .okf-layout > .okf-graph { flex: 0 0 auto; height: 76vh; min-height: 360px; }
+    .okf-layout > .okf-detail { flex: 0 0 auto; }
+    /* The signal bar is in-flow at the top of the detail pane (which
+     * stacks below the canvas on mobile) — no overlay geometry needed; just
+     * relax the sticky inset to the pane's mobile padding. */
+    .okf-signal--bar { top: 0; margin: 0 0 var(--okf-space-3); padding: var(--okf-space-2) var(--okf-space-3); }
+    .okf-signal__body { max-height: 29vh; -webkit-overflow-scrolling: touch; }
+    /* Stack the overlays so the collapsed Signal summary, node index, and LOD
+     * pill never sit on top of each other. */
+    .okf-graph-lod-pill { font-size: var(--okf-text-xs); padding: 4px 10px; top: 102px; }
+    /* Editorial Workbench hardening: graph topbar controls must NOT wrap
+     * (wrapping pushed controls outside the fixed single-row bar height).
+     * Instead they scroll horizontally inside the controls scroller — same
+     * pattern as the wiki topbar. Every child has min-width:0 so no single
+     * control forces document-level horizontal overflow. */
+    .okf-topbar__controls {
+      flex-wrap: nowrap; overflow-x: auto; row-gap: 0;
+    }
+    .okf-topbar__controls > * { min-width: 0; flex-shrink: 0; }
+    .okf-topbar__controls #okf-search { flex: 1 1 100px; min-width: 90px; }
+    .okf-topbar__controls select { flex: 0 1 auto; min-width: 7rem; }
+  }
+
+  /* Narrow viewport: graph topbar also wraps so all controls are visible. */
+  @media (max-width: 430px) {
+    .okf-topbar { flex-wrap: wrap; height: auto; min-height: var(--okf-topbar-h); }
+    .okf-topbar__brand { flex: 1 1 100%; }
+    .okf-topbar__controls {
+      flex: 1 1 100%; width: 100%; overflow-x: visible; flex-wrap: wrap;
+      gap: var(--okf-space-1); padding-top: var(--okf-space-1);
+    }
+    .okf-topbar__controls > * { min-width: 0; }
+    .okf-topbar__controls #okf-search { flex: 1 1 120px; }
+  }
 
 @media (prefers-reduced-motion: reduce) {
   .okf-signal__advanced > summary::after { transition: none !important; }

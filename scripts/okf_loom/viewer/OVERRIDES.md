@@ -34,13 +34,32 @@ footer:
 
 ## 2. Static asset overrides
 
-Drop a file at `.okf-loom/viewer/static/<file>` to replace the built-in asset.
-Recognised files: `wiki.css`, `wiki.js`, `graph.css`, `graph.js`. Both the
-live server (`/__static/...`) and the static-site builder honour overrides.
+Drop a file at `.okf-loom/viewer/static/<file>` to replace a built-in asset.
+Both the live server (`/__static/...`) and the static-site builder honour
+overrides. **Only built-in viewer asset names are overridable** — the single
+explicit scope (the on-disk built-in set, currently):
+
+```text
+graph.css   graph.js   live.js   renderers.js   static-search.js
+studio.css  studio.js  theme.js  wiki.css       wiki.js
+```
+
+(derive the current set from `list_builtin_static()` / `STATIC_ASSET_NAMES`;
+an override for any other name is ignored, and loading/serving an unknown
+name is rejected.)
 
 ```text
 .okf-loom/viewer/static/wiki.css   ← replaces the bundled stylesheet
 ```
+
+External asset URLs carry a content-derived `?v=` cache-busting query
+(see `http_routes.md` › `/__static/<file>`). The version is the SHA-256 of
+the *resolved* asset, so editing an override changes its version and
+invalidates browser/CDN caches automatically — no manual cache-clear and no
+server reload needed. The version is recomputed from the override's current
+bytes on every render, so a saved stale value can never be served. When the
+active-code gate is closed the override is ignored and the version falls
+back to the builtin's.
 
 ## 3. Type palette overrides
 
@@ -82,8 +101,17 @@ of defence apply:
 |------------------|---------|-----------|------------------------------------------------|
 | `name`           | string  | bundle dir name | Display name for the viewer / browser title. |
 | `default_layout` | string  | `"cose"`  | Initial Cytoscape layout: `cose` / `concentric` / `breadthfirst` / `circle` / `grid`. |
-| `theme`          | string  | `"light"` | Initial colour theme: `light` / `dark`. Users can toggle and the choice is persisted to `localStorage['okf-theme']`. |
+| `theme`          | string  | `"technical-light"` | Concrete initial colour theme: `"swiss-light"` / `"swiss-dark"` / `"technical-light"` / `"technical-dark"`. A saved user preference takes precedence. |
 | `cdn`            | bool    | `true`    | If `false`, omit the Cytoscape.js CDN `<script>` tags from the single-file viewer and the `/__graph` page (for fully offline packaging — supply your own copy in that case). Markdown is rendered server-side by okf-loom's own stdlib renderer, so there is no client-side markdown parser to gate. |
+
+`config.json` is strict: malformed JSON, a non-object top level, unknown keys,
+wrong types, empty values, and unsupported enum values stop the operation with
+a file-and-field diagnostic. Retired theme names are not silently interpreted.
+Replace `light` with `technical-light`, `dark` or `midnight` with
+`technical-dark`, and `pastel` or `sepia` with `swiss-light`. This explicit
+configuration migration is separate from the one-time migration of returning
+users' saved browser preferences. Display names may contain ordinary special
+characters; renderer escaping remains mandatory and prevents interpolation.
 
 ```json
 {

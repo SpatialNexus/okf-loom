@@ -460,6 +460,8 @@
   // Best-effort: if the selected text no longer exists after the swap, the
   // selection is simply cleared (no false match). The studio.js path uses a
   // richer block-aware restore (see studio.js saveSelectionAcrossPatch).
+  // FAIL-CLOSED: if the text appears multiple times, do NOT restore to the
+  // first global match — the selection is cleared instead.
   function saveBodySelection() {
     const sel = window.getSelection && window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
@@ -471,6 +473,7 @@
     if (!snapshot || !snapshot.text) return;
     const body = document.querySelector(".okf-page__body");
     if (!body) return;
+    // Find ALL occurrences and fail closed if ambiguous (>1 match).
     const found = findTextNode(body, snapshot.text);
     if (!found) return;
     const range = document.createRange();
@@ -481,15 +484,30 @@
     sel.removeAllRanges();
     try { sel.addRange(range); } catch (e) {}
   }
-  function findTextNode(root, text) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-      const idx = node.nodeValue ? node.nodeValue.indexOf(text) : -1;
-      if (idx >= 0) return { node: node, start: idx, end: idx + text.length };
+    // Single-node text search. Returns null if not found or if the text spans
+    // multiple text nodes (cross-element). Fail-closed: returns null if the
+    // text appears more than once total (including multiple occurrences within
+    // the SAME text node), since the correct occurrence cannot be determined.
+    function findTextNode(root, text) {
+      if (!text) return null;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      let node;
+      let match = null;
+      let matchCount = 0;
+      while ((node = walker.nextNode())) {
+        if (!node.nodeValue) continue;
+        // Enumerate ALL occurrences within this text node, not just the first.
+        let fromIdx = 0;
+        let idx;
+        while ((idx = node.nodeValue.indexOf(text, fromIdx)) >= 0) {
+          matchCount++;
+          if (matchCount > 1) return null; // ambiguous, fail closed
+          match = { node: node, start: idx, end: idx + text.length };
+          fromIdx = idx + 1;
+        }
+      }
+      return match;
     }
-    return null;
-  }
 
   function pulseHighlight() {
     if (REDUCED_MOTION) return; // respect preference: no flash

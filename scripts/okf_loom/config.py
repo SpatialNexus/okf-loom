@@ -27,6 +27,7 @@ from .exceptions import OKFError
 # against the root and confirm containment via relative_to). Importing the
 # private symbol is intentional: the spec mandates reuse, not duplication.
 from .log import _resolve_within_bundle
+from .theme import CONFIGURABLE_THEMES, legacy_theme_message
 # P2-1: import the shared YAML alias-bomb defences from parse.py rather than
 # duplicating the security control. This adds only parse.py's leaf deps
 # (paths/exceptions); it does NOT pull in model (config already imports
@@ -276,9 +277,7 @@ class SearchConfig:
         )
 
 
-_ALLOWED_STUDIO_THEMES: frozenset[str] = frozenset(
-    {"auto", "technical-light", "technical-dark", "swiss-light", "swiss-dark"}
-)
+_ALLOWED_STUDIO_THEMES: frozenset[str] = CONFIGURABLE_THEMES
 
 
 @dataclass(frozen=True)
@@ -319,7 +318,17 @@ class StudioConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "StudioConfig":
         data = data or {}
-        theme = str(data.get("theme", _DEFAULT_STUDIO_THEME))
+        theme_value = data.get("theme", _DEFAULT_STUDIO_THEME)
+        if not isinstance(theme_value, str):
+            raise OkfConfigError(
+                f"studio.theme must be a string, got {type(theme_value).__name__}"
+            )
+        theme = theme_value.strip()
+        if not theme:
+            raise OkfConfigError("studio.theme must not be empty or whitespace")
+        migration = legacy_theme_message("studio.theme", theme)
+        if migration:
+            raise OkfConfigError(migration)
         _validate_enum("studio.theme", theme, _ALLOWED_STUDIO_THEMES)
         raw_hosts = data.get("allowed_hosts", list(_DEFAULT_STUDIO_ALLOWED_HOSTS))
         if isinstance(raw_hosts, str):
