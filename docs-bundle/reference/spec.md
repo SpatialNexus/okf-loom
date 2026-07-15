@@ -308,6 +308,10 @@ scripts/okf-loom replace-text --bundle docs-bundle --id reference/new_topic --ol
 ```
 
 `link-add` is fail-closed on missing targets unless `--allow-forward-reference` is passed intentionally.
+Without `--section`, `link-add` MUST insert immediately before a terminal body
+`# Citations` appendix so the link remains visible when duplicate body
+citations are rendered separately; if there is no such appendix, it appends at
+the end of the body. Explicit `--section` placement is unchanged.
 Repeated actions should converge to no-op or already-present results rather than duplicate content.
 
 Partial body updates are first-class: `update-section` replaces (or, with

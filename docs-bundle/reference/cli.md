@@ -635,8 +635,11 @@ scripts/okf-loom link-add --bundle BUNDLE --source SOURCE --target TARGET
             [--format {text,json}] [--group-id GROUP_ID] [--actor ACTOR]
 ```
 
-Append a markdown link in `--section` (or end of body). Always emits
-the SPEC §5.1 absolute form (`/tables/customers.md`).
+With `--section`, append a markdown link in that section. Without `--section`,
+insert it immediately before a terminal body `# Citations` appendix so it
+remains visible when duplicate body citations are rendered separately;
+otherwise append it at the end of the body. Always emits the SPEC §5.1
+absolute form (`/tables/customers.md`).
 
 | Flag | Effect |
 |---|---|
