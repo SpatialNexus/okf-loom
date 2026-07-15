@@ -113,8 +113,10 @@ okf-loom/
 │   ├── okf-loom              # checked-in helper command
 │   ├── okf_loom/             # checkout-local runtime package
 │   ├── build_skill_archive.py
+│   ├── capture_support.py     # shared browser resolution/readiness/manifests
 │   ├── capture_readme_media.py
 │   ├── capture_viewer_proof.py
+│   ├── capture_final_workbench_proof.py
 │   ├── capture_signal_controls.py
 │   └── lint-js.sh
 ├── docs-bundle/             # OKF documentation bundle
@@ -125,6 +127,16 @@ okf-loom/
 ├── AGENTS.md                # thin pointer for agents that read AGENTS first
 └── CLAUDE.md                # thin pointer for agents that read CLAUDE first
 ```
+
+Viewer appearance state is single-owned by
+`scripts/okf_loom/viewer/static/theme.js` across live, static, and single-file
+outputs. Browser-proof tooling shares browser discovery, semantic readiness,
+and manifest writing through `scripts/capture_support.py`.
+`scripts/capture_readme_media.py` refreshes the stable curated media set;
+`scripts/capture_viewer_proof.py` writes a lightweight dated live/static smoke
+proof; `scripts/capture_final_workbench_proof.py` captures the bounded final
+Editorial Workbench parity matrix. The dedicated first-paint/no-JS/table
+artifact driver is `tests/capture_boot_settlement_proof.py`.
 
 ## Core commands
 

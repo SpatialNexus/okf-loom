@@ -26,6 +26,7 @@ from typing import Any
 from .aliases import alias_labels
 from .model import Bundle, Concept
 from .paths import ConceptId, concept_id_to_str
+from .theme import EXPLICIT_THEMES
 from .viewer.assets import (
     auto_palette,
     list_builtin_static,
@@ -39,6 +40,7 @@ from .viewer.assets import (
     type_icon_svg,
     type_icon_key,
     type_icon_paths,
+    versioned_asset_url,
 )
 from .viewer.markdown import (
     markdown_to_html,
@@ -548,46 +550,75 @@ def build_graph_data(bundle: Bundle, *, name: str | None = None) -> dict[str, An
 # Theme button (P2-74) + shared topbar nav fragment (P2-61)
 # ---------------------------------------------------------------------------
 
-# The set of valid ``data-theme`` values. wiki.css defines a token block per
-# theme. KEEP IN SYNC with the THEMES / THEME_GLYPHS copies in wiki.js:27-28,
-# graph.js:30-31 and studio.js:219-220 (each JS context loads without the
-# others). Four Editorial-Workbench themes: technical/swiss families in
-# light + dark. `_theme_button_html` no longer cycles this tuple; it only
-# membership-tests `initial_theme` against it and hyphen-partitions the match
-# into family/mode. The order is retained solely for (a) the JS-mirror sync
-# contract and (b) auto resolving into Swiss (the primary family), which is
-# why Swiss stays listed first.
-_THEMES: tuple[str, ...] = (
-    "swiss-light", "swiss-dark", "technical-light", "technical-dark",
-)
-_THEME_GLYPHS: dict[str, str] = {
-    "swiss-light": "\u25d1",      # \u25d1 right half-black circle (solid-fill motif)
-    "swiss-dark": "\u25d0",       # \u25d0 left half-black circle
-    "technical-light": "\u2600",  # \u2600 sun
-    "technical-dark": "\u263e",   # \u263e moon
-}
+# The set of valid ``data-theme`` values comes from the shared backend contract.
+# The single client-side mirror lives in viewer/static/theme.js (THEMES /
+# LEGACY_THEMES), the canonical theme-state asset loaded before wiki.js /
+# graph.js / studio.js in every context; tests/test_theme_contract.py pins the
+# JS mirror to :data:`okf_loom.theme.EXPLICIT_THEMES` /
+# :data:`~okf_loom.theme.LEGACY_THEME_MIGRATIONS`. Four Editorial-Workbench
+# themes: technical/swiss families in light + dark. `_theme_button_html` only
+# membership-tests `initial_theme` against this tuple and hyphen-partitions the
+# match into family/mode. EXPLICIT_THEMES preserves Swiss-first order for the
+# JS-mirror contract and Auto resolution into Swiss (the primary family).
+_THEMES: tuple[str, ...] = EXPLICIT_THEMES
+
+
+def _theme_js_link(static_prefix: str, bundle: Bundle | None = None) -> str:
+    """``<script>`` tag for the canonical theme-state asset.
+
+    Emitted in ``<head>`` as a PARSER-BLOCKING classic script (no ``defer``)
+    so theme.js resolves ``data-theme`` BEFORE the first paint of ``<body>``.
+
+    Rationale: the resolved theme depends on client-only signals the server
+    cannot know — the saved family/mode preference (localStorage) and, for
+    Auto mode, ``prefers-color-scheme``. Under ``defer`` the browser painted
+    ``<body>`` against the ``:root`` light fallback and only re-themed once
+    the deferred script ran, producing a wrong-theme flash on dark-OS /
+    saved-dark navigations (FOUC). The page CSP (``script-src 'self'``) forbids
+    inline scripts, so a blocking external head script is the only
+    deterministic way to set ``data-theme`` before paint. The fetch overlaps
+    with the render-blocking ``wiki.css`` link (both sit in ``<head>``), so the
+    cost is the marginal theme.js fetch, not a serial delay.
+
+    It still executes BEFORE every consumer: the deferred
+    wiki.js/graph.js/renderers.js at the end of ``<body>`` and the studio
+    module scripts injected before ``</head>`` (a blocking head script runs
+    during head parse, ahead of all deferred/module scripts), so
+    ``window.OKFLoomTheme`` is ready when they run.
+
+    The URL carries a content-derived ``?v=`` cache-busting query
+    (:func:`versioned_asset_url`) so a theme.js edit invalidates browser/CDN
+    caches. The version is computed from the same resolved content in every
+    emit path (serve/SPA/static), keeping the digest contract uniform.
+    """
+    return f'<script src="{versioned_asset_url("theme.js", static_prefix, bundle)}"></script>'
 
 
 def _theme_button_html(initial_theme: str) -> str:
     """Appearance-menu trigger + popover (Round 2 \u00a75.3), server-rendered to
     avoid FOUC. Replaces the former theme-cycle button. Consolidates family
     (technical/swiss) \u00b7 mode (light/dark/auto) \u00b7 contrast (high/soft) \u00b7 border
-    (on/muted/off). The trigger keeps id="okf-theme" so the wiki.js/graph.js/
-    studio.js bindings resolve it; the wiring (open/close + option handlers,
-    each reusing its bundle's applyTheme) lives in those IIFEs. contrast/border
+    (on/muted/off). The trigger keeps id="okf-theme" so the client bindings
+    resolve it; the wiring (open/close + option handlers, driving the shared
+    resolver) lives in viewer/static/theme.js. contrast/border
     default to high/on server-side (the server can't read the user's
     localStorage); the client corrects aria-checked at boot.
     """
     theme = initial_theme if initial_theme in _THEMES else ""
     if theme:
-        family, _, mode = theme.partition("-")  # "swiss-light" -> "swiss","light"
+        # Split at the LAST hyphen — parity with theme.js lastIndexOf("-")
+        # parsing, so a future multi-word family name cannot diverge.
+        family, _, mode = theme.rpartition("-")  # "swiss-light" -> "swiss","light"
     else:
         family, mode = "swiss", "auto"          # auto resolves within Swiss (see JS)
 
     def _opt(setk: str, val: str, label: str, checked: bool) -> str:
+        # tabindex="-1": roving-tabindex pattern managed by theme.js
+        # (sets tabindex="0" on the checked option per group at boot and on
+        # selection change). All peers start unfocusable via Tab.
         return (
             '<button type="button" role="radio" class="okf-appearance__opt" '
-            f'data-okf-set="{setk}" data-okf-val="{val}" '
+            f'tabindex="-1" data-okf-set="{setk}" data-okf-val="{val}" '
             f'aria-checked="{"true" if checked else "false"}">{label}</button>'
         )
 
@@ -611,7 +642,7 @@ def _theme_button_html(initial_theme: str) -> str:
     return (
         '<div class="okf-appearance">'
         '<button id="okf-theme" type="button" class="okf-appearance__trigger" '
-        'aria-haspopup="true" aria-expanded="false" '
+        'aria-haspopup="dialog" aria-expanded="false" '
         'aria-controls="okf-appearance-menu" aria-label="Appearance settings" '
         'title="Appearance">Aa <span aria-hidden="true">\u25be</span></button>'
         '<div class="okf-appearance__menu" id="okf-appearance-menu" role="dialog" '
@@ -822,14 +853,23 @@ def render_single_file(
     data = build_graph_data(bundle, name=display_name)
     template = load_template("single_file.html", bundle)
     css = load_static("wiki.css", bundle) + "\n" + load_static("graph.css", bundle)
-    # Bundle renderers.js too so the single-file detail panel gets
-    # the same mermaid/hljs/KaTeX treatment as the wiki + graph views
-    # (graph.js dispatches okf-loom:bodyPatched after every showDetail).
-    js = load_static("graph.js", bundle) + "\n" + load_static("renderers.js", bundle)
+    # theme.js FIRST (graph.js and renderers.js consume window.OKFLoomTheme /
+    # its okf-loom:themeChanged event); bundle renderers.js too so the
+    # single-file detail panel gets the same mermaid/hljs/KaTeX treatment as
+    # the wiki + graph views (graph.js dispatches okf-loom:bodyPatched after
+    # every showDetail).
+    js = (
+        load_static("theme.js", bundle)
+        + "\n" + load_static("graph.js", bundle)
+        + "\n" + load_static("renderers.js", bundle)
+    )
 
-    initial_theme = "light"
-    if config.get("theme") in _THEMES:
-        initial_theme = config["theme"]
+    # Parity with the served/built pages: a concrete configured theme is
+    # server-rendered into ``data-theme`` (no FOUC); otherwise the attribute
+    # is omitted and theme.js resolves Swiss Auto/OS (never the retired
+    # "light" name the old fallback emitted).
+    initial_theme = config.get("theme") or "auto"
+    theme_attr = f' data-theme="{initial_theme}"' if initial_theme in _THEMES else ""
     initial_layout = config.get("default_layout") or "cose"
     cdn_scripts = _CDN_SCRIPTS if config.get("cdn", True) else (
         "<!-- CDN scripts omitted (config.cdn=false). Provide your own "
@@ -843,6 +883,7 @@ def render_single_file(
         .replace("__BUNDLE_DATA__", _json_for_script(data))
         .replace("/*__VIEWER_CSS__*/", css)
         .replace("/*__VIEWER_JS__*/", js)
+        .replace("__THEME_ATTR__", theme_attr)
         .replace("__INITIAL_THEME__", initial_theme)
         .replace("__INITIAL_THEME_BUTTON__", _theme_button_html(initial_theme))
         .replace("__INITIAL_LAYOUT__", initial_layout)
@@ -1420,6 +1461,30 @@ def _readtime_html(body: str) -> str:
     return f'<span class="okf-readtime">{minutes} min read</span>'
 
 
+def _render_concept_body_html(
+    concept: Concept,
+    bundle: Bundle,
+    *,
+    mode: str,
+    root_prefix: str = "",
+) -> str:
+    """Render the canonical concept-body fragment for pages and live patches.
+
+    Keeping markdown conversion, link rewriting, citation suppression, and
+    heading demotion behind this boundary prevents ``/__data/doc`` from
+    emitting a structurally different fragment during ready/resync.
+    """
+    body_html = markdown_to_html(concept.body)
+    body_html = rewrite_internal_links(
+        body_html, _render_link_map(bundle, concept, mode)
+    )
+    if mode == "static":
+        body_html = _relativize_asset_srcs(body_html, root_prefix)
+    if _has_frontmatter_citations(concept):
+        body_html = _strip_body_citations_section(body_html)
+    return _demote_headings(body_html)
+
+
 def _render_concept_page(
     concept: Concept,
     bundle: Bundle,
@@ -1435,27 +1500,9 @@ def _render_concept_page(
     static_prefix = _static_prefix_for(mode, concept.id)
     root_prefix = _root_prefix_for(mode, concept.id)
 
-    # Body markdown → HTML → internal-link rewrite.
-    body_html = markdown_to_html(concept.body)
-    link_map = _render_link_map(bundle, concept, mode)
-    body_html = rewrite_internal_links(body_html, link_map)
-    if mode == "static":
-        # Absolute image srcs must become page-relative in static builds
-        # (the copied media sits at its bundle-relative path in the output).
-        body_html = _relativize_asset_srcs(body_html, root_prefix)
-    # P1-39: when frontmatter ``citations:`` is present (rendered by the
-    # governed-keys block below), suppress the body's ``# Citations``
-    # heading + its content so the two citation lists don't render twice.
-    # We strip the body's Citations section BEFORE heading demotion so the
-    # regex matches the original (pre-demote) ``<h1>Citations</h1>`` the
-    # markdown renderer emits for ``# Citations``.
-    if _has_frontmatter_citations(concept):
-        body_html = _strip_body_citations_section(body_html)
-    # Demote body headings by one level so the page <h1> (concept title)
-    # is the only top-level heading. This preserves a clean document
-    # outline for screen-reader navigation and SEO. `# Schema` in the
-    # body becomes <h2>, `## Subsection` becomes <h3>, etc. h6 stays h6.
-    body_html = _demote_headings(body_html)
+    body_html = _render_concept_body_html(
+        concept, bundle, mode=mode, root_prefix=root_prefix
+    )
 
     # Editorial Workbench §6.1: on-page ToC from the FINAL body_html so its
     # #anchors match the ids the renderer emitted (gated to >=3 headings).
@@ -1581,9 +1628,10 @@ def _render_concept_page(
         theme_attr = f' data-theme="{initial_theme}"'
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
-    renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    theme_js_link = _theme_js_link(static_prefix, bundle)
+    js_link = f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>'
+    renderers_link = f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
 
     # P2-22: render aliases as a subtitle paragraph immediately after the
     # page title (SPEC §7.1 wording: "show as subtitles"). The subtitle is
@@ -1616,6 +1664,7 @@ def _render_concept_page(
         # target URL. Only consumed by wiki.js in static mode.
         .replace("__ROOT_PREFIX__", _esc_attr_qs(root_prefix))
         .replace("__WIKI_CSS_LINK__", css_link)
+        .replace("__THEME_JS_LINK__", theme_js_link)
         .replace("__WIKI_JS_LINK__", js_link)
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__CONCEPT_ID__", _esc(cid_str))
@@ -2238,9 +2287,10 @@ def _render_index_page(
     # pages, so the notice never appeared on the index/search surfaces).
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
-    renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    theme_js_link = _theme_js_link(static_prefix, bundle)
+    js_link = f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>'
+    renderers_link = f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
     graph_link = "/__graph" if mode in ("serve", "spa") else (
         ("../" * len(sub_parts)) + "__graph.html" if sub_parts else "__graph.html"
     )
@@ -2280,6 +2330,7 @@ def _render_index_page(
         .replace("__BRAND_ARIA_CURRENT__", brand_aria)
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
+        .replace("__THEME_JS_LINK__", theme_js_link)
         .replace("__WIKI_JS_LINK__", js_link)
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__NAV_HTML__", nav_html)
@@ -2398,7 +2449,11 @@ def _render_search_page(
             f'<div class="okf-search-snippet">{_highlight(desc, query)}</div>'
             f'</article>'
         )
-    results_html = "\n".join(result_parts) or '<p class="okf-search-empty">No results.</p>'
+    results_html = "\n".join(result_parts) or (
+        '<p class="okf-search-empty">' +
+        ('No results.' if query else 'Search the bundle by title, tag, or content.') +
+        '</p>'
+    )
 
     theme_attr = ""
     initial_theme = config.get("theme") or "auto"
@@ -2409,9 +2464,10 @@ def _render_search_page(
     # detects static mode and shows the static-search-note there as well.
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    js_link = f'<script src="{static_prefix}/wiki.js" defer></script>'
-    renderers_link = f'<script src="{static_prefix}/renderers.js" defer></script>'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    theme_js_link = _theme_js_link(static_prefix, bundle)
+    js_link = f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>'
+    renderers_link = f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
     # Current spec §9: in static mode also load the client-side
     # searcher so the static __search.html page is functional (no /__search
     # backend available). The live `serve`/`spa` paths are unchanged — they
@@ -2419,8 +2475,8 @@ def _render_search_page(
     # emitted under __static/ by _emit_site (it iterates list_builtin_static).
     if mode == "static":
         js_link = (
-            f'<script src="{static_prefix}/wiki.js" defer></script>\n'
-            f'<script src="{static_prefix}/static-search.js" defer></script>'
+            f'<script src="{versioned_asset_url("wiki.js", static_prefix, bundle)}" defer></script>\n'
+            f'<script src="{versioned_asset_url("static-search.js", static_prefix, bundle)}" defer></script>'
         )
 
     # P2-61: shared topbar nav. Search page lives at the bundle root, so
@@ -2438,8 +2494,10 @@ def _render_search_page(
     # iter1 P3-13: proper pluralisation (no "result(s)" cop-out). The heading
     # also carries the query so the empty state reads naturally.
     count = len(results)
-    if count == 0:
+    if count == 0 and query:
         heading = f'No results for &ldquo;{_esc(query)}&rdquo;'
+    elif count == 0:
+        heading = "Search"
     elif count == 1:
         heading = f'1 result for &ldquo;{_esc(query)}&rdquo;'
     else:
@@ -2454,6 +2512,7 @@ def _render_search_page(
         .replace("__BUNDLE_NAME__", _esc(name))
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
+        .replace("__THEME_JS_LINK__", theme_js_link)
         .replace("__WIKI_JS_LINK__", js_link)
         .replace("__RENDERERS_JS_LINK__", renderers_link)
         .replace("__NAV_HTML__", nav_html)
@@ -2497,15 +2556,15 @@ def _render_graph_page(
     # concept/index/search pages.
     data_attrs = f'data-okf-mode="{mode}" data-okf-enhance="{("1" if mode != "static" else "0")}"'
 
-    css_link = f'<link rel="stylesheet" href="{static_prefix}/wiki.css">'
-    graph_css_link = f'<link rel="stylesheet" href="{static_prefix}/graph.css">'
+    css_link = f'<link rel="stylesheet" href="{versioned_asset_url("wiki.css", static_prefix, bundle)}">'
+    graph_css_link = f'<link rel="stylesheet" href="{versioned_asset_url("graph.css", static_prefix, bundle)}">'
     # The graph detail panel renders the same
     # server-produced concept HTML as the wiki pages, so it needs the SAME
     # progressive renderers (mermaid/hljs/KaTeX). graph.js dispatches
     # okf-loom:bodyPatched after each showDetail() so renderers.js re-scans.
     graph_js = (
-        f'<script src="{static_prefix}/graph.js" defer></script>\n'
-        f'<script src="{static_prefix}/renderers.js" defer></script>'
+        f'<script src="{versioned_asset_url("graph.js", static_prefix, bundle)}" defer></script>\n'
+        f'<script src="{versioned_asset_url("renderers.js", static_prefix, bundle)}" defer></script>'
     )
 
     return (
@@ -2518,6 +2577,7 @@ def _render_graph_page(
         .replace("__STATIC_PREFIX__", static_prefix)
         .replace("__WIKI_CSS_LINK__", css_link)
         .replace("__GRAPH_CSS_LINK__", graph_css_link)
+        .replace("__THEME_JS_LINK__", _theme_js_link(static_prefix, bundle))
         .replace("__GRAPH_JS_SRC__", graph_js)
         .replace("__CDN_SCRIPTS__", cdn_scripts)
         .replace("__INITIAL_THEME__", initial_theme)

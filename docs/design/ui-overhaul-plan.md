@@ -1,5 +1,14 @@
 # Wiki & Graph UI Overhaul Plan
 
+> [!IMPORTANT]
+> **Historical and superseded.** This investigation and proposal predates the
+> completed Editorial Workbench implementation and is retained for design
+> rationale only. The hardening closed at `be52770` and post-closeout
+> stabilization landed through `ded047c`; proposed libraries, phases, file
+> locations, and gaps below are not a current backlog. Use the
+> [current specification](../../docs-bundle/reference/spec.md) and the
+> [completed hardening plan](../../docs-bundle/plans/editorial-workbench-hardening.md).
+
 Investigation date: 2026-07-01, against the live server
 run on `samples/showcase` ("Northwind Coffee"). Bug-level findings from the
 same review touch these surfaces and should ride along with this work.

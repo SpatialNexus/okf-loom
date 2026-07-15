@@ -61,8 +61,41 @@ scripts/okf_loom/
     ├── plugins.py     — entry-point ViewerPlugin loader (group okf_loom.viewer_plugins); CompositeViewerPlugin
     ├── OVERRIDES.md   — concrete examples of every override point
     ├── templates/     — single_file.html, concept_page.html, index_page.html, search_page.html, graph_page.html
-    └── static/        — wiki.{css,js}, graph.{css,js}, live.js (SSE + patching), studio.{css,js} (views/comments/collab UI), static-search.js, renderers.js (progressive mermaid/KaTeX/highlight.js enhancement, shared by wiki pages, the graph detail panel, and the single-file export)
+    └── static/        — theme.js (prepaint resolver + overlay stack + boot watchdog), wiki.{css,js}, graph.{css,js}, live.js (SSE + patching), studio.{css,js} (views/comments/collab UI + terminal boot settlement), static-search.js, renderers.js (progressive mermaid/KaTeX/highlight.js and table enhancement, shared by wiki pages, the graph detail panel, and the single-file export)
 ```
+
+Visual-proof entrypoints under `scripts/` share `scripts/capture_support.py`.
+That module owns Chromium candidate selection, opt-in sandbox disabling, HTTP
+and semantic capture readiness, graph-layout sequence waits, display paths,
+revision metadata, and capture-manifest writing for those entrypoints.
+`tests/capture_boot_settlement_proof.py` is the intentional exception: it is a
+standalone boot-state artifact driver with its own browser selection and
+scenario-specific readiness rules. When `AIC_PLAYWRIGHT_CHROME_PATH` is set,
+that driver tries the named executable first and automatically adds
+`--no-sandbox`; its system-channel and Playwright-managed fallbacks do not add
+that flag.
+
+## Viewer lifecycle ownership
+
+The hardened viewer deliberately divides responsibility instead of making one
+late client script repair the page:
+
+| Contract | Owner |
+|---|---|
+| Validated configured theme and initial server paint | `config.py`, `viewer/assets.py`, and `render.py` |
+| Prepaint family/mode/OS resolution and shared overlay stack | `viewer/static/theme.js`, emitted by `render.py:_theme_js_link` as a parser-blocking head script |
+| Live bootstrap data ordering | `server.py:_studio_bootstrap` and `_send_text`: inert JSON first in `<head>`, studio CSS/modules at the end of `<head>` |
+| Successful vs unavailable boot settlement | `viewer/static/studio.js` settles after synchronous `boot()`; `theme.js` provides the DOMContentLoaded missing-module watchdog; `wiki.css` reveals only the settled failure banner |
+| No-JS table fallback | `viewer/markdown.py:_render_table` emits a semantic, named, tabbable bare scrollport; `wiki.css` contains it locally |
+| JS table enhancement | `viewer/static/renderers.js` wraps, classifies, and reclassifies tables after load, resize, and `okf-loom:bodyPatched`, transferring the focus affordance only to overflowing wrappers |
+| Desktop rail reserve and responsive removal | `viewer/static/wiki.css` / `studio.css`; the reserve exists before studio modules run and is absent on mobile and no-JS layouts |
+| Capture browser/readiness/manifest support | `scripts/capture_support.py` for entrypoints under `scripts/`; `tests/capture_boot_settlement_proof.py` intentionally owns independent browser selection, boot readiness, and provenance for its boot-state artifacts |
+
+This ordering keeps first paint correct without an inline executable script:
+the server-injected bootstrap is data, `theme.js` resolves theme during head
+parse, CSS establishes final initial geometry, and deferred/module scripts only
+enhance an already usable document. If enhancement never runs, native anchors
+and bare tables remain usable.
 
 ## Data flow
 
@@ -255,7 +288,8 @@ flowchart TB
 
 Because every writer goes through the same funnel, **attribution is
 exact** (`actor` + `origin`), **undo is always available** (snapshot +
-optional group manifest under `.okf-loom/session/history/<group_id>/`), and
+optional group manifest under
+`.okf-loom/session/history/_groups/<group_id>/manifest.json`), and
 the **change list is complete** (one `events.jsonl` row per write). There
 is no duplicated bookkeeping between the CLI and HTTP paths.
 
@@ -284,8 +318,7 @@ permanent `log.md`.
 | `presence.json` | Agent presence (current spec §12): `{actor, state, focus, ts}`. State ∈ `idle`/`watching`/`thinking`/`editing`. | ephemeral |
 | `.token` | Per-session CSRF token (`X-OKF-Token`), written 0600 on `scripts/okf-loom serve` boot. Read by `scripts/okf-loom token` and attached by the studio's own JS. | per-session |
 | `.last-logged.json` | Cross-process dedup index (current spec §13). Maps the most-recent `rev` logged per concept so the watcher's disk-backfill never double-logs a write that already logged itself. | ephemeral |
-| `history/` | Undo snapshots (current spec §13). `history/<cid>/<rev>.md` is a capped ring per concept; `history/<group_id>/` carries the group manifest for one-click group undo. | ephemeral |
-| `_groups/` | Group-undo manifests (one per `--group-id` pass): the concept ids + revs to restore. | ephemeral |
+| `history/` | Undo snapshots and group manifests (current spec §13). `history/<cid>/<rev>.md` is a capped ring per concept; `history/_groups/<group_id>/manifest.json` carries the concept ids + revs to restore for one-click group undo. | ephemeral |
 | `proposals.jsonl` | **Only under a user's opt-in `propose_only` constraint** (current spec §10): the agent appends `PlannedAction` envelopes here for review. Absent by default. | ephemeral |
 
 ### The agent loop (current spec §12)
@@ -352,8 +385,11 @@ things that are not the user:
 - **`--no-watch-ui` enforced server-side (current spec §11/§14).** When SSE / live UI is
   off, `/__events` returns `503` and the watcher is skipped entirely —
   not just hidden on the client.
-- **`--no-edit` refuses writes at the route layer.** Live reads stay
-  available; all `POST` endpoints are disabled.
+- **`--no-edit` refuses normal studio writes at the route layer.** Live reads
+  stay available; normal authoring, comment, and directive mutators are
+  disabled. The documented `POST /__tunnel` attach/detach (and status) control
+  remains available for sharing a read-only kiosk, but still requires the
+  session token and Origin/Host acceptance (current spec §11/§14).
 - **Malicious-bundle code is still gated** behind the existing two-layer
   active-code gate (bundle `viewer.allow_active_code: true` AND operator
   `--allow-active-code` / `OKF_LOOM_ALLOW_ACTIVE_CODE`). Editing / saving /

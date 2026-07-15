@@ -13,6 +13,9 @@
       __STATIC_PREFIX__    → URL prefix for /__static/ assets
       __WIKI_CSS_LINK__    → <link rel="stylesheet" href="...wiki.css">
       __GRAPH_CSS_LINK__   → <link rel="stylesheet" href="...graph.css">
+      __THEME_JS_LINK__    → <script src="...theme.js" defer></script>
+                             (canonical theme state; MUST precede graph.js,
+                              which consumes window.OKFLoomTheme)
       __GRAPH_JS_SRC__     → <script src="...graph.js" defer></script>
       __CDN_SCRIPTS__      → Cytoscape.js CDN tag (or empty if config.cdn=false)
       __INITIAL_THEME__    → "technical-light" | "technical-dark" | "swiss-light" | "swiss-dark"
@@ -28,6 +31,7 @@
 <title>__HEAD_TITLE__</title>
 __WIKI_CSS_LINK__
 __GRAPH_CSS_LINK__
+__THEME_JS_LINK__
 __CDN_SCRIPTS__
 </head>
 <body class="okf-viewer okf-viewer--graph" __DATA_ATTRS__>
@@ -50,15 +54,16 @@ __CDN_SCRIPTS__
 
 <!-- iter1 CRI-019: SSR / no-JS fallback banner (see concept_page.html). -->
 <noscript><p class="okf-studio-fallback-banner" role="alert">JavaScript is off. The graph needs it; use the concept index to browse.</p></noscript>
-<p class="okf-studio-fallback-banner" role="status">Live studio unavailable. Showing a read-only view.</p>
+<p class="okf-studio-fallback-banner okf-studio-fallback-banner--js" role="status">Live studio unavailable. Showing a read-only view.</p>
 
-<main id="okf-main" class="okf-layout">
+<main id="okf-main" tabindex="-1" class="okf-layout">
   <!-- P2-2 (iter-1): top-level heading so the graph view has a real h1
        in the document outline (WCAG / SEO). Visually hidden; the detail
        panel's selected-node title is an <h2> below. -->
   <h1 class="sr-only">__BUNDLE_NAME__ graph view</h1>
 
   <section id="okf-graph" class="okf-graph" aria-label="Concept graph"
+           tabindex="-1"
            data-graph-url="__GRAPH_DATA_URL__"
            data-concept-prefix="__STATIC_PREFIX__/../"
            data-initial-layout="__INITIAL_LAYOUT__"

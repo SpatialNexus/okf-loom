@@ -12,6 +12,9 @@
                        (P1-10: lets wiki.js detect static mode on the search
                        page so the static-search-note shows correctly)
   __WIKI_CSS_LINK__  → <link rel="stylesheet" href="...wiki.css">
+  __THEME_JS_LINK__  → <script src="...theme.js" defer></script>
+                       (canonical theme state; MUST precede the other
+                        viewer scripts — they consume window.OKFLoomTheme)
   __WIKI_JS_LINK__   → <script src="...wiki.js" defer></script>
   __RENDERERS_JS_LINK__ → <script src="...renderers.js" defer></script>
                        (progressive renderers + markdown UX enhancers
@@ -29,6 +32,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>__HEAD_TITLE__</title>
 __WIKI_CSS_LINK__
+__THEME_JS_LINK__
 </head>
 <body class="okf-viewer okf-viewer--search" __DATA_ATTRS__>
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>
@@ -42,9 +46,9 @@ __WIKI_CSS_LINK__
 
 <!-- iter1 CRI-019: SSR / no-JS fallback banner (see concept_page.html). -->
 <noscript><p class="okf-studio-fallback-banner" role="alert">JavaScript is off. The live studio needs it, so this is a read-only view.</p></noscript>
-<p class="okf-studio-fallback-banner" role="status">Live studio unavailable. Showing a read-only view.</p>
+<p class="okf-studio-fallback-banner okf-studio-fallback-banner--js" role="status">Live studio unavailable. Showing a read-only view.</p>
 
-<main id="okf-main" class="okf-search">
+<main id="okf-main" tabindex="-1" class="okf-search">
   <!-- P2-3 (iter-2): the page's only h1 renders full-size full-colour.
        The prior <span class="okf-muted"> wrapper demoted it to 14px gray
        (.okf-muted sets font-size: --okf-text-sm), making the search page's

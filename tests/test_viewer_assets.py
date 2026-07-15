@@ -9,8 +9,16 @@ under the old hash — these tests pin the new behaviour.
 """
 from __future__ import annotations
 
+import json
 import re
+from types import SimpleNamespace
 
+import pytest
+
+from okf_loom.config import _ALLOWED_STUDIO_THEMES
+from okf_loom.exceptions import OKFError
+from okf_loom.render import _THEMES
+from okf_loom.theme import CONFIGURABLE_THEMES, EXPLICIT_THEMES
 from okf_loom.viewer import assets
 
 
@@ -159,3 +167,111 @@ def test_stable_hue_still_exists_for_render_fallback() -> None:
     # And the two utilities compose (render.py:404 pattern).
     color = assets.hsl_color(assets.stable_hue("Dataset"))
     assert color.startswith("hsl(")
+
+
+# ---------------------------------------------------------------------------
+# Editorial Workbench hardening — public viewer config validation
+# ---------------------------------------------------------------------------
+
+
+def _viewer_bundle(tmp_path, content: str | None = None):
+    if content is not None:
+        config_dir = tmp_path / ".okf-loom" / "viewer"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text(content, encoding="utf-8")
+    return SimpleNamespace(root=tmp_path, name="test-bundle")
+
+
+def test_viewer_config_absent_uses_validated_defaults(tmp_path) -> None:
+    # theme None = unconfigured: the resolution contract's configured slot
+    # stays empty so the Swiss Auto/OS fallback governs (a concrete default
+    # here would masquerade as author configuration downstream).
+    assert assets.load_config(_viewer_bundle(tmp_path)) == {
+        "name": None,
+        "default_layout": "cose",
+        "theme": None,
+        "cdn": True,
+    }
+
+
+def test_viewer_config_accepts_all_fields_and_special_characters_in_name(tmp_path) -> None:
+    data = {
+        "name": 'Research </script> & "Review"',
+        "default_layout": "grid",
+        "theme": "swiss-dark",
+        "cdn": False,
+    }
+    assert assets.load_config(_viewer_bundle(tmp_path, json.dumps(data))) == data
+
+
+@pytest.mark.parametrize("theme", EXPLICIT_THEMES)
+def test_viewer_config_accepts_every_concrete_theme(tmp_path, theme: str) -> None:
+    cfg = assets.load_config(_viewer_bundle(tmp_path, json.dumps({"theme": theme})))
+    assert cfg["theme"] == theme
+
+
+def test_viewer_config_explicit_null_theme_means_unconfigured(tmp_path) -> None:
+    """``"theme": null`` equals omitting the key: the configured slot stays
+    empty so the Swiss Auto/OS fallback governs downstream."""
+    cfg = assets.load_config(_viewer_bundle(tmp_path, json.dumps({"theme": None})))
+    assert cfg["theme"] is None
+
+
+def test_viewer_config_null_layout_is_still_rejected(tmp_path) -> None:
+    """Accepting null for theme must not weaken the other enum fields."""
+    with pytest.raises(assets.ViewerConfigError, match=r"default_layout.*string"):
+        assets.load_config(_viewer_bundle(tmp_path, json.dumps({"default_layout": None})))
+
+
+def test_backend_theme_manifests_match_renderer_and_yaml_contract() -> None:
+    assert tuple(_THEMES) == EXPLICIT_THEMES
+    assert assets._ALLOWED_THEMES == frozenset(EXPLICIT_THEMES)
+    assert _ALLOWED_STUDIO_THEMES == CONFIGURABLE_THEMES
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ('{"theme":', r"config\.json.*line 1 column"),
+        ('["swiss-light"]', r"config\.json.*JSON object.*list"),
+        ('{"mystery": true}', r"config\.json.*unknown key.*mystery"),
+        ('{"cdn": "false"}', r"config\.json.*cdn.*boolean"),
+        ('{"default_layout": "spiral"}', r"default_layout.*spiral.*expected one of"),
+        ('{"theme": ""}', r"theme.*empty or whitespace"),
+        ('{"theme": "   "}', r"theme.*empty or whitespace"),
+        ('{"theme": "<script>"}', r"theme.*<script>.*expected one of"),
+    ],
+)
+def test_viewer_config_rejects_invalid_input_with_context(
+    tmp_path, content: str, message: str
+) -> None:
+    with pytest.raises(assets.ViewerConfigError, match=message):
+        assets.load_config(_viewer_bundle(tmp_path, content))
+
+
+def test_viewer_config_error_is_project_domain_and_value_error(tmp_path) -> None:
+    with pytest.raises(assets.ViewerConfigError) as caught:
+        assets.load_config(_viewer_bundle(tmp_path, '{"theme":'))
+    assert isinstance(caught.value, OKFError)
+    assert isinstance(caught.value, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("legacy", "replacement"),
+    [
+        ("light", "technical-light"),
+        ("dark", "technical-dark"),
+        ("pastel", "swiss-light"),
+        ("sepia", "swiss-light"),
+        ("midnight", "technical-dark"),
+    ],
+)
+def test_viewer_config_rejects_legacy_theme_with_migration(
+    tmp_path, legacy: str, replacement: str
+) -> None:
+    content = json.dumps({"theme": legacy})
+    with pytest.raises(
+        assets.ViewerConfigError,
+        match=rf"legacy theme {legacy!r}.*replace it with {replacement!r}",
+    ):
+        assets.load_config(_viewer_bundle(tmp_path, content))

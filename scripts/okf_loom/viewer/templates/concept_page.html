@@ -18,6 +18,9 @@
                          neighbour links (P1-9). Only consumed by wiki.js
                          in static mode; empty for serve/spa.
   __WIKI_CSS_LINK__    → <link rel="stylesheet" href="...wiki.css">
+  __THEME_JS_LINK__    → <script src="...theme.js" defer></script>
+                         (canonical theme state; MUST precede the other
+                          viewer scripts — they consume window.OKFLoomTheme)
   __WIKI_JS_LINK__     → <script src="...wiki.js" defer></script>
        __CONCEPT_ID__       → concept id string (escaped; kept for compatibility
                               references; the visible breadcrumb is
@@ -46,8 +49,16 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>__HEAD_TITLE__</title>
 __WIKI_CSS_LINK__
+__THEME_JS_LINK__
 </head>
-<body class="okf-viewer okf-viewer--page" __DATA_ATTRS__>
+<!-- okf-has-rail is SERVER-RENDERED here (not added later by studio.js) so
+     studio.css's desktop rail reserve (body.okf-has-rail padding-right) is
+     present from FIRST PAINT and the centered .okf-page never recentres when
+     the rail mounts. Harmless where studio.css is absent: that stylesheet only
+     loads when the live studio is attached (serve), so static/SPA builds and
+     the <=900px mobile case (studio.css @media max-width:900 override) see no
+     reserve. studio.js still re-adds the class idempotently at boot. -->
+<body class="okf-viewer okf-viewer--page okf-has-rail" __DATA_ATTRS__>
 <a href="#okf-main" class="okf-skip-link">Skip to content</a>
 <header class="okf-topbar">
   <div class="okf-topbar__brand">
@@ -62,10 +73,10 @@ __WIKI_CSS_LINK__
      in static builds (data-okf-mode="static"). If studio.js fails to load
      the banner stays so the user knows live updates are off, not silently
      missing. The <noscript> variant covers the JS-disabled case. -->
-<noscript><p class="okf-studio-fallback-banner" role="alert">JavaScript is off. The live studio needs it, so this is a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p></noscript>
-<p class="okf-studio-fallback-banner" role="status">Live studio unavailable. Showing a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p>
+<noscript><p class="okf-studio-fallback-banner" role="alert">JavaScript is off — this is a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p></noscript>
+<p class="okf-studio-fallback-banner okf-studio-fallback-banner--js" role="status">Live studio unavailable — showing a read-only view. <a href="__BRAND_HREF__">Browse the index</a>.</p>
 
-<main id="okf-main" class="okf-page">
+<main id="okf-main" tabindex="-1" class="okf-page">
   <aside class="okf-page__sidebar" aria-label="Navigation">
     __CONCEPT_NAV_HTML__
     <div class="okf-local-graph" id="okf-local-graph" data-graph="__LOCAL_GRAPH_DATA__" data-root-prefix="__ROOT_PREFIX__"></div>

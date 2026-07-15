@@ -308,6 +308,10 @@ scripts/okf-loom replace-text --bundle docs-bundle --id reference/new_topic --ol
 ```
 
 `link-add` is fail-closed on missing targets unless `--allow-forward-reference` is passed intentionally.
+Without `--section`, `link-add` MUST insert immediately before a terminal body
+`# Citations` appendix so the link remains visible when duplicate body
+citations are rendered separately; if there is no such appendix, it appends at
+the end of the body. Explicit `--section` placement is unchanged.
 Repeated actions should converge to no-op or already-present results rather than duplicate content.
 
 Partial body updates are first-class: `update-section` replaces (or, with
@@ -351,6 +355,76 @@ Bundles should normally gitignore `.okf-loom/index/` and `.okf-loom/session/`.
 ## 9. Viewer, build, and static outputs
 
 All viewer targets share the same `ContentIndex`.
+
+Theme defaults have one configuration contract. `studio.theme` in
+`okf-loom.config.yaml` accepts `auto` plus the concrete `swiss-light`,
+`swiss-dark`, `technical-light`, and `technical-dark` themes. The narrower
+`.okf-loom/viewer/config.json` surface accepts the four concrete themes only.
+Both surfaces reject retired names with contextual replacements (`light` →
+`technical-light`, `dark` / `midnight` → `technical-dark`, and `pastel` /
+`sepia` → `swiss-light`); returning users' saved browser preferences are
+migrated separately. Invalid viewer JSON never silently falls back: malformed
+JSON, a non-object top level, unknown keys, wrong types, empty values, and
+unsupported layout/theme values are errors. When both surfaces configure a
+theme for the same served page, the viewer JSON value — the one the server
+paints into `data-theme` — is authoritative; `studio.theme` applies only when
+the viewer surface leaves the theme unconfigured (explicit `null` equals
+omission), and its `auto` default carries no preference. A saved user
+preference overrides the validated configured initial value; otherwise the
+configured value applies, then Swiss Auto/OS fallback. The concrete resolved Auto value is derived and is
+not configuration or persisted preference state. Browsers persist the two
+orthogonal preferences under `okf-theme-family` (`swiss` | `technical`) and
+`okf-theme-mode` (`auto` | `light` | `dark`); the retired `okf-theme` key is
+migrated once and afterwards kept only as a write-only compatibility mirror of
+explicit concrete choices (removed while Auto). One shared client asset
+(`theme.js`) owns this state in every viewer output and announces each actual
+resolved change as a single `okf-loom:themeChanged` event.
+
+The following viewer lifecycle and accessibility contracts are binding:
+
+- **Theme before paint.** On live-served multi-page pages with the studio
+  attached, the inert live-studio JSON bootstrap is the first node in `<head>`,
+  before `theme.js`. Static multi-page output has no live-studio bootstrap.
+  In both live and static multi-page output, `theme.js` is a classic
+  parser-blocking head script: it resolves the configured value, saved
+  preference, and Auto/OS result before body paint and before deferred viewer
+  or studio consumers run. A destination reached through an ordinary link must
+  not paint a fallback theme first.
+- **One-way studio boot settlement.** A successful synchronous `boot()` adds
+  `okf-studio-booted`; a thrown boot adds `okf-studio-unavailable`; and the
+  DOMContentLoaded watchdog adds unavailable when the studio module is blocked,
+  missing, or fails before boot. These terminal outcomes must not overwrite one
+  another. The JavaScript fallback banner is hidden until genuine unavailability,
+  so successful boot and native navigation never flash it; the separate
+  `<noscript>` notice remains the no-JS path.
+- **Native document navigation.** Ordinary internal concept links remain real
+  anchors rather than being captured by a studio SPA shell. Browser Back and
+  Forward, Enter on a focused anchor, and Ctrl/Cmd-click to open a new tab retain
+  their native meanings.
+- **Stable rail geometry.** On JavaScript-enabled desktop concept pages, the
+  48px studio-rail reserve is present at first layout and does not animate in
+  later. Mobile (`<=900px`) and no-JS pages carry no reserve. The content
+  centerline and document width must remain stable across first paints and native
+  navigation, without document-level horizontal overflow.
+- **Contained accessible tables.** The server-rendered bare table is a locally
+  scrolling, implicitly semantic table with `tabindex="0"` and an accessible
+  horizontal-scroll instruction, so every column remains keyboard-reachable with
+  JavaScript disabled. With JavaScript, `renderers.js` transfers scrolling to an
+  enhancer wrapper only when needed: an overflowing wrapper is a named,
+  focusable region with a visible cue and edge state, while a fitting table has
+  no extra tab stop or stale ARIA. Resize and live body patches must reclassify
+  the current table without leaking old affordances.
+- **Graph-tour focus ownership.** The first-visit tour is a registered modal in
+  the shared overlay stack. It must defer while another overlay owns focus,
+  recheck ownership before its microtask-scheduled activation, activate at most
+  once, trap focus while open, and restore focus to a stable graph control when
+  dismissed. Escape closes only the topmost overlay; a completed tour must not
+  reactivate.
+- **Graph LOD layout proof.** LOD reveal operations, including selecting a hidden
+  node from the index and **Show all**, run through the current stale-safe layout
+  owner. Show all reveals every node on a grid without overlap. A layout's 900ms
+  safety completion may apply and fit a sequence only once; a late `layoutstop`
+  for that same sequence must not apply or fit it again.
 
 | Target | Command | Use |
 |---|---|---|
@@ -662,6 +736,11 @@ A build-from-docs implementation must satisfy these acceptance checks:
 - Comment archive is a separate boolean track, root-only, gated on whole-thread-resolved, and auto-unarchives on reply.
 - `okfLoomStudio.register()` ships `panel` and `viewMode`; other documented kinds are reserved and warned.
 - Public bind, active-code, no-edit, CSRF, Origin/Host, body-size, and path-containment gates are fail-closed.
+- Viewer first paint satisfies the theme/bootstrap ordering, terminal boot
+  settlement, native navigation, stable rail geometry, and JS/no-JS table
+  contracts in §9.
+- Graph-tour overlays preserve focus ownership, and LOD/layout completion
+  satisfies the one-owner, one-apply invariant in §9.
 
 Suggested repo-local verification commands:
 
@@ -671,6 +750,9 @@ scripts/okf-loom validate docs-bundle --strict
 scripts/okf-loom info docs-bundle --format json
 scripts/okf-loom search docs-bundle "current spec" --mode lexical --format json
 scripts/okf-loom build docs-bundle --target static --out /tmp/okf-docs-site
+python -m pytest tests/test_update.py
+python -m pytest tests/test_first_paint_lifecycle_browser.py tests/test_responsive_keyboard_browser.py
+python -m pytest tests/test_viewer_browser.py tests/test_graph_disclosure_browser.py tests/test_graph_invariant_closure_browser.py
 ```
 
 ## 18. Current source-of-truth references

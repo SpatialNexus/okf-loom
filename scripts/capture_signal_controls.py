@@ -3,8 +3,10 @@
 
 Stands up ``scripts/okf-loom serve samples/demo_bundle`` on an ephemeral port, drives the
 full-page ``/__graph`` view through several Signal-controls states with
-Playwright (system Chrome via ``AIC_PLAYWRIGHT_CHROME_PATH``), and writes
-PNGs under ``docs/screenshots/graph-signal-controls/``.
+Playwright using the shared managed/system Chrome resolver, and writes PNGs
+under ``docs/screenshots/graph-signal-controls/``. Chrome's sandbox remains
+enabled unless a constrained root container explicitly sets
+``OKF_CAPTURE_NO_SANDBOX=1``.
 
 Run from okf-loom/:  python scripts/capture_signal_controls.py
 """
@@ -19,6 +21,11 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+try:
+    from scripts.capture_support import launch_chromium
+except ModuleNotFoundError:  # pragma: no cover - direct invocation path
+    from capture_support import launch_chromium
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "samples" / "demo_bundle"
@@ -57,10 +64,7 @@ def wait_ready(base: str, proc: subprocess.Popen, timeout: float = 15.0) -> None
 
 
 def launch_browser(p):
-    chrome = os.environ.get("AIC_PLAYWRIGHT_CHROME_PATH")
-    if chrome:
-        return p.chromium.launch(executable_path=chrome, args=["--no-sandbox"])
-    return p.chromium.launch()
+    return launch_chromium(p).browser
 
 
 def wait_graph_ready(page) -> None:

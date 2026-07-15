@@ -1,5 +1,13 @@
 # Handover — Adopt the okf-loom "Editorial Workbench" theme overhaul
 
+> [!IMPORTANT]
+> **Historical and superseded.** This pre-merge adoption handover preserves the
+> branch state and instructions that existed before the Editorial Workbench
+> hardening closed at `be52770` and stabilized through `ded047c`. Do not use its
+> commit counts, duplicated-theme guidance, cache notes, or verification totals
+> as current instructions. Use the [current specification](../../docs-bundle/reference/spec.md)
+> and the [completed hardening plan](../../docs-bundle/plans/editorial-workbench-hardening.md).
+
 > **Purpose:** get the *complete* new theme system live and stop landing on the **old-looking swiss/technical**. Hand this whole file to the dev (or paste it into a fresh AI coding session working in their okf-loom checkout). Self-contained.
 
 ---

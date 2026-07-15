@@ -97,42 +97,189 @@
   }
 
   // --- Mermaid ---
+  // One controller owns initial, theme, and body-patch renders. A monotonic
+  // generation counter gates async completion: a stale mermaid.run() result
+  // (from a fast light→dark→light toggle or a body patch during render) is
+  // discarded BEFORE it can mutate live DOM.
+  //
+  // Commit gating: mermaid.run() renders to off-DOM CLONES of the target
+  // divs. Only if the generation is still current when the render completes
+  // are the clone SVGs swapped into the live DOM. This guarantees a stale
+  // render can NEVER overwrite a newer one.
+  var _mermaidGen = 0;
+  var _mermaidMod = null;
+  var _mermaidIdCounter = 0;
+
+  // Test seam: if set, used instead of dynamic import() so tests can inject
+  // a controlled mock renderer without a CDN dependency.
+  // Set window.__okfMermaidTestImport to {default: mockMermaid} to use.
+  function _importMermaid() {
+    if (window.__okfMermaidTestImport) return Promise.resolve(window.__okfMermaidTestImport);
+    return import(PINS.mermaidEsm);
+  }
+
+  function _nextMermaidId() { return "okf-mermaid-" + (++_mermaidIdCounter); }
+
+  // Build Mermaid themeVariables from the current computed Editorial
+  // Workbench CSS tokens. Uses theme:'base' so ALL colors are controlled
+  // by themeVariables (no Mermaid built-in palette interference).
+  // CSS custom properties may return OKLCH values which Mermaid's internal
+  // SVG renderer cannot parse — resolve them to RGB hex via a canvas probe.
+  function _mermaidThemeVars() {
+    var cs = getComputedStyle(document.documentElement);
+    // Create a canvas to resolve any CSS color (oklch, hsl, named) to hex.
+    var cv = document.createElement("canvas"); cv.width = 2; cv.height = 2;
+    var cx = cv.getContext("2d");
+    function toHex(cssVal) {
+      if (!cssVal) return "#ffffff";
+      cx.fillStyle = "#000"; // reset
+      cx.fillStyle = cssVal;
+      cx.fillRect(0, 0, 1, 1);
+      var d = cx.getImageData(0, 0, 1, 1).data;
+      return "#" + [d[0], d[1], d[2]].map(function(c) {
+        return c.toString(16).padStart(2, "0");
+      }).join("");
+    }
+    function v(name) { return cs.getPropertyValue(name).trim(); }
+    var dark = isDark();
+    var fg = toHex(v("--okf-fg"));
+    var bgElev = toHex(v("--okf-bg-elev"));
+    var bgInset = toHex(v("--okf-bg-inset"));
+    var borderStrong = toHex(v("--okf-border-strong"));
+    var border = toHex(v("--okf-border"));
+    var fgMuted = toHex(v("--okf-fg-muted"));
+    var accent = toHex(v("--okf-accent"));
+    var accentBg = toHex(v("--okf-accent-bg"));
+    var bg = toHex(v("--okf-bg"));
+    var lineColor = fgMuted;  // Use --okf-fg-muted for connectors/arrows: >=3:1 on bg in all themes
+    return {
+      // Flowchart nodes.
+      primaryColor: bgElev,
+      primaryTextColor: fg,
+      primaryBorderColor: fgMuted,  // Node borders need >=3:1 on bg-elev
+      secondaryColor: bgInset,
+      secondaryTextColor: fg,
+      secondaryBorderColor: fgMuted,
+      tertiaryColor: accentBg,
+      tertiaryTextColor: fg,
+      tertiaryBorderColor: accent,
+      // Lines and edges.
+      lineColor: lineColor,
+      // Sequence diagram.
+      actorBkg: bgElev,
+      actorBorder: fgMuted,  // Actor borders >=3:1 on actorBkg
+      actorTextColor: fg,
+      actorLineColor: fgMuted,
+      noteBkgColor: bgElev,          // Notes use bg-elev (not accent-bg) so border/text pass
+      noteBorderColor: fgMuted,     // Note borders >=3:1 on note bg
+      noteTextColor: fg,
+      activationBkgColor: bgInset,
+      activationBorderColor: fgMuted,
+      signalColor: fg,
+      signalTextColor: fg,
+      labelBoxBkgColor: bgElev,
+      labelBoxBorderColor: borderStrong,
+      labelTextColor: fg,
+      loopTextColor: fg,
+      // Overall.
+      background: bg,
+      mainBkg: bgElev,
+      textColor: fg,
+      fontFamily: v("--okf-font-body") || "sans-serif",
+      fontSize: "14px",
+    };
+  }
+
   function initMermaid() {
-    // Only process mermaid divs that haven't been rendered yet (no SVG child).
-    // This prevents re-rendering diagrams that are already shown, which would
-    // cause a visible flash on live updates that don't change the diagram.
     var allDivs = document.querySelectorAll("div.mermaid");
     if (allDivs.length === 0) return;
     var mermaidDivs = Array.from(allDivs).filter(function (el) {
-      return !el.querySelector("svg"); // skip already-rendered
+      return !el.querySelector("svg");
     });
-    if (mermaidDivs.length === 0) return; // nothing to render
-    // Stamp the original source text as data-source BEFORE mermaid
-    // replaces it with SVG output.
-    mermaidDivs.forEach(function (el, i) {
-      if (!el.getAttribute("data-source")) {
-        el.setAttribute("data-source", el.textContent);
-      }
-      if (!el.id) el.id = "okf-mermaid-" + i;
+    if (mermaidDivs.length === 0) return;
+    // Stamp source + page-global unique IDs (never per-call index, which
+    // would collide across body patches).
+    mermaidDivs.forEach(function (el) {
+      if (!el.getAttribute("data-source")) el.setAttribute("data-source", el.textContent);
+      if (!el.id) el.id = _nextMermaidId();
     });
-    // Mermaid v11 is ESM-only. Use dynamic import() so the module loads
-    // asynchronously and we get the mermaid object as a named export.
-    // CSP allows this because cdn.jsdelivr.net is in script-src.
-    import(PINS.mermaidEsm)
+    _renderMermaidGeneration(mermaidDivs);
+  }
+
+  // Start a new render generation. Increments the counter ONLY when there is
+  // non-empty work (avoids spurious generation bumps on no-op calls).
+  function _renderMermaidGeneration(divs) {
+    if (!divs || !divs.length) return;
+    var gen = ++_mermaidGen;
+    _importMermaid()
       .then(function (mod) {
-        var mermaid = mod.default || window.mermaid;
-        if (!mermaid) return;
+        if (gen !== _mermaidGen) return null; // stale before start
+        var mermaid = mod && (mod.default || window.mermaid);
+        if (!mermaid) throw new Error("mermaid module unavailable"); // triggers fallback
+        _mermaidMod = mermaid;
         mermaid.initialize({
           startOnLoad: false,
-          theme: isDark() ? "dark" : "default",
+          theme: "base",
+          themeVariables: _mermaidThemeVars(),
         });
-        return mermaid.run({ nodes: mermaidDivs });
+        // Render to clones in a hidden container — mermaid.run may require
+        // nodes to be in the document tree. Commit to live DOM only if gen
+        // is still current.
+        var scratch = document.createElement("div");
+        scratch.style.position = "absolute";
+        scratch.style.left = "-9999px";
+        scratch.style.visibility = "hidden";
+        document.body.appendChild(scratch);
+        var clones = divs.map(function (el, idx) {
+          var c = el.cloneNode(false);
+          c.textContent = el.getAttribute("data-source") || el.textContent;
+          // Unique temp ID distinct from live ID (avoids duplicate-ID while
+          // scratch is attached to the document).
+          c.id = (el.id || _nextMermaidId()) + "--scratch-" + gen + "-" + idx;
+          c.removeAttribute("data-source"); // don't duplicate on clone
+          scratch.appendChild(c);
+          return c;
+        });
+        return mermaid.run({ nodes: clones }).then(function () {
+          scratch.remove();
+          return clones;
+        }).catch(function (err) {
+          scratch.remove();
+          throw err;
+        });
+      })
+      .then(function (clones) {
+        if (!clones) return;
+        if (gen !== _mermaidGen) return; // stale — discard clones, never touch live DOM
+        // Commit: swap rendered content from clones into live nodes.
+        divs.forEach(function (el, i) {
+          if (i < clones.length && clones[i].querySelector("svg")) {
+            el.innerHTML = clones[i].innerHTML;
+            el.classList.remove("mermaid--fallback");
+          }
+        });
       })
       .catch(function () {
-        mermaidDivs.forEach(function (el) {
-          el.classList.add("mermaid--fallback");
-        });
+        if (gen !== _mermaidGen) return; // stale failure — don't mutate
+        divs.forEach(function (el) { el.classList.add("mermaid--fallback"); });
       });
+  }
+
+  // Rerender on resolved light↔dark transition only. Family-only (same
+  // resolvedMode) does NOT rerender.
+  function rerenderMermaidOnThemeChange(e) {
+    var detail = e.detail || {};
+    var prevMode = detail.previousResolvedMode;
+    var newMode = detail.resolvedMode;
+    if (!prevMode || prevMode === newMode) return;
+    var allDivs = document.querySelectorAll("div.mermaid");
+    if (!allDivs.length) return;
+    var toRender = Array.from(allDivs).filter(function (el) {
+      return el.getAttribute("data-source");
+    });
+    if (!toRender.length) return; // no work — don't bump generation
+    // Source text stays on live DOM until the new render commits.
+    _renderMermaidGeneration(toRender);
   }
 
   // --- Syntax highlighting (highlight.js) ---
@@ -282,6 +429,7 @@
         enhanceTable(t);
       });
     });
+    watchTableContainers();
     updateTableFits();
   }
 
@@ -292,6 +440,20 @@
 
   function enhanceTable(table) {
     table.dataset.okfEnhanced = "1";
+    // Transfer the no-JS server fallback focus affordance OFF the table.
+    // markdown.py stamps the bare <table> with tabindex="0" + aria-label +
+    // data-okf-fallback="tabbable" so a no-JS keyboard user can focus and
+    // arrow-scroll the table without an enhancer. Once we run, classifyTable()
+    // owns that decision: it re-applies the affordance on the wrapper only
+    // when the table actually overflows, so a JS-enhanced table that FITS
+    // keeps no extra tab stop (table tabindex stripped, wrapper has none).
+    // Stripped before the headerless early return so headerless tables are
+    // cleaned up too.
+    if (table.getAttribute("data-okf-fallback") === "tabbable") {
+      table.removeAttribute("tabindex");
+      table.removeAttribute("aria-label");
+      table.removeAttribute("data-okf-fallback");
+    }
     if (!table.tHead || !table.tHead.rows.length) return; // headerless: leave as-is
 
     // Wrapper carries the horizontal scroll (previously on the table itself)
@@ -337,6 +499,13 @@
         cycleSort(table, th, originalRows);
       });
     });
+
+    // Edge-shadow state tracks the user's horizontal scroll position so the
+    // cue shadow always points toward off-screen content. Passive: we never
+    // preventDefault on the scroll.
+    wrap.addEventListener("scroll", function () {
+      updateScrollEdgeState(wrap);
+    }, { passive: true });
   }
 
   function buildTableToolbar(table) {
@@ -504,22 +673,128 @@
     });
   }
 
+  // --------------------------------------------------------------------
+  // Table overflow containment + accessibility
+  // --------------------------------------------------------------------
+  // A table overflows its wrapper when the wrapper's own scrollport is
+  // wider than its visible area: ``wrap.scrollWidth > wrap.clientWidth + 1``
+  // (the +1 tolerates sub-pixel rounding). On overflow the wrapper becomes
+  // a keyboard-focusable scroll region with an accessible name, a visible
+  // cue, and stateful start/end edge shadows. On fit, all of that is
+  // removed so the wrapper is neither a tab stop nor visually adorned —
+  // desktop tables that fit read as plain tables with sticky headers.
+  //
+  // The fit/overflow classes are MUTUALLY EXCLUSIVE: classifyTable() never
+  // leaves both (or neither) on a wrapper. Reclassification runs after
+  // initial enhancement, viewport/column resize, and live body replacement.
+
+  var SCROLL_CUE_TEXT = "Scroll horizontally to view all columns";
+  var _cueIdCounter = 0;
+
+  // Derive an accessible name from a <caption> (if present) or the nearest
+  // preceding heading in the prose root, falling back to "Table". Strips
+  // the decorative heading-anchor pilcrow so the label reads cleanly.
+  function tableAccessibleName(table) {
+    var cap = table.querySelector("caption");
+    if (cap && collapseWs(cap.textContent)) return collapseWs(cap.textContent);
+    var wrap = table.closest(".okf-tablewrap");
+    var start = wrap || table;
+    for (var node = start.previousElementSibling; node; node = node.previousElementSibling) {
+      if (/^H[1-6]$/.test(node.tagName)) {
+        var clone = node.cloneNode(true);
+        var anchors = clone.querySelectorAll(".okf-heading-anchor");
+        Array.prototype.forEach.call(anchors, function (a) { a.remove(); });
+        var txt = collapseWs(clone.textContent);
+        if (txt) return txt + " table";
+      }
+    }
+    return "Table";
+  }
+
+  function ensureScrollCue(wrap) {
+    var cue = wrap.querySelector(".okf-table-cue");
+    if (cue) return cue;
+    cue = document.createElement("p");
+    cue.className = "okf-table-cue";
+    cue.id = "okf-table-cue-" + (++_cueIdCounter);
+    cue.setAttribute("aria-hidden", "true");
+    cue.textContent = SCROLL_CUE_TEXT;
+    wrap.insertBefore(cue, wrap.firstChild);
+    return cue;
+  }
+
+  function removeScrollCue(wrap) {
+    var cue = wrap.querySelector(".okf-table-cue");
+    if (cue) cue.parentNode.removeChild(cue);
+  }
+
+  // Update the data-scroll edge-state attribute that drives the CSS edge
+  // shadows. Called on scroll, after classify, and after resize.
+  function updateScrollEdgeState(wrap) {
+    if (!wrap.classList.contains("okf-tablewrap--overflow")) return;
+    var sl = wrap.scrollLeft;
+    var max = wrap.scrollWidth - wrap.clientWidth;
+    if (max <= 1) { wrap.setAttribute("data-scroll", "start"); return; }
+    var atStart = sl <= 1;
+    var atEnd = sl >= max - 1;
+    if (atStart && atEnd) wrap.setAttribute("data-scroll", "start"); // tiny overflow
+    else if (atEnd) wrap.setAttribute("data-scroll", "end");
+    else if (atStart) wrap.setAttribute("data-scroll", "start");
+    else wrap.setAttribute("data-scroll", "middle");
+  }
+
+  // Core classifier: measure once, set mutually-exclusive state + ARIA.
+  function classifyTable(wrap) {
+    var table = wrap.querySelector("table");
+    if (!table) return;
+    var overflows = wrap.scrollWidth > wrap.clientWidth + 1;
+    if (overflows) {
+      wrap.classList.remove("okf-tablewrap--fit");
+      wrap.classList.add("okf-tablewrap--overflow");
+      wrap.setAttribute("role", "region");
+      wrap.setAttribute("aria-label",
+        tableAccessibleName(table) + ". " + SCROLL_CUE_TEXT + ".");
+      wrap.setAttribute("tabindex", "0");
+      ensureScrollCue(wrap);
+      updateScrollEdgeState(wrap);
+    } else {
+      wrap.classList.add("okf-tablewrap--fit");
+      wrap.classList.remove("okf-tablewrap--overflow");
+      wrap.removeAttribute("role");
+      wrap.removeAttribute("aria-label");
+      wrap.removeAttribute("tabindex");
+      wrap.removeAttribute("data-scroll");
+      removeScrollCue(wrap);
+    }
+  }
+
   // Sticky headers only work when the wrapper is NOT a horizontal scroll
   // container (position:sticky pins to the nearest scrollport). When the
-  // table fits, mark the wrapper so the stylesheet can lift the overflow
-  // and let thead stick under the page topbar.
+  // table fits, the --fit class lifts overflow so thead can stick under
+  // the page topbar. When it overflows, --overflow keeps the scroll region
+  // and its accessibility affordance.
   function updateTableFits() {
     Array.prototype.forEach.call(document.querySelectorAll(".okf-tablewrap"), function (wrap) {
-      var table = wrap.querySelector("table");
-      if (!table) return;
-      wrap.classList.toggle("okf-tablewrap--fit", table.scrollWidth <= wrap.clientWidth + 1);
+      classifyTable(wrap);
     });
   }
+
+  // Debounced reclassification driver shared by window-resize and the
+  // ResizeObserver (which catches container-width changes that don't fire
+  // a window resize: sidebar toggle, focus mode, split-view drag).
   var fitTimer = null;
-  window.addEventListener("resize", function () {
+  function scheduleReclassify() {
     if (fitTimer) clearTimeout(fitTimer);
     fitTimer = setTimeout(updateTableFits, 150);
-  });
+  }
+  window.addEventListener("resize", scheduleReclassify);
+
+  var _tableRO = null;
+  function watchTableContainers() {
+    if (_tableRO || typeof ResizeObserver === "undefined") return;
+    _tableRO = new ResizeObserver(scheduleReclassify);
+    proseRoots().forEach(function (root) { _tableRO.observe(root); });
+  }
 
   // --- code blocks: copy button + language badge -------------------------
   function initCodeBlocks() {
@@ -647,4 +922,8 @@
 
   // Re-run on live studio patches (when the concept body is re-rendered).
   window.addEventListener("okf-loom:bodyPatched", initAll);
+
+  // Rerender Mermaid diagrams on resolved light↔dark theme changes only.
+  // Family-only changes (same resolvedMode) do NOT trigger a rerender.
+  window.addEventListener("okf-loom:themeChanged", rerenderMermaidOnThemeChange);
 })();

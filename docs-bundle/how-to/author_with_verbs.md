@@ -90,6 +90,19 @@ By default the verb refuses to write a link whose target does not exist.
 Pass `--allow-forward-reference` to write a deliberate forward reference
 (SPEC §5.3 tolerates it; see [Link forms](/reference/links.md)).
 
+Placement depends on whether you name a section:
+
+- With `--section`, the link stays in that explicit section, even when the
+  document ends with a `# Citations` appendix.
+- Without `--section`, the default link is inserted immediately before a
+  terminal body `# Citations` appendix. This keeps it in the visible authored
+  body when duplicate body citations are rendered separately.
+- Without either an explicit section or a terminal `# Citations` appendix, the
+  link is appended at end of file.
+
+Only a terminal level-one body heading is treated as that appendix; a Citations
+string inside a fenced code block does not change placement.
+
 # Step 4: Add an entity
 
 `entity-add` appends an entity object to the concept's `entities:`

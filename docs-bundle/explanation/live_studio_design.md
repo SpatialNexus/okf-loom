@@ -117,6 +117,52 @@ below). Editing, saving, and watching are never behind a gate; only
 the loopback boundary, the cross-origin guard, and the active-code gate
 are — and the first two are invisible to a local user.
 
+# Why first paint is treated as a contract
+
+The studio does not wait for its deferred modules and then repair a visibly
+wrong page. The server places the inert studio configuration first in the
+document head, and the shared theme resolver runs during head parsing. It can
+therefore combine configuration, saved Appearance preferences, and the OS
+light/dark setting before the body paints. The desktop rail reserve is likewise
+part of initial CSS geometry, not padding animated in after boot. This is why a
+dark destination and the concept centerline remain stable when you follow an
+ordinary link.
+
+Boot status follows the same principle. The JavaScript failure banner is hidden
+unless boot genuinely settles unavailable. A successful synchronous boot marks
+itself ready only after its setup completes, so there is no successful-boot
+fallback flash. A blocked module, an evaluation failure, or a throw during boot
+settles unavailable and reveals one stable banner. Late fetches and timers cannot
+turn that failure into success, or turn a settled success into failure. With
+JavaScript disabled, the separate `<noscript>` notice explains the read-only
+state instead.
+
+# Why navigation remains native
+
+The studio patches a concept in place when the underlying file changes, but it
+does not capture ordinary document links to simulate an SPA. Internal concepts
+remain real anchors: browser Back and Forward retain their document-history
+meaning, Enter activates a focused link, and Ctrl/Cmd-click opens a new tab.
+Keeping these platform behaviors is more valuable than hiding a page load, and
+the prepaint theme and geometry contracts make the native destination load
+stable.
+
+# Why rails and tables have fallback-first geometry
+
+On a JavaScript-enabled desktop concept page, space for the studio rail exists
+from first layout, so mounting the rail does not recenter the article. Mobile
+does not reserve that space, and a no-JS desktop does not leave a dead gutter for
+a rail that cannot mount.
+
+Wide tables follow the same fallback-first rule. Server-rendered tables are
+semantic, locally horizontally scrollable, keyboard focusable, and named with a
+scroll instruction before any enhancer runs. JavaScript improves only the
+affordance: an overflowing table gets a labelled focusable wrapper, edge cues,
+and a visible scroll hint; a table that fits remains a plain table without an
+extra tab stop. Resize and live patches recalculate that distinction. If
+JavaScript is unavailable, every column is still reachable and the page itself
+does not become horizontally scrollable.
+
 # Why Server-Sent Events, with a polling fallback
 
 Live push is Server-Sent Events (SSE) over plain HTTP, served from the
@@ -240,5 +286,7 @@ is open or not. See [Direct the agent loop](/tutorials/author_with_agent.md).
   `studio.*` defaults and how to change them.
 * [`/reference/spec.md`](/reference/spec.md) — the binding current
   specification this essay summarises.
+* [Editorial Workbench hardening](/explanation/editorial_workbench_hardening.md) —
+  the companion rationale for stable, accessible theme and navigation behavior.
 
 Return to [Explanation](/explanation/index.md).

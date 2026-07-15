@@ -34,6 +34,7 @@ See ``viewer/OVERRIDES.md`` for the full override reference.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -41,12 +42,33 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from ..exceptions import OKFError
 from ..model import Bundle
+from ..theme import EXPLICIT_THEMES, legacy_theme_message
 
 _THIS_DIR = Path(__file__).resolve().parent
 _BUILTIN_TEMPLATES = _THIS_DIR / "templates"
 _BUILTIN_STATIC = _THIS_DIR / "static"
 _OKF_VIEWER_SUBDIR = Path(".okf-loom") / "viewer"
+
+# The one explicit override/static-asset name scope: the built-in viewer
+# asset file names. This frozenset is the single source of truth shared by
+# file emission (``list_builtin_static``), loading (``load_static`` /
+# ``_resolve_static``), the live ``/__static`` handler (server.py), and the
+# content-version hasher (``asset_version``). Only these names may be
+# loaded, served, or overridden as viewer static assets; an override for any
+# other name is ignored, and loading/hashing an unknown name raises /
+# degrades gracefully. Derived from the on-disk built-in set so it cannot
+# drift from what is actually shipped.
+STATIC_ASSET_NAMES: frozenset[str] = (
+    frozenset(p.name for p in _BUILTIN_STATIC.iterdir() if p.is_file())
+    if _BUILTIN_STATIC.is_dir() else frozenset()
+)
+
+
+def is_known_static_asset(name: str) -> bool:
+    """True iff ``name`` is in the built-in viewer static-asset scope."""
+    return name in STATIC_ASSET_NAMES
 
 # ---------------------------------------------------------------------------
 # Bundle-local media the viewer displays (image-rich bundles): the live
@@ -163,6 +185,13 @@ def clear_overrides_cache(bundle_root: str | Path | None = None) -> None:
 
     With no argument, clears every cached root (used when operator consent
     changes process-wide). With a root, clears only that root's entry.
+
+    Note: the asset-version cache (:func:`asset_version`) holds ONLY
+    process-constant builtin digests — mutable override digests are computed
+    fresh on every call and are never memoized — so it does not need to be
+    invalidated here. A gate toggle re-runs :func:`_overrides_allowed`
+    (whose own cache this call drops) and re-resolves builtin-vs-override
+    on the next :func:`asset_version` / :func:`load_static` call.
     """
     if bundle_root is None:
         _OVERRIDES_CACHE.clear()
@@ -511,15 +540,65 @@ def resolve_palette(bundle: Bundle) -> dict[str, str]:
 _DEFAULT_CONFIG: dict[str, Any] = {
     "name": None,
     "default_layout": "cose",
-    "theme": "technical-light",
+    # No configured theme by default: only an AUTHOR-set value may act as
+    # the "configured preference" in the resolution contract (saved user
+    # preference > configured preference > Swiss Auto/OS fallback). A
+    # concrete built-in default here would be indistinguishable from real
+    # configuration downstream and would override the Swiss-first fallback.
+    "theme": None,
     "cdn": True,
 }
 
 
 _ALLOWED_LAYOUTS = frozenset({"cose", "concentric", "breadthfirst", "circle", "grid"})
-_ALLOWED_THEMES = frozenset(
-    {"technical-light", "technical-dark", "swiss-light", "swiss-dark"}
-)
+_ALLOWED_THEMES = frozenset(EXPLICIT_THEMES)
+
+
+class ViewerConfigError(OKFError, ValueError):
+    """Raised when bundle-local ``viewer/config.json`` is invalid."""
+
+
+def _viewer_config_value(
+    path: Path, key: str, value: Any
+) -> Any:
+    """Validate one viewer config value without interpolation fallbacks."""
+    field = f"{path}:{key}"
+    if key == "name":
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ViewerConfigError(f"{field} must be a string or null")
+        if not value.strip():
+            raise ViewerConfigError(f"{field} must not be empty or whitespace")
+        return value
+    if key == "cdn":
+        if not isinstance(value, bool):
+            raise ViewerConfigError(f"{field} must be a boolean")
+        return value
+    if key in {"default_layout", "theme"}:
+        if key == "theme" and value is None:
+            # Explicit null is accepted as "unconfigured", identical to
+            # omitting the key: the configured slot stays empty and the
+            # Swiss Auto/OS fallback governs (parity with the None default).
+            return None
+        if not isinstance(value, str):
+            raise ViewerConfigError(f"{field} must be a string")
+        if not value.strip():
+            raise ViewerConfigError(f"{field} must not be empty or whitespace")
+        if key == "theme":
+            migration = legacy_theme_message(field, value)
+            if migration:
+                raise ViewerConfigError(migration)
+            allowed = _ALLOWED_THEMES
+        else:
+            allowed = _ALLOWED_LAYOUTS
+        if value not in allowed:
+            raise ViewerConfigError(
+                f"{field}: unsupported value {value!r}; "
+                f"expected one of {sorted(allowed)}"
+            )
+        return value
+    raise AssertionError(f"unhandled viewer config key: {key}")
 
 
 def load_config(bundle: Bundle) -> dict[str, Any]:
@@ -531,11 +610,14 @@ def load_config(bundle: Bundle) -> dict[str, Any]:
         default_layout (str): one of cose, concentric, breadthfirst, circle,
             grid. Used as the initial Cytoscape layout in the single-file and
             full-page graph views.
-        theme (str): one of "technical-light", "technical-dark",
-            "swiss-light", "swiss-dark" —
-            initial theme for the single-file viewer. Page-served views
-            honour ``localStorage['okf-theme']`` if set; otherwise this
-            value.
+        theme (str|None): one of "technical-light", "technical-dark",
+            "swiss-light", "swiss-dark"; None/null (the default) means
+            unconfigured —
+            configured initial theme for every viewer output. A saved user
+            preference (``localStorage['okf-theme-family']`` /
+            ``['okf-theme-mode']``, owned by viewer/static/theme.js, which
+            also migrates the retired ``okf-theme`` key once) overrides it;
+            otherwise this value applies, then Swiss Auto/OS fallback.
         cdn (bool): if False, the single-file / graph templates omit the
             CDN ``<script>`` tag for Cytoscape.js. The graph view will then
             degrade (no rendering) but the page still loads — useful for
@@ -546,28 +628,37 @@ def load_config(bundle: Bundle) -> dict[str, Any]:
     All values are VALIDATED against their allowed sets before use, so a
     malicious config.json cannot inject arbitrary values into template
     contexts (defence against supply-chain XSS via config interpolation).
+    Invalid files raise :class:`ViewerConfigError` with the file and field;
+    they never silently disappear behind defaults.
     """
     cfg = dict(_DEFAULT_CONFIG)
     path = bundle.root / _OKF_VIEWER_SUBDIR / "config.json"
     if path.is_file():
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if k not in _DEFAULT_CONFIG:
-                        continue
-                    # Validate values against allowed sets (fail-closed).
-                    if k == "default_layout" and v not in _ALLOWED_LAYOUTS:
-                        continue  # keep default
-                    if k == "theme" and v not in _ALLOWED_THEMES:
-                        continue  # keep default
-                    if k == "cdn" and not isinstance(v, bool):
-                        continue  # keep default
-                    if k == "name" and not isinstance(v, (str, type(None))):
-                        continue
-                    cfg[k] = v
-        except (OSError, ValueError):
-            pass
+            source = path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise ViewerConfigError(f"could not read viewer config {path}: {e}") from e
+        try:
+            data = json.loads(source)
+        except json.JSONDecodeError as e:
+            raise ViewerConfigError(
+                f"invalid viewer config {path}: malformed JSON at "
+                f"line {e.lineno} column {e.colno}: {e.msg}"
+            ) from e
+        if not isinstance(data, dict):
+            raise ViewerConfigError(
+                f"invalid viewer config {path}: expected a JSON object at the "
+                f"top level, got {type(data).__name__}"
+            )
+        unknown = sorted(set(data) - set(_DEFAULT_CONFIG))
+        if unknown:
+            raise ViewerConfigError(
+                f"invalid viewer config {path}: unknown key(s) "
+                f"{', '.join(repr(key) for key in unknown)}; "
+                f"expected only {sorted(_DEFAULT_CONFIG)}"
+            )
+        for key, value in data.items():
+            cfg[key] = _viewer_config_value(path, key, value)
     return cfg
 
 
@@ -651,26 +742,155 @@ def _strip_template_doc_comment(html: str) -> str:
     return _TEMPLATE_DOC_RE.sub(r"\1\2", html, count=1)
 
 
-def load_static(name: str, bundle: Bundle | None = None) -> str:
-    """Return the named static asset, honouring bundle overrides.
+def _resolve_static(name: str, bundle: Bundle | None = None) -> tuple[str, bool]:
+    """Resolve a static asset to ``(content, is_override)``.
 
-    Bundle overrides (``.okf-loom/viewer/static/<name>``) are only loaded when
-    ``allow_active_code`` is true — they can carry arbitrary JS.
+    Single resolution path shared by :func:`load_static`,
+    :func:`asset_version`, and the live ``/__static`` handler. Enforces the
+    one explicit override-name scope (see :data:`STATIC_ASSET_NAMES`):
+    unknown names raise ``FileNotFoundError`` here, so loaders, the hasher,
+    and the server all reject out-of-scope names at the same boundary.
+
+    A bundle override is honoured only when ALL of: the name is in scope, the
+    effective active-code gate is open, the override file exists, and the
+    resolved path stays within the bundle root (P1-4 symlink-escape guard).
+    ``is_override`` is ``True`` iff the returned bytes came from the bundle
+    tree (mutable content) rather than the built-ins (process-constant).
     """
+    if name not in STATIC_ASSET_NAMES:
+        raise FileNotFoundError(f"Static asset not found: {name}")
     if bundle is not None and _overrides_allowed(bundle):
         override = _bundle_override_path(bundle, "static", name)
         # P1-4 (security): same symlink-escape containment as load_template.
         from ..paths import path_within_bundle
         if override.is_file() and path_within_bundle(override, bundle.root):
-            return override.read_text(encoding="utf-8")
+            return override.read_text(encoding="utf-8"), True
     builtin = _BUILTIN_STATIC / name
     if not builtin.is_file():
         raise FileNotFoundError(f"Static asset not found: {name}")
-    return builtin.read_text(encoding="utf-8")
+    return builtin.read_text(encoding="utf-8"), False
+
+
+def load_static(name: str, bundle: Bundle | None = None) -> str:
+    """Return the named static asset, honouring bundle overrides.
+
+    Bundle overrides (``.okf-loom/viewer/static/<name>``) are only loaded when
+    ``allow_active_code`` is true — they can carry arbitrary JS. Only names in
+    :data:`STATIC_ASSET_NAMES` (the built-in viewer asset set) are loadable;
+    unknown names raise ``FileNotFoundError``.
+    """
+    content, _is_override = _resolve_static(name, bundle)
+    return content
 
 
 def list_builtin_static() -> list[str]:
-    """Names of all built-in static assets (used for static-site emission)."""
-    if not _BUILTIN_STATIC.is_dir():
-        return []
-    return sorted(p.name for p in _BUILTIN_STATIC.iterdir() if p.is_file())
+    """Names of all built-in static assets (used for static-site emission).
+
+    Derived from :data:`STATIC_ASSET_NAMES` so the file-emission list, the
+    override-name scope, and the versioning hasher all share one source of
+    truth.
+    """
+    return sorted(STATIC_ASSET_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic asset versioning (cache-busting)
+# ---------------------------------------------------------------------------
+#
+# External viewer asset URLs (the ``/__static/<name>`` references emitted into
+# live/serve, SPA, and static-build HTML) carry a content-derived ``?v=``
+# query so a browser or CDN fetches the fresh bytes after any asset edit
+# (builtin upgrade or bundle override change). The single digest contract:
+#
+#   * The version is the first :data:`_ASSET_VERSION_LEN` hex chars of the
+#     SHA-256 of the resolved asset content (the same bytes
+#     :func:`_resolve_static` returns — builtin or bundle override).
+#   * Same content ⇒ same version, deterministically, across runs and
+#     machines (no per-process timestamp or random salt).
+#   * Any content change ⇒ a different version with overwhelming probability.
+#   * The version is identical for live serve, SPA build, and static build,
+#     because all three resolve the same source content through
+#     :func:`_resolve_static`.
+#
+# Mutable-override freshness (no stale-cache race):
+#
+#   Only process-constant BUILTIN digests are memoized (keyed by name).
+#   Mutable bundle-ROOT override digests are computed from the currently
+#   resolved bytes on EVERY call and are NEVER stored in the cache. This
+#   makes a stale-set race structurally impossible: there is no cached
+#   override value for a concurrent reader to restore after the file has
+#   been edited, and freshness never depends on the bundle watcher or a
+#   manual ``clear_overrides_cache``. A gate toggle re-runs
+#   ``_overrides_allowed`` (its own cache is cleared by
+#   :func:`set_operator_consent`) and re-resolves builtin-vs-override, so
+#   the version flips without any version-cache invalidation.
+#
+# Routing impact: none. The live server routes on ``urlparse().path``
+# (``/__static/<name>``), so the ``?v=`` query is ignored; static-site web
+# servers ignore query strings on files. CSP ``default-src 'self'`` is
+# unaffected — a same-origin URL with a query is still ``'self'``.
+#
+# Single-file output is intentionally NOT versioned: it inlines CSS/JS
+# directly into the HTML, so there are no external asset URLs to bust.
+
+# 16 hex chars = 64 bits of SHA-256. Collision-safe for cache-busting (cf.
+# git's 7-40 hex of SHA-1, npm's 8 hex of SHA-512); short enough to keep
+# emitted URLs tidy.
+_ASSET_VERSION_LEN: int = 16
+
+# BUILTIN-name → version. Holds ONLY process-constant built-in digests
+# (override digests are never stored — see the freshness note above), so it
+# needs no invalidation: builtin content does not change during a process.
+_ASSET_VERSION_CACHE: dict[str, str] = {}
+
+
+def asset_version(name: str, bundle: Bundle | None = None) -> str:
+    """Deterministic content-derived version string for a resolved static asset.
+
+    Returns the first :data:`_ASSET_VERSION_LEN` hex chars of the SHA-256 of
+    the asset content :func:`_resolve_static` resolves (builtin unless a
+    bundle override is effective). The value is a pure function of the
+    resolved bytes: identical across processes, runs, and machines, and
+    stable across the live/SPA/static emit paths (the single digest
+    contract).
+
+    Freshness model: a BUILTIN digest is memoized by name (process-constant,
+    race-free); a bundle-OVERRIDE digest is recomputed from the currently
+    resolved bytes on every call and is never cached, so an override edit is
+    reflected immediately with no watcher/manual cache clear and no stale-set
+    race. Returns an empty string only for an unknown/out-of-scope name
+    (callers that reference real builtins never hit this; it exists so a
+    typo cannot raise during a render).
+    """
+    try:
+        content, is_override = _resolve_static(name, bundle)
+    except FileNotFoundError:
+        return ""
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:_ASSET_VERSION_LEN]
+    if is_override:
+        # Mutable bundle-root content: never memoize. The value returned is
+        # always derived from the bytes resolved on THIS call, so a stale
+        # value cannot be restored by a concurrent completion.
+        return digest
+    cached = _ASSET_VERSION_CACHE.get(name)
+    if cached is not None:
+        return cached
+    _ASSET_VERSION_CACHE[name] = digest
+    return digest
+
+
+def versioned_asset_url(
+    name: str, static_prefix: str, bundle: Bundle | None = None
+) -> str:
+    """Asset URL with a content-derived ``?v=`` cache-busting query.
+
+    ``static_prefix`` is preserved verbatim — absolute ``/__static`` for
+    serve/spa, relative ``__static`` / ``../../__static`` for static builds
+    — so CSP ``'self'`` and existing path routing are unaffected. When no
+    version can be computed (unknown asset name) the plain URL is returned
+    with no query, so routing never depends on the version being present.
+    """
+    version = asset_version(name, bundle)
+    if not version:
+        return f"{static_prefix}/{name}"
+    return f"{static_prefix}/{name}?v={version}"

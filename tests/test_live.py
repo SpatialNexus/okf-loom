@@ -393,6 +393,135 @@ def test_apply_then_single_concept_undo_restores_content(live_server) -> None:
     assert concept_path.read_text(encoding="utf-8") == original_raw
 
 
+def test_link_add_before_terminal_citations_stays_visible_and_undoes(
+    tmp_path: Path,
+) -> None:
+    """A live mutator keeps its new link outside the stripped body appendix."""
+    (tmp_path / "index.md").write_text("Bundle intro\n", encoding="utf-8")
+    topic_path = tmp_path / "topic.md"
+    topic_path.write_text(
+        "---\n"
+        "type: guide\n"
+        "title: Citation link contract\n"
+        "custom_key: preserve_me\n"
+        "citations:\n"
+        "  - id: source-1\n"
+        "    text: Frontmatter citation\n"
+        "---\n"
+        "# Topic\n\n"
+        "Visible context.\n\n"
+        "# Citations\n\n"
+        "- Body-only citation.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "refund_flow.md").write_text(
+        "---\ntype: playbook\ntitle: Refund flow\n---\nSteps.\n",
+        encoding="utf-8",
+    )
+    original_raw = topic_path.read_bytes()
+    server, thread, studio = _studio_server(Bundle.load(tmp_path), port=_free_port())
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        code, body = _post(
+            base,
+            "/__apply",
+            {
+                "kind": "add_link",
+                "target": "topic",
+                "args": {"label": "Refund flow", "target_concept_id": "refund_flow"},
+            },
+            server.csrf_token,
+        )
+        assert code == 200 and body["applied"] is True, body
+
+        with urllib.request.urlopen(f"{base}/topic", timeout=3) as response:
+            page_html = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base}/__data/doc?id=topic", timeout=3) as response:
+            payload = json.load(response)
+
+        added_link = "* [Refund flow](/refund_flow.md)"
+        assert "Refund flow" in page_html
+        assert "Refund flow" in payload["html"]
+        assert "Body-only citation." not in page_html
+        assert "Body-only citation." not in payload["html"]
+        assert "Frontmatter citation" in page_html
+        assert payload["frontmatter"]["custom_key"] == "preserve_me"
+        assert payload["raw"].index(added_link) < payload["raw"].index("# Citations")
+        assert payload["outgoing"] == ["refund_flow"]
+
+        event = next(
+            item for item in studio.read_events(limit=20)
+            if item.get("type") == "activity" and item.get("action") == "add_link"
+        )
+        before_rev = event["detail"]["before"]
+        code, body = _post(
+            base,
+            "/__undo",
+            {"concept": "topic", "rev": before_rev},
+            server.csrf_token,
+        )
+        assert code == 200 and body["ok"] is True and body["restored"] == 1, body
+        assert topic_path.read_bytes() == original_raw
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+@pytest.mark.parametrize(
+    ("fence", "near_match"),
+    [("````", "```python"), ("~~~~", "~~~python")],
+    ids=["long-backtick", "long-tilde"],
+)
+def test_link_add_ignores_citations_inside_renderer_fences(
+    tmp_path: Path,
+    fence: str,
+    near_match: str,
+) -> None:
+    """A code example never becomes a hidden target for default link-add."""
+    (tmp_path / "index.md").write_text("Bundle intro\n", encoding="utf-8")
+    (tmp_path / "topic.md").write_text(
+        "---\ntype: guide\ntitle: Fence contract\n---\n"
+        "# Topic\n\n"
+        f"{fence}example\n"
+        f"{near_match}\n"
+        "# Citations\n"
+        f"{fence}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "refund_flow.md").write_text(
+        "---\ntype: playbook\ntitle: Refund flow\n---\nSteps.\n",
+        encoding="utf-8",
+    )
+    server, thread, _ = _studio_server(Bundle.load(tmp_path), port=_free_port())
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        code, body = _post(
+            base,
+            "/__apply",
+            {
+                "kind": "add_link",
+                "target": "topic",
+                "args": {"label": "Refund flow", "target_concept_id": "refund_flow"},
+            },
+            server.csrf_token,
+        )
+        assert code == 200 and body["applied"] is True, body
+        with urllib.request.urlopen(f"{base}/topic", timeout=3) as response:
+            page_html = response.read().decode("utf-8")
+        with urllib.request.urlopen(f"{base}/__data/doc?id=topic", timeout=3) as response:
+            payload = json.load(response)
+
+        added_link = "* [Refund flow](/refund_flow.md)"
+        assert payload["raw"].index(added_link) > payload["raw"].rindex(fence)
+        assert "Refund flow" in page_html
+        assert "Refund flow" in payload["html"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
 def test_oversized_post_returns_413_and_closes_connection(live_server) -> None:
     """F4: a POST body exceeding MAX_EVENT_BODY_BYTES returns 413 with
     ``Connection: close`` (draining an unbounded body would pin the worker;
