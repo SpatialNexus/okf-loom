@@ -866,8 +866,9 @@ def test_backlinks_show(server_url: str, page) -> None:
 # layout's `layoutstop` + its safety-net timer never double-apply. Readiness is
 # keyed on the exact `layoutStats.lastAppliedSeq`.
 #
-# ASYNC_LIFECYCLE_MATRIX (proven by test_signal_async_lifecycle_latest_wins and
-# test_signal_lod_lifecycle below):
+# ASYNC_LIFECYCLE_MATRIX (proven by test_signal_async_lifecycle_latest_wins,
+# test_signal_lod_lifecycle, and test_layout_fallback_oneshot_and_late_stop_deduped
+# below):
 #   scenario                          | owner / fence                  | proof
 #   debounced control relayout        | runLayoutNow (++seq, then stop)| latest preset wins; positions valid
 #   layout-select rapid restart       | runLayoutNow (++seq, then stop)| skippedStale increases; last layout wins
@@ -877,6 +878,11 @@ def test_backlinks_show(server_url: str, page) -> None:
 #   node-index ensure-visible         | runLayoutNow (routed)          | hidden node added; latest state intact
 #   late layoutstop / timed fallback  | mySeq === layoutSeq gate       | skippedStale increments; no stale fit
 #   selection/focus preserved         | identity kept on relayout      | selected node unchanged after rapid changes
+#
+#   fallback-first + late-stop        | lastAppliedSeq one-shot dedup  | test_layout_fallback_oneshot_and_late_stop_deduped:
+#   one-shot (layoutstop withheld)    | (NOT a mySeq!=layoutSeq stale  |   with layoutstop withheld, the 900ms fallback applies
+#                                     |  case; same seq → no-op)       |   EXACTLY ONCE; a later layoutstop cannot re-apply the
+#                                     |                                |   same seq (applied/fit unchanged, skippedStale flat)
 
 
 def _open_graph(page, server_url, init_script: str | None = None):
@@ -1433,6 +1439,235 @@ def test_signal_lod_lifecycle(server_url: str, page) -> None:
     assert _snap(page)["n"] == 6, "Show all did not reveal every node"
     assert _state(page)["layout"] == "grid", "Show all did not switch to grid"
     assert _min_gap(page) > 0, "overlap after Show all"
+
+
+# ---------------------------------------------------------------------------
+# runLayoutNow 900ms fallback + late-`layoutstop` one-shot — direct proof
+# ---------------------------------------------------------------------------
+#
+# Deterministic, in-browser proof of the async-lifecycle P1 the LOD matrix
+# (test_graph_lod_stopgap Phase B) promises: with `layoutstop` deliberately
+# withheld, runLayoutNow's existing 900ms safety fallback applies EXACTLY ONCE,
+# and a LATER `layoutstop` for the same sequence CANNOT re-apply/re-fit it.
+#
+# Methodology (no sleep, no production-timing change, runLayoutNow NOT mocked):
+# runLayoutNow / applyLayoutResult / lastAppliedSeq run UNMODIFIED. Only two
+# BOUNDARIES are controlled by a test-only harness installed AFTER init (page
+# setup runs on real timers):
+#   (1) the passage of TIME — window.setTimeout/clearTimeout are swapped for a
+#       manual-tick queue, so the production `setTimeout(done, 900)` (unchanged
+#       900 value) fires on demand instead of after a 900ms sleep;
+#   (2) the Cytoscape layout ENGINE — cy.layout() returns a controllable layout
+#       whose .run() never emits layoutstop (WITHHELD) and whose
+#       .on("layoutstop", h) records the REAL `done` for a later manual emit.
+# A read-only fit spy (cy.zoom SET count) makes each postLayout->overlayAwareFit
+# observable so "no double fit" is asserted directly. The critical before/after
+# reads around the late stop are taken in a SINGLE synchronous evaluate so no
+# real timer can interleave — the proof is deterministic.
+
+
+# Test-only runtime harness (see methodology above). Installed after _open_graph.
+_LAYOUT_FALLBACK_HARNESS_JS = r"""() => {
+  var cy = window.__okfLoomGraph.cy;
+  var emitCalls = 0, organicStop = 0;
+
+  // ---- (1) deterministic virtual clock -------------------------------------
+  var realSetTimeout = window.setTimeout, realClearTimeout = window.clearTimeout;
+  var vNow = 0, nextId = 1, queue = [];
+  window.setTimeout = function (fn, delay) {
+    var id = nextId++;
+    queue.push({ due: vNow + (delay || 0), id: id, fn: fn });
+    return id;
+  };
+  window.clearTimeout = function (id) {
+    for (var i = 0; i < queue.length; i++) {
+      if (queue[i].id === id) { queue.splice(i, 1); return; }
+    }
+  };
+  function tick(ms) {
+    var target = vNow + ms, guard = 0;
+    for (;;) {
+      queue.sort(function (a, b) { return a.due - b.due; });
+      var idx = -1;
+      for (var i = 0; i < queue.length; i++) { if (queue[i].due <= target) { idx = i; break; } }
+      if (idx < 0) break;
+      var t = queue.splice(idx, 1)[0];
+      vNow = t.due;
+      try { t.fn(); } catch (e) {}
+      if (++guard > 100000) break;
+    }
+    vNow = target;
+  }
+
+  // ---- (2) Cytoscape layout-engine stub (withhold layoutstop) --------------
+  // runLayoutNow calls cy.layout(opts).on("layoutstop", done).run(); we replace
+  // ONLY this engine so .run() never emits layoutstop and .on("layoutstop", h)
+  // records the REAL `done` closure for a later manual emit. runLayoutNow's
+  // body (++layoutSeq, stop, on, run, setTimeout fallback) is untouched.
+  var realCyLayout = cy.layout, currentLayout = null;
+  cy.layout = function () {
+    var handlers = { layoutstop: [] };
+    var api = {
+      on: function (ev, h) { (handlers[ev] || (handlers[ev] = [])).push(h); return api; },
+      one: function (ev, h) { return api.on(ev, h); },
+      off: function () { return api; },
+      run: function () { return api; },                 // layoutstop WITHHELD
+      stop: function () { organicStop++; return api; },
+      promiseOn: function () { return Promise.resolve(api); },
+      emit: function () {
+        (handlers.layoutstop || []).forEach(function (h) { try { h(); } catch (e) {} });
+      },
+    };
+    currentLayout = api;
+    return api;
+  };
+
+  // ---- (3) read-only fit spy (count overlayAwareFit zoom SETs) ------------
+  // postLayout()->overlayAwareFit()->cy.zoom(z) is a SET (one arg); each
+  // applyLayoutResult calls postLayout exactly once, so fits == applies for the
+  // current sequence. Counting SETs proves "no double fit".
+  var realZoom = cy.zoom, fitCount = 0;
+  cy.zoom = function () {
+    if (arguments.length) fitCount++;
+    return realZoom.apply(this, arguments);
+  };
+
+  // ---- expose + teardown ---------------------------------------------------
+  window.__okfTestClock = { tick: tick, pending: function () { return queue.length; } };
+  window.__okfTestLayout = {
+    emitLayoutStop: function () { emitCalls++; if (currentLayout) currentLayout.emit(); },
+    get emitCount() { return emitCalls; },
+    get organicStop() { return organicStop; },
+  };
+  Object.defineProperty(window, "__okfTestFitCount", {
+    get: function () { return fitCount; }, configurable: true,
+  });
+  window.__okfTestHarness = {
+    teardown: function () {
+      try { window.setTimeout = realSetTimeout; } catch (e) {}
+      try { window.clearTimeout = realClearTimeout; } catch (e) {}
+      try { cy.layout = realCyLayout; } catch (e) {}
+      try { cy.zoom = realZoom; } catch (e) {}
+    },
+  };
+}"""
+
+
+def test_layout_fallback_oneshot_and_late_stop_deduped(server_url: str, page) -> None:
+    """Direct deterministic proof of runLayoutNow's 900ms safety fallback and
+    late-`layoutstop` idempotency — the async-lifecycle P1 the LOD matrix
+    (test_graph_lod_stopgap Phase B) promises. No sleep; no production-timing
+    change; runLayoutNow is NOT mocked.
+
+    Scenario (exercises the REAL owner end-to-end):
+      1. applyLens("map") -> scheduleLayout(220ms) -> runLayoutNow, all real.
+         runLayoutNow runs UNMODIFIED: ++layoutSeq, stop() the previous layout,
+         cy.layout(opts).on("layoutstop", done).run(), setTimeout(done, 900).
+      2. The Cytoscape layout ENGINE is stubbed so .run() NEVER emits
+         layoutstop (WITHHELD) and .on("layoutstop", h) records the REAL `done`
+         for a later manual emit. runLayoutNow's body is untouched.
+      3. The 900ms fallback is fired on demand by a virtual test clock
+         (window.setTimeout/clearTimeout swapped for a manual-tick queue,
+         installed AFTER init so page setup ran on real timers) — the ONLY way
+         to fire a 900ms timer without sleeping 900ms or changing production 900.
+      4. With layoutstop withheld, the fallback APPLIES EXACTLY ONCE: applied+1,
+         lastAppliedSeq == current seq, exactly one fit.
+      5. The withheld engine then EMITS its late `layoutstop` (the real `done`).
+         It CANNOT re-apply the same sequence: applied, fit, and skippedStale
+         are unchanged (one-shot per-seq dedup at the SAME seq — NOT a
+         mySeq!=layoutSeq stale case).
+    """
+    _open_graph(page, server_url)
+    page.evaluate(_LAYOUT_FALLBACK_HARNESS_JS)
+
+    baseline = page.evaluate(
+        "() => ({ starts: window.__okfLoomGraph.layoutStats.starts, "
+        "         applied: window.__okfLoomGraph.layoutStats.applied, "
+        "         fit: window.__okfTestFitCount })"
+    )
+
+    # Trigger a layout through the real owner. Under the virtual clock the
+    # 220ms debounce is queued (not fired), so no layout has started yet.
+    page.evaluate("() => window.__okfLoomGraph.applyLens('map')")
+    # Fire the 220ms debounce -> runLayoutNow runs (real body). layoutstop is
+    # withheld, so the 900ms fallback is the ONLY completion that can apply.
+    page.evaluate("() => window.__okfTestClock.tick(220)")
+    after_start = page.evaluate(
+        "() => ({ starts: window.__okfLoomGraph.layoutStats.starts, "
+        "         applied: window.__okfLoomGraph.layoutStats.applied })"
+    )
+    assert after_start["starts"] == baseline["starts"] + 1, (
+        f"runLayoutNow did not start exactly one layout through the owner "
+        f"(starts {baseline['starts']} -> {after_start['starts']})"
+    )
+    # Nothing has applied yet: the fallback (900ms) is not due and layoutstop is
+    # withheld. This is the "fallback-first" precondition.
+    assert after_start["applied"] == baseline["applied"], (
+        "a layout applied before the 900ms fallback fired even though "
+        "layoutstop was withheld (CRI P1 fallback-first proof)"
+    )
+
+    # Fire the 900ms fallback and read the result in ONE synchronous evaluate
+    # so no real timer can interleave between fire and read.
+    after_fallback = page.evaluate(
+        "() => { window.__okfTestClock.tick(900); return {"
+        "  applied: window.__okfLoomGraph.layoutStats.applied,"
+        "  lastAppliedSeq: window.__okfLoomGraph.layoutStats.lastAppliedSeq,"
+        "  starts: window.__okfLoomGraph.layoutStats.starts,"
+        "  fit: window.__okfTestFitCount,"
+        "} }"
+    )
+    # EXACTLY ONE apply from the fallback (layoutstop withheld).
+    assert after_fallback["applied"] == baseline["applied"] + 1, (
+        f"900ms fallback did not apply EXACTLY ONCE with layoutstop withheld "
+        f"(applied {baseline['applied']} -> {after_fallback['applied']})"
+    )
+    assert after_fallback["lastAppliedSeq"] == after_fallback["starts"], (
+        "the fallback did not mark the current (latest) layout as applied"
+    )
+    # Exactly ONE fit (overlayAwareFit) from the single apply — no double fit.
+    assert after_fallback["fit"] == baseline["fit"] + 1, (
+        f"the fallback fit the graph {after_fallback['fit'] - baseline['fit']} "
+        f"time(s); expected exactly 1 (no double fit)"
+    )
+
+    # The withheld engine now EMITS its late `layoutstop` (the real `done`).
+    # before/emit/after are captured in ONE synchronous evaluate so the late
+    # stop's effect is isolated from any real-timer interleaving.
+    late = page.evaluate(
+        "() => {"
+        "  var before = {"
+        "    applied: window.__okfLoomGraph.layoutStats.applied,"
+        "    skippedStale: window.__okfLoomGraph.layoutStats.skippedStale,"
+        "    fit: window.__okfTestFitCount,"
+        "  };"
+        "  window.__okfTestLayout.emitLayoutStop();"
+        "  return {"
+        "    before: before,"
+        "    applied: window.__okfLoomGraph.layoutStats.applied,"
+        "    skippedStale: window.__okfLoomGraph.layoutStats.skippedStale,"
+        "    fit: window.__okfTestFitCount,"
+        "    emits: window.__okfTestLayout.emitCount,"
+        "  };"
+        "}"
+    )
+    assert late["emits"] == 1, "late layoutstop was not emitted exactly once"
+    assert late["applied"] == late["before"]["applied"], (
+        f"late `layoutstop` re-applied the same sequence "
+        f"(applied {late['before']['applied']} -> {late['applied']}); "
+        f"one-shot per-seq dedup failed"
+    )
+    assert late["fit"] == late["before"]["fit"], (
+        "late `layoutstop` caused a second fit (no double fit)"
+    )
+    assert late["skippedStale"] == late["before"]["skippedStale"], (
+        f"late `layoutstop` for the CURRENT sequence was mis-counted as stale "
+        f"(skippedStale {late['before']['skippedStale']} -> "
+        f"{late['skippedStale']}); it must be one-shot deduped, not fenced"
+    )
+
+    # Restore real timers + the Cytoscape engine + zoom so later tests are clean.
+    page.evaluate("() => window.__okfTestHarness.teardown()")
 
 
 # ---------------------------------------------------------------------------

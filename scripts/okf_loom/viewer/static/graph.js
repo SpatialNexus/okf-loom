@@ -400,6 +400,27 @@
   }
 
   function init(bundle) {
+    // CRI2-006 hardening: graph-internal readiness marks (DIAGNOSTIC/TEST-ONLY,
+    // not a public API). CSP-safe (no inline script — this runs inside the
+    // 'self'-served graph.js). These let the browser LOD proof measure the
+    // OWNED graph-init workload (init-start -> first-frame) with
+    // performance.now() timestamps captured INSIDE the page, excluding
+    // navigation, CDN load, and Playwright controller scheduling that the old
+    // Python wall-clock proof (goto -> selector-visible) could not isolate.
+    // init-start fires here because acquireBundle() has already resolved
+    // (window.BUNDLE is synchronous) and the guard below confirms the Cytoscape
+    // library is loaded — so page navigation and resource timing are already
+    // complete before this mark. Field shape may change with the implementation.
+    var _now = (typeof performance !== "undefined" && typeof performance.now === "function")
+      ? function () { return performance.now(); }
+      : function () { return Date.now(); };
+    var lodMarks = (window.__okfGraphLodMarks = {
+      initStart: _now(),
+      lodReady: null,
+      firstFrame: null,
+      nodeCount: null,
+      totalNodeCount: null,
+    });
     if (typeof window.cytoscape !== "function") {
       showLoadError("Cytoscape.js failed to load (CDN unavailable?). " +
         "Reopen with network access or see config option {\"cdn\": false}.");
@@ -1466,6 +1487,31 @@
       refreshLodPill();
     }
     refreshLodPill();
+    // LOD readiness: the capped Cytoscape collection + LOD pill are ready.
+    // nodeCount proves the initial collection was capped (100 for a 500-node
+    // bundle), not the full set — the test asserts this directly. The delayed
+    // initial layout (scheduleLayout's 220ms timer, fired later by applyLens)
+    // runs AFTER the first-frame rAF below fires, so it cannot inflate the
+    // owned init->frame metric or force 500 nodes before Show all.
+    lodMarks.lodReady = _now();
+    lodMarks.nodeCount = cy.nodes().length;
+    lodMarks.totalNodeCount = totalNodeCount;
+    // First paint (paint-crossing signal): the FIRST requestAnimationFrame
+    // callback runs BEFORE the paint/composite of that frame, so a timestamp
+    // taken there is still pre-paint. To prove the render loop actually
+    // crossed the paint boundary, the first rAF schedules a SECOND rAF and
+    // records the post-first-paint timestamp in its callback. rAF is the
+    // render-sync primitive, NOT a timer/sleep — each callback fires once on
+    // the next frame, so the two-step chain captures the real owned
+    // first-paint workload without polling or retries. Monotonicity holds:
+    // initStart <= lodReady <= firstPaint.
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { lodMarks.firstFrame = _now(); });
+      });
+    } else {
+      lodMarks.firstFrame = lodMarks.lodReady;
+    }
 
     // P1-4 / P2-2 (iter-1): keyboard-accessible node index. Populates the
     // <details class="okf-node-index"> overlay with one <button> per node,
@@ -1940,7 +1986,7 @@
     // never re-position or re-fit after a newer one started.
     // layoutStats is exposed via window.__okfLoomGraph for durable async proof.
     var runningLayout = null, layoutTimer = null, layoutSeq = 0, lastAppliedSeq = 0;
-    var layoutStats = { starts: 0, applied: 0, skippedStale: 0, lastAppliedSeq: 0 };
+    var layoutStats = { starts: 0, applied: 0, skippedStale: 0, lastAppliedSeq: 0, lastStartedNodeCount: null };
 
     // Apply a layout's settle result exactly ONCE, and only if it is still the
     // current layout. Stale (superseded) completions are counted + dropped.
@@ -1962,6 +2008,12 @@
       var mySeq = ++layoutSeq;
       if (runningLayout) { try { runningLayout.stop(); } catch (e) {} }
       layoutStats.starts++;
+      // Capture the collection size SYNCHRONOUSLY at layout start (before
+      // creating/running the layout) so the LOD proof can assert the EXACT
+      // node count this layout ran on, independent of any later mutation
+      // (e.g. a subsequent Show all). Diagnostic/test-only snapshot; it does
+      // not influence the layout algorithm, its thresholds, or its result.
+      layoutStats.lastStartedNodeCount = cy.nodes().length;
       var l = cy.layout(layoutOpts(currentLayoutName,
         Object.assign({ animate: false, randomize: !!randomize, fit: false }, layoutTuning(controlState))));
       runningLayout = l;

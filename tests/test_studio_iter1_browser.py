@@ -2517,9 +2517,109 @@ def test_graph_lod_stopgap(server_url: str, page) -> None:
 
     Injects a synthetic 500-node bundle via window.BUNDLE before the graph
     page's scripts run (acquireBundle honours window.BUNDLE first), then
-    asserts: (a) the LOD pill appears with the right counts, (b) first paint
-    lands within a 2s budget, (c) clicking 'Show all' removes the pill
-    (every node now in the canvas).
+    asserts: (a) the initial Cytoscape collection is capped to exactly 100
+    nodes, (b) the owned graph-init workload (init-start -> first-frame,
+    measured with browser performance.now()) lands within a 2s budget, (c)
+    the LOD pill shows the right counts, (d) no full 500-node layout runs
+    before Show all, and (e) clicking 'Show all' streams every node in and
+    removes the pill.
+
+    PERF PROOF BOUNDARY (CRI2-006 hardening): the old proof measured Python
+    wall time from BEFORE page.goto to canvas/pill visibility, which conflated
+    Playwright scheduling, server response, six CDN resource loads, parser
+    evaluation, and unrelated page setup with the actual LOD workload — it
+    flaked under sequential suite load (3.82s/6.56s vs ~2.03s navigation
+    alone). The new proof is browser-internal: graph.js sets performance.now()
+    marks at init-start (top of init(bundle), AFTER navigation + Cytoscape
+    load), lod-ready (capped collection + pill rendered), and first-frame (one
+    requestAnimationFrame after lod-ready). The test reads those marks via
+    page.evaluate — it never starts a Python timer before page.goto, so
+    navigation, CDN load, and controller scheduling are structurally excluded.
+    Navigation/resource timing is captured separately as a DIAGNOSTIC only,
+    never as assertion budget.
+
+    ASYNC_LIFECYCLE_MATRIX (LOD proof — graph init -> paint -> Show all)
+    All marks are browser-internal performance.now() captured inside graph.js;
+    the test only READS them. This proof protocol introduces NO owned timers/
+    retries/timeouts on the measured path — wait_for_function only OBSERVES the
+    browser-internal marks. requestAnimationFrame is a render-sync primitive,
+    not a timer. Each phase below explicitly names its persisted state (all
+    N/A — browser-ephemeral: the Cytoscape collection, DOM nodes, and layout
+    positions live only in this page session; nothing is written to disk or the
+    server), its deadline/abort owner, and its timeout/retry posture.
+
+    Phase A: graph init -> LOD ready -> paint-crossing
+      owner    : graph.js init(bundle) owns the SYNCHRONOUS setup (capping the
+                 collection + rendering the LOD pill); the first-paint mark is
+                 then captured by an ASYNC nested requestAnimationFrame chain
+      trigger  : page load with window.BUNDLE set (acquireBundle honours it)
+      mutate   : constructs capped (<=100) Cytoscape collection + LOD pill
+      persisted: N/A — browser-ephemeral (collection + DOM live only this session)
+      result   : lodMarks.initStart (top of init) -> lodReady -> firstFrame, all
+                 browser-internal performance.now()
+      deadline : the owning code has NO deadline and NO abort — init runs to
+                 completion and the rAF chain resolves on the browser render
+                 loop. The test's wait_for_function(..., timeout=15000) is an
+                 OBSERVATION failure boundary (the test fails if the marks never
+                 appear), NOT a production timeout and NOT part of the owned
+                 init->frame metric below
+      late     : the nested rAF is ASYNC browser render-loop work — each
+                 callback fires once on a LATER frame, so firstFrame lands AFTER
+                 init() returns. It is still one-shot (no re-entrancy); the
+                 chain runs once and records a single mark
+      stale    : N/A — first paint is one-shot
+      timeout  : NONE owned. The 15s Playwright readiness wait is observation-
+                 only and is explicitly NOT part of the <2000ms owned metric
+      retry    : N/A
+      proof    : initStart <= lodReady <= firstFrame (monotonic) AND
+                 firstFrame - initStart < 2000ms (owned interval only)
+
+    Phase B: delayed initial layout start
+      owner    : runLayoutNow — the SINGLE stale-safe layout owner (layoutSeq is
+                 bumped BEFORE stopping the prior layout; the settle result is
+                 applied one-shot per sequence)
+      trigger  : applyLens at end of init -> scheduleLayout(220ms) -> runLayoutNow
+      mutate   : runs a cose layout on the CURRENT (capped) collection; on
+                 settle, postLayout() (resolveOverlaps + label collisions +
+                 overlayAwareFit) repositions/refits
+      persisted: N/A — browser-ephemeral (node positions live in the Cytoscape
+                 collection for this session; nothing persisted)
+      result   : layoutStats.starts++ and layoutStats.lastStartedNodeCount =
+                 cy.nodes().length captured synchronously at layout start
+      deadline : NO test/abort deadline owns the settle; `layoutstop` is the
+                 authoritative settle signal. runLayoutNow's one-shot 900ms
+                 fallback is the ONLY owned safety deadline on this path
+      late     : a later layout supersedes via ++layoutSeq; older layoutstop is
+                 fenced (skippedStale++) and never re-fits
+      stale    : applyLayoutResult dedups by sequence (one-shot per seq)
+      timeout  : the existing one-shot 900ms safety net inside runLayoutNow (NOT
+                 added/changed here) fires only if layoutstop never fires; the
+                 fallback applies AT MOST ONCE, and a LATE layoutstop after it
+                 is one-shot deduped (proven directly and deterministically — no
+                 sleep, no production-timing change — by
+                 test_layout_fallback_oneshot_and_late_stop_deduped in
+                 test_viewer_browser.py)
+      retry    : N/A
+      proof    : lastStartedNodeCount == 100 (initial layout ran on the capped
+                 collection, not all 500)
+
+    Phase C: Show all
+      owner    : LOD pill click handler (streamAll) -> runLayoutNow
+      trigger  : test clicks .okf-graph-lod-pill
+      mutate   : unhides every node (hidden===0), removes the pill, then lays
+                 out the full collection through the same runLayoutNow owner
+      persisted: N/A — browser-ephemeral (full node set + pill removal are
+                 in-page DOM/collection state for this session; nothing persisted)
+      result   : cy.nodes().length == 500 and pill removed from the DOM
+      deadline : NO owned settle deadline beyond runLayoutNow's 900ms fallback
+                 (Phase B). The test's wait_for_function(..., timeout=15000) for
+                 pill-removed is an observation boundary, not a production timeout
+      late     : N/A — user-driven, single-shot
+      stale    : the post-Show-all layout goes through the same runLayoutNow
+                 owner/seq fence (Phase B)
+      timeout  : existing runLayoutNow 900ms safety net only
+      retry    : N/A
+      proof    : wait_for_function(pill gone) + cy.nodes().length == 500
     """
     # Build a 500-node synthetic bundle with a high-degree hub so the degree
     # sort is meaningful (node_0 connects to many others).
@@ -2541,22 +2641,74 @@ def test_graph_lod_stopgap(server_url: str, page) -> None:
             window.BUNDLE = { nodes, edges, palette: { 'Synthetic': '#3b82f6' }, bodies: {}, types: ['Synthetic'] };
         }"""
     )
-    import time as _time
-    t0 = _time.monotonic()
     page.goto(f"{server_url}/__graph", wait_until="load")
-    # Wait for the canvas (Cytoscape booted) + the LOD pill.
-    page.wait_for_selector("#okf-graph canvas", timeout=15000)
+
+    # Wait for the graph-internal readiness marks (set by graph.js init).
+    # All three timestamps come from performance.now() INSIDE the page:
+    #   initStart  — top of init(bundle), after navigation + Cytoscape load
+    #   lodReady   — capped Cytoscape collection + LOD pill rendered
+    #   firstFrame — post-first-paint mark: the first rAF (pre-paint) schedules
+    #                a SECOND rAF whose callback runs AFTER the first paint, so
+    #                firstFrame is a paint-crossing signal, not a pre-paint one.
+    # wait_for_function polls without influencing the measured values.
+    page.wait_for_function(
+        """() => {
+            const m = window.__okfGraphLodMarks;
+            if (!m) return false;
+            return m.initStart != null && m.lodReady != null &&
+                   m.firstFrame != null && m.nodeCount != null;
+        }""",
+        timeout=15000,
+    )
+    # Read the marks (browser performance.now() values, read via evaluate).
+    marks = page.evaluate(
+        """() => {
+            const m = window.__okfGraphLodMarks;
+            return {
+                initStart: m.initStart,
+                lodReady: m.lodReady,
+                firstFrame: m.firstFrame,
+                nodeCount: m.nodeCount,
+                totalNodeCount: m.totalNodeCount,
+            };
+        }"""
+    )
+
+    # --- Owned in-browser metric: init-start -> first-frame ---------------
+    # Both endpoints are performance.now() captured inside the page. This
+    # excludes navigation, CDN load, and Playwright scheduling (the old
+    # wall-clock proof measured Python time from before page.goto to
+    # selector-visible, which conflated all of those and flaked under
+    # sequential suite load). 2s budget is for the OWNED interval only.
+    owned_ms = marks["firstFrame"] - marks["initStart"]
+    assert owned_ms < 2000, (
+        f"owned graph-init workload (init-start -> first-frame) took "
+        f"{owned_ms:.0f}ms (> 2000ms budget) — LOD stopgap did not cap the "
+        f"initial render (CRI2-006)"
+    )
+    # Monotonicity: init <= ready <= frame. Deterministic proof that the
+    # metric is a single contiguous owned interval, not a re-timed or
+    # controller-scheduled measurement.
+    assert marks["initStart"] <= marks["lodReady"] <= marks["firstFrame"], (
+        f"readiness marks not monotonic: init={marks['initStart']:.2f} "
+        f"ready={marks['lodReady']:.2f} frame={marks['firstFrame']:.2f}"
+    )
+
+    # --- LOD cap: initial Cytoscape collection is exactly 100 nodes -------
+    # nodeCount was captured at lod-ready (the moment the capped collection +
+    # pill were ready), proving the render was capped to the LOD threshold
+    # rather than constructing all 500 nodes.
+    assert marks["totalNodeCount"] == 500, (
+        f"synthetic bundle should have 500 nodes, got {marks['totalNodeCount']}"
+    )
+    assert marks["nodeCount"] == 100, (
+        f"initial Cytoscape collection should be LOD-capped to 100 nodes, "
+        f"got {marks['nodeCount']} (CRI2-006)"
+    )
+
+    # --- LOD pill text ----------------------------------------------------
     pill = page.locator(".okf-graph-lod-pill")
     pill.wait_for(state="visible", timeout=10000)
-    t1 = _time.monotonic()
-    first_paint_s = t1 - t0
-    # Perf budget: first paint of a 500-node bundle (LOD-capped at 100)
-    # must land under 2s. The pre-LOD cose layout on 500 nodes took multiple
-    # seconds; the stopgap caps the initial render at 100 nodes.
-    assert first_paint_s < 2.0, (
-        f"graph first paint took {first_paint_s:.2f}s (> 2s budget) — LOD stopgap "
-        f"did not cap the initial render (CRI2-006)"
-    )
     text = pill.inner_text()
     assert "500" in text, f"LOD pill does not name the total node count: {text!r}"
     assert "Show all" in text, f"LOD pill missing 'Show all' action: {text!r}"
@@ -2565,7 +2717,66 @@ def test_graph_lod_stopgap(server_url: str, page) -> None:
     assert "100" in text, (
         f"LOD pill does not show the capped initial count (100): {text!r}"
     )
-    # Click 'Show all' → every node streams in → the pill is removed.
+
+    # --- No full 500-node layout before Show all --------------------------
+    # The delayed initial layout (scheduleLayout's 220ms timer, fired by
+    # applyLens at the end of init) runs on the Cytoscape collection that was
+    # capped to 100. runLayoutNow captures the collection size SYNCHRONOUSLY at
+    # layout start into layoutStats.lastStartedNodeCount (before creating/running
+    # the layout), so this asserts the EXACT node count the initial layout ran
+    # on — independent of any later mutation (e.g. Show all). Wait for the first
+    # layout to have been STARTED, then assert the captured count.
+    page.wait_for_function(
+        """() => window.__okfLoomGraph &&
+                window.__okfLoomGraph.layoutStats &&
+                window.__okfLoomGraph.layoutStats.starts >= 1 &&
+                window.__okfLoomGraph.layoutStats.lastStartedNodeCount != null""",
+        timeout=10000,
+    )
+    layout_started_count = page.evaluate(
+        "() => window.__okfLoomGraph ? window.__okfLoomGraph.layoutStats.lastStartedNodeCount : -1"
+    )
+    assert layout_started_count == 100, (
+        f"initial layout started on {layout_started_count} nodes (captured at "
+        f"layout start), expected 100 — a full 500-node layout occurred before "
+        f"Show all (CRI2-006)"
+    )
+    # Secondary live-count sanity: the collection is still 100 at this point.
+    layout_node_count = page.evaluate(
+        "() => window.__okfLoomGraph ? window.__okfLoomGraph.cy.nodes().length : -1"
+    )
+    assert layout_node_count == 100, (
+        f"live collection is {layout_node_count} nodes after the initial layout, "
+        f"expected 100 (CRI2-006)"
+    )
+
+    # --- Navigation/resource timing: DIAGNOSTIC ONLY, never asserted ------
+    # Captured to document what the owned metric excludes. The owned interval
+    # (init->frame) starts AFTER navigation completes; these numbers are NOT
+    # part of any assertion budget.
+    nav_timing = page.evaluate(
+        """() => {
+            const nav = (performance.getEntriesByType('navigation') || [])[0] || {};
+            const res = (performance.getEntriesByType('resource') || []);
+            return {
+                loadEventEnd: nav.loadEventEnd || 0,
+                domContentLoadedEventEnd: nav.domContentLoadedEventEnd || 0,
+                responseEnd: nav.responseEnd || 0,
+                resourceCount: res.length,
+            };
+        }"""
+    )
+    print(
+        f"\n[diagnostic] nav: loadEnd={nav_timing['loadEventEnd']:.0f}ms "
+        f"domEnd={nav_timing['domContentLoadedEventEnd']:.0f}ms "
+        f"respEnd={nav_timing['responseEnd']:.0f}ms "
+        f"resources={nav_timing['resourceCount']} | "
+        f"owned init->frame={owned_ms:.0f}ms "
+        f"(init={marks['initStart']:.0f} ready={marks['lodReady']:.0f} "
+        f"frame={marks['firstFrame']:.0f})"
+    )
+
+    # --- Show all: every node streams in, pill removed --------------------
     pill.click()
     page.wait_for_function(
         "() => !document.querySelector('.okf-graph-lod-pill')",
@@ -2574,6 +2785,13 @@ def test_graph_lod_stopgap(server_url: str, page) -> None:
     # Sanity: the pill is gone, meaning hidden===0 after Show all.
     gone = page.evaluate("!document.querySelector('.okf-graph-lod-pill')")
     assert gone, "LOD pill still present after Show all click — not every node loaded"
+    # After Show all, every node is in the canvas (500).
+    full_count = page.evaluate(
+        "() => window.__okfLoomGraph ? window.__okfLoomGraph.cy.nodes().length : -1"
+    )
+    assert full_count == 500, (
+        f"after Show all, expected 500 nodes in canvas, got {full_count}"
+    )
 
 
 # ---------------------------------------------------------------------------
